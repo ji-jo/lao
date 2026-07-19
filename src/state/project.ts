@@ -24,6 +24,8 @@ interface ProjectState {
   stepFrame: (delta: number) => void;
 
   addStroke: (stroke: Stroke) => void;
+  /** paste strokes into the current frame at their original coordinates; returns the new ids */
+  pasteStrokes: (strokes: Stroke[]) => string[];
   deleteStrokes: (ids: string[]) => void;
   replaceStrokePoints: (strokeId: string, points: Stroke["points"]) => void;
   addKeyframe: () => void;
@@ -127,6 +129,27 @@ export const useProject = create<ProjectState>((set, get) => {
       }
       const nextCel: Frame = { ...cel, strokes: [...cel.strokes, stroke] };
       commit(replaceLayer(project, layerIndex, setCel(layer, celIndex, nextCel)));
+    },
+
+    pasteStrokes: (strokes) => {
+      if (strokes.length === 0) return [];
+      const { project, layerIndex, frameIndex } = get();
+      const layer = project.layers[layerIndex];
+      if (!layer) return [];
+      const fi = layer.isStatic ? 0 : frameIndex;
+      const pasted = strokes.map((s) => ({
+        ...s,
+        id: crypto.randomUUID(),
+        points: s.points.map((p) => ({ ...p })),
+      }));
+      // paste into the keyframe at this slot; if the slot is empty or held,
+      // start a fresh cel here — the paste is what you're placing
+      const existing = layer.frames[fi] ?? null;
+      const cel: Frame = existing
+        ? { ...existing, strokes: [...existing.strokes, ...pasted] }
+        : { id: crypto.randomUUID(), strokes: pasted };
+      commit(replaceLayer(project, layerIndex, setCel(layer, fi, cel)));
+      return pasted.map((s) => s.id);
     },
 
     deleteStrokes: (ids) => {

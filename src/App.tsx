@@ -26,6 +26,8 @@ import { useProject } from "@/state/project";
 import { usePlayback } from "@/state/playback";
 import { useReference } from "@/state/reference";
 import { useSelection } from "@/state/selection";
+import { copyStrokes, readClipboard } from "@/state/clipboard";
+import { resolveCel } from "@/model/types";
 import { ShaderSnapshotMount } from "@/components/ShaderBackground";
 import { useRef } from "react";
 
@@ -100,6 +102,33 @@ export default function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o") {
         e.preventDefault();
         void openLaoFile().then((p) => p && useProject.getState().loadProject(p));
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        useSelection.getState().selectAll();
+        useTools.getState().setTool("select");
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+        const ids = useSelection.getState().ids;
+        if (!ids.length) return;
+        e.preventDefault();
+        const ps = useProject.getState();
+        const layer = ps.project.layers[ps.layerIndex];
+        const cel = layer ? resolveCel(layer, ps.frameIndex) : null;
+        if (cel) copyStrokes(cel.strokes.filter((s) => ids.includes(s.id)));
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
+        const strokes = readClipboard();
+        if (!strokes.length) return;
+        e.preventDefault();
+        const newIds = useProject.getState().pasteStrokes(strokes);
+        if (newIds.length) {
+          useSelection.getState().set(newIds);
+          useTools.getState().setTool("select");
+        }
         return;
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
