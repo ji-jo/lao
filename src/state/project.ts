@@ -28,6 +28,9 @@ interface ProjectState {
   duplicateFrameForward: () => void;
   deleteKeyframe: () => void;
   extendTimeline: (frames: number) => void;
+  setProjectSettings: (
+    patch: Partial<Pick<Project, "name" | "width" | "height" | "fps" | "frameCount">>,
+  ) => void;
   addLayer: () => void;
   toggleLayerVisible: (layerIndex: number) => void;
 
@@ -156,6 +159,11 @@ export const useProject = create<ProjectState>((set, get) => {
     extendTimeline: (frames) => {
       const { project } = get();
       commit({ ...project, frameCount: project.frameCount + frames });
+    },
+
+    setProjectSettings: (patch) => {
+      const { project } = get();
+      commit({ ...project, ...patch });
     },
 
     addLayer: () => {

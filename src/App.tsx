@@ -9,6 +9,9 @@ import ArrowBackUpIcon from "@/components/ui/arrow-back-up-icon";
 import HistoryCircleIcon from "@/components/ui/history-circle-icon";
 import PlayerIcon from "@/components/ui/player-icon";
 import CameraIcon from "@/components/ui/camera-icon";
+import DownloadIcon from "@/components/ui/download-icon";
+import { ExportDialog } from "@/components/panels/ExportDialog";
+import { useState } from "react";
 import { StageCanvas } from "@/components/StageCanvas";
 import { PreviewStage } from "@/components/PreviewStage";
 import { InspectPanel } from "@/components/panels/InspectPanel";
@@ -43,6 +46,7 @@ export default function App() {
   const mode = usePlayback((s) => s.mode);
   const setMode = usePlayback((s) => s.setMode);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [exportOpen, setExportOpen] = useState(false);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -82,6 +86,12 @@ export default function App() {
                   onClick: () => fileInputRef.current?.click(),
                 }]
               : []),
+            {
+              id: "export",
+              label: "Export",
+              icon: <DownloadIcon size={14} />,
+              onClick: () => setExportOpen(true),
+            },
           ]}
         />
         <input
@@ -132,6 +142,8 @@ export default function App() {
       <div className="pointer-events-none absolute bottom-4 left-1/2 flex -translate-x-1/2 justify-center">
         <Timeline />
       </div>
+
+      <ExportDialog open={exportOpen} onOpenChange={setExportOpen} />
     </div>
   );
 }
