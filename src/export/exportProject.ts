@@ -9,10 +9,12 @@ import {
 import { GIFEncoder, quantize, applyPalette } from "gifenc";
 import type { Project } from "@/model/types";
 import { paintProjectFrame } from "@/engine/paintFrame";
+import { paintBackground, loadBackgroundImage } from "@/engine/background";
+import { getShaderSnapshotCanvas } from "@/components/ShaderBackground";
 
 export type ExportFormat = "mp4" | "webm" | "gif";
 
-const BACKGROUND = "#141416";
+const FALLBACK_BACKGROUND = "#141416";
 
 /**
  * Render every timeline frame at full quality (boil baked) and encode.
@@ -30,14 +32,21 @@ export async function exportProject(
   canvas.height = height;
   const ctx = canvas.getContext("2d", { willReadFrequently: format === "gif" })!;
 
+  // decode the background image up front so every frame gets it
+  if (project.background?.kind === "image") {
+    await loadBackgroundImage(project.background.src).catch(() => undefined);
+  }
+  const shaderCanvas =
+    project.background?.kind === "shader" ? getShaderSnapshotCanvas() : null;
+
   function paint(frame: number) {
-    paintProjectFrame(ctx, project, frame);
-    // opaque background under the art
-    ctx.save();
-    ctx.globalCompositeOperation = "destination-over";
-    ctx.fillStyle = BACKGROUND;
-    ctx.fillRect(0, 0, width, height);
-    ctx.restore();
+    ctx.clearRect(0, 0, width, height);
+    const hasBg = paintBackground(ctx, project, { shaderCanvas });
+    if (!hasBg) {
+      ctx.fillStyle = FALLBACK_BACKGROUND;
+      ctx.fillRect(0, 0, width, height);
+    }
+    paintProjectFrame(ctx, project, frame, { clear: false });
   }
 
   if (format === "gif") {

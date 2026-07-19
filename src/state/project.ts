@@ -24,12 +24,16 @@ interface ProjectState {
   stepFrame: (delta: number) => void;
 
   addStroke: (stroke: Stroke) => void;
+  deleteStrokes: (ids: string[]) => void;
+  replaceStrokePoints: (strokeId: string, points: Stroke["points"]) => void;
   addKeyframe: () => void;
   duplicateFrameForward: () => void;
   deleteKeyframe: () => void;
   extendTimeline: (frames: number) => void;
   setProjectSettings: (
-    patch: Partial<Pick<Project, "name" | "width" | "height" | "fps" | "frameCount">>,
+    patch: Partial<
+      Pick<Project, "name" | "width" | "height" | "fps" | "frameCount" | "background">
+    >,
   ) => void;
   addLayer: () => void;
   toggleLayerVisible: (layerIndex: number) => void;
@@ -123,6 +127,30 @@ export const useProject = create<ProjectState>((set, get) => {
       }
       const nextCel: Frame = { ...cel, strokes: [...cel.strokes, stroke] };
       commit(replaceLayer(project, layerIndex, setCel(layer, celIndex, nextCel)));
+    },
+
+    deleteStrokes: (ids) => {
+      const { project, layerIndex, frameIndex } = get();
+      const layer = project.layers[layerIndex];
+      if (!layer) return;
+      const celIndex = resolveCelIndex(layer, layer.isStatic ? 0 : frameIndex);
+      if (celIndex === null) return;
+      const cel = layer.frames[celIndex]!;
+      const strokes = cel.strokes.filter((s) => !ids.includes(s.id));
+      if (strokes.length === cel.strokes.length) return;
+      commit(replaceLayer(project, layerIndex, setCel(layer, celIndex, { ...cel, strokes })));
+    },
+
+    replaceStrokePoints: (strokeId, points) => {
+      const { project, layerIndex, frameIndex } = get();
+      const layer = project.layers[layerIndex];
+      if (!layer) return;
+      const celIndex = resolveCelIndex(layer, layer.isStatic ? 0 : frameIndex);
+      if (celIndex === null) return;
+      const cel = layer.frames[celIndex]!;
+      if (!cel.strokes.some((s) => s.id === strokeId)) return;
+      const strokes = cel.strokes.map((s) => (s.id === strokeId ? { ...s, points } : s));
+      commit(replaceLayer(project, layerIndex, setCel(layer, celIndex, { ...cel, strokes })));
     },
 
     addKeyframe: () => {

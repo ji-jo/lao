@@ -26,9 +26,10 @@ export function paintProjectFrame(
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   project: Project,
   frame: number,
+  opts: { clear?: boolean } = {},
 ) {
   const { width, height } = project;
-  ctx.clearRect(0, 0, width, height);
+  if (opts.clear !== false) ctx.clearRect(0, 0, width, height);
 
   const scratch = getCelCanvas(width, height);
   const scratchCtx = scratch.getContext("2d") as CanvasRenderingContext2D;

@@ -2,8 +2,17 @@ import { useEffect, useRef } from "react";
 import { useProject } from "@/state/project";
 import { useTools } from "@/state/tools";
 import { usePlayback } from "@/state/playback";
+import { useSelection } from "@/state/selection";
 import { renderStrokes, renderStroke } from "@/engine/renderer";
 import { PressureTracker } from "@/engine/pressure";
+import { paintBackground } from "@/engine/background";
+import {
+  straightLinePoints,
+  warpPoints,
+  handleIndices,
+  distanceToPoints,
+  HANDLE_HIT_PX,
+} from "@/engine/pathEdit";
 import { resolveCel, resolveCelIndex, type Stroke, type StrokePoint } from "@/model/types";
 
 /**
@@ -27,6 +36,14 @@ export function StageCanvas() {
   const artRef = useRef<HTMLCanvasElement | null>(null);
   const fitRef = useRef<Fit>({ scale: 1, ox: 0, oy: 0 });
   const liveRef = useRef<{ stroke: Stroke; points: StrokePoint[] } | null>(null);
+  const warpRef = useRef<{
+    strokeId: string;
+    handleIndex: number;
+    startX: number;
+    startY: number;
+    origPoints: StrokePoint[];
+    currentPoints: StrokePoint[];
+  } | null>(null);
   const dirtyRef = useRef(true);
   const timerRef = useRef<{ kind: "raf" | "timeout"; id: number }>({ kind: "raf", id: 0 });
 
@@ -35,6 +52,7 @@ export function StageCanvas() {
     const ctx = canvas.getContext("2d")!;
     const pressure = new PressureTracker();
     let strokeStart = 0;
+    let handleSpots: { strokeId: string; index: number; sx: number; sy: number }[] = [];
 
     const artCanvas = document.createElement("canvas");
     artRef.current = artCanvas;
@@ -42,6 +60,9 @@ export function StageCanvas() {
     // per-cel scratch canvas so an eraser stroke only affects its own cel
     const celCanvas = document.createElement("canvas");
     const celCtx = celCanvas.getContext("2d")!;
+    // draft-scale background canvas (color/gradient/image; shader = flat approx)
+    const bgCanvas = document.createElement("canvas");
+    const bgCtx = bgCanvas.getContext("2d")!;
 
     function projectSize() {
       const { width, height } = useProject.getState().project;
@@ -50,6 +71,7 @@ export function StageCanvas() {
 
     function resize() {
       const parent = canvas.parentElement!;
+      if (parent.clientWidth === 0 || parent.clientHeight === 0) return; // layout not ready
       canvas.width = parent.clientWidth;
       canvas.height = parent.clientHeight;
       const { pw, ph } = projectSize();
@@ -63,12 +85,19 @@ export function StageCanvas() {
       artCanvas.height = Math.max(Math.round(ph * DRAFT_SCALE), 1);
       celCanvas.width = artCanvas.width;
       celCanvas.height = artCanvas.height;
+      bgCanvas.width = artCanvas.width;
+      bgCanvas.height = artCanvas.height;
       dirtyRef.current = true;
     }
 
     function toProject(e: PointerEvent): { x: number; y: number } {
       const rect = canvas.getBoundingClientRect();
-      const { scale, ox, oy } = fitRef.current;
+      let { scale, ox, oy } = fitRef.current;
+      if (!(scale > 0)) {
+        resize(); // recover from a zero-size boot race
+        ({ scale, ox, oy } = fitRef.current);
+        if (!(scale > 0)) return { x: 0, y: 0 };
+      }
       return {
         x: (e.clientX - rect.left - ox) / scale,
         y: (e.clientY - rect.top - oy) / scale,
@@ -82,10 +111,11 @@ export function StageCanvas() {
       liveStroke: Stroke | null,
       alpha: number,
       colorOverride?: string,
+      displaced?: Map<string, StrokePoint[]>,
     ) {
       celCtx.setTransform(DRAFT_SCALE, 0, 0, DRAFT_SCALE, 0, 0);
       celCtx.clearRect(0, 0, celCanvas.width / DRAFT_SCALE, celCanvas.height / DRAFT_SCALE);
-      renderStrokes(celCtx, strokes, { quality: "draft", colorOverride });
+      renderStrokes(celCtx, strokes, { quality: "draft", colorOverride, displaced });
       if (liveStroke && livePoints)
         renderStroke(celCtx, liveStroke, { quality: "draft" }, livePoints);
       artCtx.save();
@@ -135,6 +165,7 @@ export function StageCanvas() {
       }
 
       const live = liveRef.current;
+      const warp = warpRef.current;
       ps.project.layers.forEach((layer, li) => {
         if (!layer.visible) return;
         const cel = resolveCel(layer, ps.frameIndex);
@@ -145,6 +176,8 @@ export function StageCanvas() {
           isTarget && live ? live.points : null,
           isTarget && live ? live.stroke : null,
           1,
+          undefined,
+          warp && isTarget ? new Map([[warp.strokeId, warp.currentPoints]]) : undefined,
         );
       });
 
@@ -153,32 +186,147 @@ export function StageCanvas() {
       ctx.fillStyle = "#0b0b0d";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // artboard checkerboard
+      // artboard: project background, or checkerboard when none
+      bgCtx.setTransform(DRAFT_SCALE, 0, 0, DRAFT_SCALE, 0, 0);
+      bgCtx.clearRect(0, 0, pw, ph);
+      const hasBg = paintBackground(bgCtx, ps.project, {
+        onImageReady: () => (dirtyRef.current = true),
+      });
+
       const bx = ox, by = oy, bw = pw * scale, bh = ph * scale;
       ctx.save();
       ctx.beginPath();
       ctx.rect(bx, by, bw, bh);
       ctx.clip();
-      ctx.fillStyle = "#141416";
-      ctx.fillRect(bx, by, bw, bh);
-      ctx.fillStyle = "#1c1c1f";
-      const cell = 24;
-      for (let y = 0; y * cell < bh; y++)
-        for (let x = 0; x * cell < bw; x++)
-          if ((x + y) % 2 === 0) ctx.fillRect(bx + x * cell, by + y * cell, cell, cell);
       // aliased on purpose in edit mode
       ctx.imageSmoothingEnabled = false;
+      if (hasBg) {
+        ctx.drawImage(bgCanvas, bx, by, bw, bh);
+      } else {
+        ctx.fillStyle = "#141416";
+        ctx.fillRect(bx, by, bw, bh);
+        ctx.fillStyle = "#1c1c1f";
+        const cell = 24;
+        for (let y = 0; y * cell < bh; y++)
+          for (let x = 0; x * cell < bw; x++)
+            if ((x + y) % 2 === 0) ctx.fillRect(bx + x * cell, by + y * cell, cell, cell);
+      }
       ctx.drawImage(artCanvas, bx, by, bw, bh);
       ctx.restore();
 
       ctx.strokeStyle = "#2b5cff";
       ctx.lineWidth = 1.5;
       ctx.strokeRect(bx, by, bw, bh);
+
+      // --- selection overlay (select tool) ---
+      handleSpots = [];
+      const selIds = useSelection.getState().ids;
+      const selCel = activeLayer ? resolveCel(activeLayer, ps.frameIndex) : null;
+      if (selIds.length && selCel) {
+        const selStrokes = selCel.strokes.filter((s) => selIds.includes(s.id));
+        const ptsOf = (s: Stroke) =>
+          warp && warp.strokeId === s.id ? warp.currentPoints : s.points;
+        let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+        for (const s of selStrokes)
+          for (const p of ptsOf(s)) {
+            if (p.x < minx) minx = p.x;
+            if (p.y < miny) miny = p.y;
+            if (p.x > maxx) maxx = p.x;
+            if (p.y > maxy) maxy = p.y;
+          }
+        if (minx !== Infinity) {
+          const pad = 8;
+          ctx.strokeStyle = "#2b5cff";
+          ctx.lineWidth = 1.2;
+          ctx.setLineDash([5, 4]);
+          ctx.strokeRect(
+            bx + minx * scale - pad, by + miny * scale - pad,
+            (maxx - minx) * scale + pad * 2, (maxy - miny) * scale + pad * 2,
+          );
+          ctx.setLineDash([]);
+        }
+        // warp handles for a single selected stroke
+        if (selStrokes.length === 1) {
+          const s = selStrokes[0];
+          const pts = ptsOf(s);
+          for (const i of handleIndices(pts.length)) {
+            const sx = bx + pts[i].x * scale;
+            const sy = by + pts[i].y * scale;
+            handleSpots.push({ strokeId: s.id, index: i, sx, sy });
+            ctx.fillStyle = "#0e0e11";
+            ctx.strokeStyle = "#39c5e8";
+            ctx.lineWidth = 1.4;
+            ctx.beginPath();
+            ctx.rect(sx - 4, sy - 4, 8, 8);
+            ctx.fill();
+            ctx.stroke();
+          }
+        }
+      }
     }
 
     function onPointerDown(e: PointerEvent) {
       const tools = useTools.getState();
-      if (tools.tool === "select" || e.button !== 0) return;
+      if (e.button !== 0) return;
+
+      if (tools.tool === "select") {
+        const sel = useSelection.getState();
+        const rect = canvas.getBoundingClientRect();
+        const sx = e.clientX - rect.left;
+        const sy = e.clientY - rect.top;
+
+        // grab a warp handle first
+        const spot = handleSpots.find((h) => Math.hypot(h.sx - sx, h.sy - sy) <= HANDLE_HIT_PX);
+        if (spot) {
+          const ps = useProject.getState();
+          const layer = ps.project.layers[ps.layerIndex];
+          const cel = layer ? resolveCel(layer, ps.frameIndex) : null;
+          const stroke = cel?.strokes.find((s) => s.id === spot.strokeId);
+          if (stroke) {
+            try {
+              canvas.setPointerCapture(e.pointerId);
+            } catch {
+              // best-effort
+            }
+            const { x, y } = toProject(e);
+            warpRef.current = {
+              strokeId: stroke.id,
+              handleIndex: spot.index,
+              startX: x,
+              startY: y,
+              origPoints: stroke.points,
+              currentPoints: stroke.points,
+            };
+            dirtyRef.current = true;
+            return;
+          }
+        }
+
+        // otherwise pick a stroke (topmost wins), shift toggles
+        const { x, y } = toProject(e);
+        const ps = useProject.getState();
+        const layer = ps.project.layers[ps.layerIndex];
+        const cel = layer ? resolveCel(layer, ps.frameIndex) : null;
+        let hit: string | null = null;
+        if (cel) {
+          for (let i = cel.strokes.length - 1; i >= 0; i--) {
+            const s = cel.strokes[i];
+            if (distanceToPoints(s.points, x, y) <= Math.max(s.size * 1.5, 12)) {
+              hit = s.id;
+              break;
+            }
+          }
+        }
+        if (hit) {
+          if (e.shiftKey) sel.toggle(hit);
+          else sel.set([hit]);
+        } else {
+          sel.clear();
+        }
+        dirtyRef.current = true;
+        return;
+      }
+
       try {
         canvas.setPointerCapture(e.pointerId);
       } catch {
@@ -203,6 +351,18 @@ export function StageCanvas() {
     }
 
     function onPointerMove(e: PointerEvent) {
+      const warp = warpRef.current;
+      if (warp) {
+        const { x, y } = toProject(e);
+        warp.currentPoints = warpPoints(
+          warp.origPoints,
+          warp.handleIndex,
+          x - warp.startX,
+          y - warp.startY,
+        );
+        dirtyRef.current = true;
+        return;
+      }
       const live = liveRef.current;
       if (!live) return;
       let events: PointerEvent[] = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
@@ -212,10 +372,26 @@ export function StageCanvas() {
         const p = pressure.read(ev as PointerEvent, x, y, ev.timeStamp);
         live.points.push({ x, y, pressure: p, t: ev.timeStamp - strokeStart });
       }
+      // Shift constrains the stroke to a straight line from its start point
+      if (e.shiftKey && live.points.length > 1) {
+        live.points = straightLinePoints(live.points[0], live.points[live.points.length - 1]);
+      }
       dirtyRef.current = true;
     }
 
     function onPointerUp(e: PointerEvent) {
+      const warp = warpRef.current;
+      if (warp) {
+        warpRef.current = null;
+        try {
+          canvas.releasePointerCapture(e.pointerId);
+        } catch {
+          // best-effort
+        }
+        useProject.getState().replaceStrokePoints(warp.strokeId, warp.currentPoints);
+        dirtyRef.current = true;
+        return;
+      }
       const live = liveRef.current;
       if (!live) return;
       liveRef.current = null;
@@ -230,6 +406,8 @@ export function StageCanvas() {
 
     const unsub = useProject.subscribe(() => (dirtyRef.current = true));
     const unsubPb = usePlayback.subscribe(() => (dirtyRef.current = true));
+    const unsubSel = useSelection.subscribe(() => (dirtyRef.current = true));
+    const unsubTools = useTools.subscribe(() => (dirtyRef.current = true));
     const ro = new ResizeObserver(resize);
     ro.observe(canvas.parentElement!);
     resize();
@@ -251,6 +429,8 @@ export function StageCanvas() {
       document.removeEventListener("visibilitychange", onVisibility);
       unsub();
       unsubPb();
+      unsubSel();
+      unsubTools();
       ro.disconnect();
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointermove", onPointerMove);

@@ -111,12 +111,32 @@ export function Timeline() {
         <TBtn label="Forward 1 frame ( . )" onClick={() => stepFrame(1)}>
           <RightChevron size={14} />
         </TBtn>
-        <div className="mx-2 min-w-16 text-center font-mono text-xs text-muted-foreground">
-          {String(frameIndex + 1).padStart(2, "0")} / {project.frameCount}
-          <span className="ml-2 opacity-60">{project.fps}fps</span>
+        <div className="mx-2 flex min-w-16 items-center gap-1.5 text-center font-mono text-xs text-muted-foreground">
+          <span>
+            {String(frameIndex + 1).padStart(2, "0")} / {project.frameCount}
+          </span>
+          <input
+            type="number"
+            key={project.fps}
+            defaultValue={project.fps}
+            min={1}
+            max={60}
+            title="Frames per second"
+            onBlur={(e) => {
+              const v = Math.round(Number(e.target.value));
+              if (Number.isFinite(v) && v >= 1 && v <= 60 && v !== project.fps)
+                useProject.getState().setProjectSettings({ fps: v });
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              e.stopPropagation();
+            }}
+            className="w-11 rounded border border-border bg-background/40 px-1 py-0.5 text-center text-[11px] text-muted-foreground outline-none focus:border-primary/50 focus:text-foreground"
+          />
+          <span className="opacity-60">fps</span>
         </div>
         <div className="mx-1 h-4 w-px bg-border" />
-        <TBtn label="Blank keyframe" onClick={addKeyframe}>
+        <TBtn label="Empty cel — stop the held drawing here, start fresh" onClick={addKeyframe}>
           <KeyframesIcon size={14} />
         </TBtn>
         <TBtn label="Duplicate frame → next" onClick={duplicateFrameForward}>

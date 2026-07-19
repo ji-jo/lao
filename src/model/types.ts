@@ -39,6 +39,17 @@ export interface Layer {
   frames: (Frame | null)[];
 }
 
+export type BackgroundFit = "fill" | "cover" | "contain" | "crop";
+export type ShaderPresetId = "mesh" | "grain" | "neuro" | "smoke" | "voronoi" | "waves";
+
+export type Background =
+  | { kind: "none" }
+  | { kind: "color"; color: string }
+  | { kind: "gradient"; shape: "linear" | "radial"; from: string; to: string; angle: number }
+  /** src is a data URL so the image travels inside the .lao file */
+  | { kind: "image"; src: string; fit: BackgroundFit }
+  | { kind: "shader"; preset: ShaderPresetId; colors: string[]; speed: number };
+
 export interface Project {
   version: 1;
   name: string;
@@ -48,6 +59,7 @@ export interface Project {
   /** total timeline length in frames */
   frameCount: number;
   layers: Layer[];
+  background?: Background;
 }
 
 /**

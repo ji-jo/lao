@@ -25,6 +25,8 @@ import { useTools, type ToolId } from "@/state/tools";
 import { useProject } from "@/state/project";
 import { usePlayback } from "@/state/playback";
 import { useReference } from "@/state/reference";
+import { useSelection } from "@/state/selection";
+import { ShaderSnapshotMount } from "@/components/ShaderBackground";
 import { useRef } from "react";
 
 const TOOL_ITEMS = [
@@ -50,6 +52,8 @@ export default function App() {
   const redo = useProject((s) => s.redo);
   const mode = usePlayback((s) => s.mode);
   const setMode = usePlayback((s) => s.setMode);
+  const background = useProject((s) => s.project.background);
+  const aspect = useProject((s) => s.project.width / s.project.height);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [recovered, setRecovered] = useState<Project | null>(null);
@@ -98,8 +102,29 @@ export default function App() {
         void openLaoFile().then((p) => p && useProject.getState().loadProject(p));
         return;
       }
-      const t = SHORTCUTS[e.key.toLowerCase()];
-      if (t && !e.ctrlKey && !e.metaKey && !e.altKey) setTool(t);
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === "Delete" || e.key === "Backspace") {
+        const ids = useSelection.getState().ids;
+        if (ids.length) {
+          e.preventDefault();
+          useProject.getState().deleteStrokes(ids);
+          useSelection.getState().clear();
+        }
+        return;
+      }
+      const k = e.key.toLowerCase();
+      if (k === "a") {
+        // select all strokes in the current cel (and switch to the select tool)
+        useSelection.getState().selectAll();
+        useTools.getState().setTool("select");
+        return;
+      }
+      if (k === "d") {
+        useSelection.getState().clear();
+        return;
+      }
+      const t = SHORTCUTS[k];
+      if (t) setTool(t);
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -120,8 +145,13 @@ export default function App() {
     >
       {mode === "draw" ? <StageCanvas /> : <PreviewStage />}
 
-      {/* floating mode bar */}
-      <div className="absolute left-4 top-4">
+      {/* hidden shader instance for export snapshots */}
+      {background?.kind === "shader" && (
+        <ShaderSnapshotMount background={background} aspect={aspect} />
+      )}
+
+      {/* floating mode + tool cluster (mode bar sits left of the draw panel) */}
+      <div className="absolute left-1/2 top-4 flex -translate-x-1/2 items-start gap-2">
         <ExpandableActionBar
           size="sm"
           activeId={mode}
@@ -167,18 +197,16 @@ export default function App() {
             e.target.value = "";
           }}
         />
-      </div>
 
-      {/* floating tool bar (draw mode) */}
-      {mode === "draw" && (
-        <div className="absolute left-1/2 top-4 -translate-x-1/2">
+        {/* draw panel */}
+        {mode === "draw" && (
           <ExpandableActionBar
             items={TOOL_ITEMS}
             activeId={tool}
             onAction={(item) => setTool(item.id as ToolId)}
           />
-        </div>
-      )}
+        )}
+      </div>
 
       {/* floating history bar */}
       {mode === "draw" && (
