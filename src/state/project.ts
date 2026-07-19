@@ -1,76 +1,207 @@
 import { create } from "zustand";
-import { createEmptyProject, type Project, type Stroke } from "@/model/types";
+import {
+  createEmptyProject,
+  resolveCel,
+  resolveCelIndex,
+  type Frame,
+  type Layer,
+  type Project,
+  type Stroke,
+} from "@/model/types";
+import { useTools } from "@/state/tools";
 
-interface StrokeRef {
-  layerIndex: number;
-  frameIndex: number;
-  stroke: Stroke;
-}
+const MAX_UNDO = 100;
 
 interface ProjectState {
   project: Project;
   layerIndex: number;
   frameIndex: number;
-  undoStack: StrokeRef[];
-  redoStack: StrokeRef[];
+  undoStack: Project[];
+  redoStack: Project[];
+
+  setFrameIndex: (i: number) => void;
+  setLayerIndex: (i: number) => void;
+  stepFrame: (delta: number) => void;
+
   addStroke: (stroke: Stroke) => void;
+  addKeyframe: () => void;
+  duplicateFrameForward: () => void;
+  deleteKeyframe: () => void;
+  extendTimeline: (frames: number) => void;
+  addLayer: () => void;
+  toggleLayerVisible: (layerIndex: number) => void;
+
   undo: () => void;
   redo: () => void;
 }
 
-function withStroke(project: Project, ref: StrokeRef, add: boolean): Project {
-  const layers = project.layers.map((layer, li) => {
-    if (li !== ref.layerIndex) return layer;
-    const frames = layer.frames.map((frame, fi) => {
-      if (fi !== ref.frameIndex || !frame) return frame;
-      return {
-        ...frame,
-        strokes: add
-          ? [...frame.strokes, ref.stroke]
-          : frame.strokes.filter((s) => s.id !== ref.stroke.id),
-      };
-    });
-    return { ...layer, frames };
-  });
-  return { ...project, layers };
+function replaceLayer(project: Project, li: number, layer: Layer): Project {
+  return { ...project, layers: project.layers.map((l, i) => (i === li ? layer : l)) };
 }
 
-export const useProject = create<ProjectState>((set) => ({
-  project: createEmptyProject(),
-  layerIndex: 0,
-  frameIndex: 0,
-  undoStack: [],
-  redoStack: [],
+function setCel(layer: Layer, fi: number, cel: Frame | null): Layer {
+  const frames = layer.frames.slice();
+  while (frames.length <= fi) frames.push(null);
+  frames[fi] = cel;
+  return { ...layer, frames };
+}
 
-  addStroke: (stroke) =>
-    set((s) => {
-      const ref = { layerIndex: s.layerIndex, frameIndex: s.frameIndex, stroke };
-      return {
-        project: withStroke(s.project, ref, true),
-        undoStack: [...s.undoStack, ref],
-        redoStack: [],
-      };
-    }),
+function emptyCel(): Frame {
+  return { id: crypto.randomUUID(), strokes: [] };
+}
 
-  undo: () =>
-    set((s) => {
-      const ref = s.undoStack[s.undoStack.length - 1];
-      if (!ref) return s;
-      return {
-        project: withStroke(s.project, ref, false),
-        undoStack: s.undoStack.slice(0, -1),
-        redoStack: [...s.redoStack, ref],
-      };
-    }),
+export const useProject = create<ProjectState>((set, get) => {
+  /** history-recording update */
+  function commit(next: Project) {
+    set((s) => ({
+      project: next,
+      undoStack: [...s.undoStack.slice(-MAX_UNDO + 1), s.project],
+      redoStack: [],
+    }));
+  }
 
-  redo: () =>
-    set((s) => {
-      const ref = s.redoStack[s.redoStack.length - 1];
-      if (!ref) return s;
-      return {
-        project: withStroke(s.project, ref, true),
-        undoStack: [...s.undoStack, ref],
-        redoStack: s.redoStack.slice(0, -1),
+  return {
+    project: createEmptyProject(),
+    layerIndex: 0,
+    frameIndex: 0,
+    undoStack: [],
+    redoStack: [],
+
+    setFrameIndex: (i) =>
+      set((s) => ({ frameIndex: Math.max(0, Math.min(i, s.project.frameCount - 1)) })),
+    setLayerIndex: (i) =>
+      set((s) => ({ layerIndex: Math.max(0, Math.min(i, s.project.layers.length - 1)) })),
+    stepFrame: (delta) =>
+      set((s) => {
+        const n = s.project.frameCount;
+        return { frameIndex: ((s.frameIndex + delta) % n + n) % n };
+      }),
+
+    addStroke: (stroke) => {
+      const s = get();
+      const { autoKey } = useTools.getState();
+      let { project, layerIndex, frameIndex } = s;
+      let layer = project.layers[layerIndex];
+      if (!layer) return;
+
+      if (!autoKey && !layer.isStatic) {
+        // Auto-key OFF: route the stroke to a static (held) layer
+        let staticIndex = project.layers.findIndex((l) => l.isStatic);
+        if (staticIndex === -1) {
+          const staticLayer: Layer = {
+            id: crypto.randomUUID(),
+            name: "Static",
+            visible: true,
+            isStatic: true,
+            frames: [emptyCel()],
+          };
+          project = { ...project, layers: [...project.layers, staticLayer] };
+          staticIndex = project.layers.length - 1;
+        }
+        layerIndex = staticIndex;
+        layer = project.layers[layerIndex];
+        frameIndex = 0;
+      }
+
+      // Auto-key: drawing on a held/empty slot creates a keyframe there
+      let celIndex = layer.isStatic ? 0 : frameIndex;
+      let cel = layer.frames[celIndex] ?? null;
+      if (!cel) {
+        if (layer.isStatic) {
+          cel = emptyCel();
+        } else if (autoKey || resolveCelIndex(layer, frameIndex) === null) {
+          cel = emptyCel();
+        } else {
+          // draw onto the held cel (extends the exposure's artwork)
+          celIndex = resolveCelIndex(layer, frameIndex)!;
+          cel = layer.frames[celIndex]!;
+        }
+      }
+      const nextCel: Frame = { ...cel, strokes: [...cel.strokes, stroke] };
+      commit(replaceLayer(project, layerIndex, setCel(layer, celIndex, nextCel)));
+    },
+
+    addKeyframe: () => {
+      const { project, layerIndex, frameIndex } = get();
+      const layer = project.layers[layerIndex];
+      if (!layer || layer.isStatic || layer.frames[frameIndex]) return;
+      commit(replaceLayer(project, layerIndex, setCel(layer, frameIndex, emptyCel())));
+    },
+
+    /** duplicate the current cel onto the next frame and move there — the core draw→flip→fix loop */
+    duplicateFrameForward: () => {
+      const s = get();
+      const { project, layerIndex, frameIndex } = s;
+      const layer = project.layers[layerIndex];
+      if (!layer || layer.isStatic) return;
+      const cel = resolveCel(layer, frameIndex);
+      const target = frameIndex + 1;
+      const copy: Frame = cel
+        ? { id: crypto.randomUUID(), strokes: cel.strokes.map((st) => ({ ...st, id: crypto.randomUUID() })) }
+        : emptyCel();
+      let next = replaceLayer(project, layerIndex, setCel(layer, target, copy));
+      if (target >= next.frameCount) next = { ...next, frameCount: target + 1 };
+      commit(next);
+      set({ frameIndex: target });
+    },
+
+    deleteKeyframe: () => {
+      const { project, layerIndex, frameIndex } = get();
+      const layer = project.layers[layerIndex];
+      const fi = layer?.isStatic ? 0 : frameIndex;
+      if (!layer || !layer.frames[fi]) return;
+      commit(replaceLayer(project, layerIndex, setCel(layer, fi, null)));
+    },
+
+    extendTimeline: (frames) => {
+      const { project } = get();
+      commit({ ...project, frameCount: project.frameCount + frames });
+    },
+
+    addLayer: () => {
+      const { project } = get();
+      const layer: Layer = {
+        id: crypto.randomUUID(),
+        name: `Layer ${project.layers.length + 1}`,
+        visible: true,
+        isStatic: false,
+        frames: [emptyCel()],
       };
-    }),
-}));
+      commit({ ...project, layers: [...project.layers, layer] });
+      set({ layerIndex: project.layers.length });
+    },
+
+    toggleLayerVisible: (li) => {
+      const { project } = get();
+      const layer = project.layers[li];
+      if (!layer) return;
+      commit(replaceLayer(project, li, { ...layer, visible: !layer.visible }));
+    },
+
+    undo: () =>
+      set((s) => {
+        const prev = s.undoStack[s.undoStack.length - 1];
+        if (!prev) return s;
+        return {
+          project: prev,
+          undoStack: s.undoStack.slice(0, -1),
+          redoStack: [...s.redoStack, s.project],
+          layerIndex: Math.min(s.layerIndex, prev.layers.length - 1),
+          frameIndex: Math.min(s.frameIndex, prev.frameCount - 1),
+        };
+      }),
+
+    redo: () =>
+      set((s) => {
+        const next = s.redoStack[s.redoStack.length - 1];
+        if (!next) return s;
+        return {
+          project: next,
+          undoStack: [...s.undoStack, s.project],
+          redoStack: s.redoStack.slice(0, -1),
+          layerIndex: Math.min(s.layerIndex, next.layers.length - 1),
+          frameIndex: Math.min(s.frameIndex, next.frameCount - 1),
+        };
+      }),
+  };
+});

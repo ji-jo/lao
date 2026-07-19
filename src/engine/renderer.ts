@@ -7,6 +7,8 @@ export interface RenderOptions {
   quality: RenderQuality;
   /** optional per-frame displaced points (from the boil engine) keyed by stroke id */
   displaced?: Map<string, StrokePoint[]>;
+  /** force every stroke to this color (onion-skin ghosts) */
+  colorOverride?: string;
 }
 
 /** perfect-freehand options per brush — thinning drives the pressure taper */
@@ -55,7 +57,7 @@ export function renderStroke(
     ctx.globalCompositeOperation = "destination-out";
     ctx.fillStyle = "#000";
   } else {
-    ctx.fillStyle = stroke.color;
+    ctx.fillStyle = opts.colorOverride ?? stroke.color;
     if (stroke.brush === "marker") ctx.globalAlpha = 0.55;
     if (stroke.brush === "pencil") ctx.globalAlpha = 0.9;
   }

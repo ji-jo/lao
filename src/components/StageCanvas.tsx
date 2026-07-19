@@ -1,9 +1,10 @@
 import { useEffect, useRef } from "react";
 import { useProject } from "@/state/project";
 import { useTools } from "@/state/tools";
+import { usePlayback } from "@/state/playback";
 import { renderStrokes, renderStroke } from "@/engine/renderer";
 import { PressureTracker } from "@/engine/pressure";
-import type { Stroke, StrokePoint } from "@/model/types";
+import { resolveCel, resolveCelIndex, type Stroke, type StrokePoint } from "@/model/types";
 
 /**
  * The drawing stage. Committed + live strokes render into an offscreen "art"
@@ -38,6 +39,9 @@ export function StageCanvas() {
     const artCanvas = document.createElement("canvas");
     artRef.current = artCanvas;
     const artCtx = artCanvas.getContext("2d")!;
+    // per-cel scratch canvas so an eraser stroke only affects its own cel
+    const celCanvas = document.createElement("canvas");
+    const celCtx = celCanvas.getContext("2d")!;
 
     function projectSize() {
       const { width, height } = useProject.getState().project;
@@ -57,6 +61,8 @@ export function StageCanvas() {
       };
       artCanvas.width = Math.max(Math.round(pw * DRAFT_SCALE), 1);
       artCanvas.height = Math.max(Math.round(ph * DRAFT_SCALE), 1);
+      celCanvas.width = artCanvas.width;
+      celCanvas.height = artCanvas.height;
       dirtyRef.current = true;
     }
 
@@ -69,10 +75,24 @@ export function StageCanvas() {
       };
     }
 
-    function currentStrokes(): Stroke[] {
-      const s = useProject.getState();
-      const frame = s.project.layers[s.layerIndex]?.frames[s.frameIndex];
-      return frame?.strokes ?? [];
+    /** render one cel's strokes into the scratch canvas, then composite */
+    function compositeCel(
+      strokes: Stroke[],
+      livePoints: StrokePoint[] | null,
+      liveStroke: Stroke | null,
+      alpha: number,
+      colorOverride?: string,
+    ) {
+      celCtx.setTransform(DRAFT_SCALE, 0, 0, DRAFT_SCALE, 0, 0);
+      celCtx.clearRect(0, 0, celCanvas.width / DRAFT_SCALE, celCanvas.height / DRAFT_SCALE);
+      renderStrokes(celCtx, strokes, { quality: "draft", colorOverride });
+      if (liveStroke && livePoints)
+        renderStroke(celCtx, liveStroke, { quality: "draft" }, livePoints);
+      artCtx.save();
+      artCtx.setTransform(1, 0, 0, 1, 0, 0);
+      artCtx.globalAlpha = alpha;
+      artCtx.drawImage(celCanvas, 0, 0);
+      artCtx.restore();
     }
 
     // rAF doesn't fire in hidden tabs — fall back to a timer so drawing state
@@ -97,12 +117,36 @@ export function StageCanvas() {
       const { pw, ph } = projectSize();
       const { scale, ox, oy } = fitRef.current;
 
-      // --- art canvas: strokes at draft scale, aliased ---
-      artCtx.setTransform(DRAFT_SCALE, 0, 0, DRAFT_SCALE, 0, 0);
-      artCtx.clearRect(0, 0, pw, ph);
-      renderStrokes(artCtx, currentStrokes(), { quality: "draft" });
+      // --- art canvas: all visible layers' cels at draft scale, aliased ---
+      const ps = useProject.getState();
+      const pb = usePlayback.getState();
+      artCtx.setTransform(1, 0, 0, 1, 0, 0);
+      artCtx.clearRect(0, 0, artCanvas.width, artCanvas.height);
+
+      // onion ghost: previous frame's cel on the active layer (skip if held/same cel)
+      const activeLayer = ps.project.layers[ps.layerIndex];
+      if (pb.onionSkin && !pb.playing && activeLayer && !activeLayer.isStatic && ps.frameIndex > 0) {
+        const prevIdx = resolveCelIndex(activeLayer, ps.frameIndex - 1);
+        const curIdx = resolveCelIndex(activeLayer, ps.frameIndex);
+        if (prevIdx !== null && prevIdx !== curIdx) {
+          const ghost = activeLayer.frames[prevIdx]!;
+          compositeCel(ghost.strokes, null, null, 0.28, "#e0504f");
+        }
+      }
+
       const live = liveRef.current;
-      if (live) renderStroke(artCtx, live.stroke, { quality: "draft" }, live.points);
+      ps.project.layers.forEach((layer, li) => {
+        if (!layer.visible) return;
+        const cel = resolveCel(layer, ps.frameIndex);
+        const isTarget = li === ps.layerIndex;
+        if (!cel && !(isTarget && live)) return;
+        compositeCel(
+          cel?.strokes ?? [],
+          isTarget && live ? live.points : null,
+          isTarget && live ? live.stroke : null,
+          1,
+        );
+      });
 
       // --- stage ---
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -185,6 +229,7 @@ export function StageCanvas() {
     }
 
     const unsub = useProject.subscribe(() => (dirtyRef.current = true));
+    const unsubPb = usePlayback.subscribe(() => (dirtyRef.current = true));
     const ro = new ResizeObserver(resize);
     ro.observe(canvas.parentElement!);
     resize();
@@ -205,6 +250,7 @@ export function StageCanvas() {
       cancelScheduled();
       document.removeEventListener("visibilitychange", onVisibility);
       unsub();
+      unsubPb();
       ro.disconnect();
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointermove", onPointerMove);

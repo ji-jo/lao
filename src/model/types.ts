@@ -50,6 +50,24 @@ export interface Project {
   layers: Layer[];
 }
 
+/**
+ * Exposure-sheet resolution: the cel shown at timeline frame `i` is the
+ * nearest keyframe at or before `i` (a "hold"). Static layers always show
+ * their first cel.
+ */
+export function resolveCelIndex(layer: Layer, i: number): number | null {
+  if (layer.isStatic) return layer.frames[0] ? 0 : null;
+  for (let k = Math.min(i, layer.frames.length - 1); k >= 0; k--) {
+    if (layer.frames[k]) return k;
+  }
+  return null;
+}
+
+export function resolveCel(layer: Layer, i: number): Frame | null {
+  const idx = resolveCelIndex(layer, i);
+  return idx === null ? null : layer.frames[idx];
+}
+
 export function createEmptyProject(): Project {
   return {
     version: 1,

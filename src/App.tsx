@@ -9,6 +9,7 @@ import ArrowBackUpIcon from "@/components/ui/arrow-back-up-icon";
 import HistoryCircleIcon from "@/components/ui/history-circle-icon";
 import { StageCanvas } from "@/components/StageCanvas";
 import { InspectPanel } from "@/components/panels/InspectPanel";
+import { Timeline } from "@/components/timeline/Timeline";
 import { useTools, type ToolId } from "@/state/tools";
 import { useProject } from "@/state/project";
 
@@ -79,6 +80,11 @@ export default function App() {
       {/* floating inspect panel */}
       <div className="absolute right-4 top-1/2 -translate-y-1/2">
         <InspectPanel />
+      </div>
+
+      {/* floating timeline */}
+      <div className="pointer-events-none absolute bottom-4 left-1/2 flex -translate-x-1/2 justify-center">
+        <Timeline />
       </div>
     </div>
   );
