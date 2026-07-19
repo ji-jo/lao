@@ -1,0 +1,13 @@
+---
+description: lao project handbook — always read before working
+alwaysApply: true
+---
+
+Read `AGENTS.md` (environment traps, hard product constraints, commands, verification
+workflow), `docs/ARCHITECTURE.md` (data model, stores, engine), and `docs/ROADMAP.md`
+(parked features incl. the Animatron mode spec) before making changes.
+
+Critical: this drive is exFAT — use `npm install` for dependencies (bun install fails),
+but `bun run dev` / `bun test` for running. UI components only from the fluid functionalism
+shadcn registry; icons only from itshover; all panels float; keep `npx tsc -b` clean and
+`bun test` green before committing.

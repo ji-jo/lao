@@ -1,32 +1,37 @@
-# React + TypeScript + Vite
+# lao
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+A browser-based, hand-drawn animation studio. Draw with pressure brushes, animate
+frame-by-frame with onion skin and auto-key, let lines **boil** (seeded jitter, on 2s),
+preview at full quality, and export GIF / MP4 / WebM. Projects save offline as `.lao` files
+with IndexedDB autosave recovery.
 
-Currently, two official plugins are available:
+## Run
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install   # NOT bun install — this drive is exFAT, bun's lockfile write fails
+bun run dev   # dev server (vite)
+bun test      # unit tests
+npx tsc -b    # type-check
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Highlights
+
+- **Draw**: ink / pencil / marker / eraser (perfect-freehand, real pen pressure, synthesized
+  from velocity for mouse), Shift+drag for straight lines, undo/redo.
+- **Animate**: exposure-sheet timeline (keyframes + holds), duplicate-frame-forward loop,
+  onion skin, auto-key (off = static layer), editable fps, copy/paste strokes across frames.
+- **Edit**: select strokes (click / A / Ctrl+A), warp handles bend a line with smooth
+  falloff — nudge instead of redraw.
+- **Boil**: per-stroke seeded jitter, deterministic (preview == export), 3 variants on 2s.
+- **Preview**: Remotion Player playback, reference image/video attachment.
+- **Backgrounds**: color, linear/radial gradient, image (fill/cover/contain/crop), and
+  live WebGL shaders (@paper-design/shaders-react).
+- **Export**: MP4 (H.264) / WebM (VP9) via mediabunny (WebCodecs), GIF via gifenc,
+  resolution presets from 9:16 Reels to 2.39:1 Scope.
+
+## Docs
+
+- [AGENTS.md](AGENTS.md) — working agreements, environment traps, constraints (read first)
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — data model, stores, engine, surfaces
+- [docs/ROADMAP.md](docs/ROADMAP.md) — parked features (Animatron mode spec, shader line
+  effects, export fidelity) and known quirks
