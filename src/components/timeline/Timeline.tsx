@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { useProject } from "@/state/project";
 import { usePlayback } from "@/state/playback";
+import { playerRef } from "@/state/playerRef";
 import { resolveCelIndex } from "@/model/types";
 import PlayerIcon from "@/components/ui/player-icon";
 import RightChevron from "@/components/ui/right-chevron";
@@ -47,6 +48,7 @@ export function Timeline() {
   const layerIndex = useProject((s) => s.layerIndex);
   const playing = usePlayback((s) => s.playing);
   const onionSkin = usePlayback((s) => s.onionSkin);
+  const mode = usePlayback((s) => s.mode);
 
   const {
     setFrameIndex,
@@ -59,16 +61,27 @@ export function Timeline() {
     addLayer,
     toggleLayerVisible,
   } = useProject.getState();
-  const { togglePlaying, toggleOnionSkin } = usePlayback.getState();
+  const { toggleOnionSkin } = usePlayback.getState();
+
+  // preview mode delegates to the Remotion Player; draw mode uses an interval
+  function togglePlaying() {
+    const pb = usePlayback.getState();
+    if (pb.mode === "preview" && playerRef.current) {
+      if (playerRef.current.isPlaying()) playerRef.current.pause();
+      else playerRef.current.play();
+    } else {
+      pb.togglePlaying();
+    }
+  }
 
   // playback loop (edit-mode draft playback)
   useEffect(() => {
-    if (!playing) return;
+    if (!playing || mode !== "draw") return;
     const interval = window.setInterval(() => {
       useProject.getState().stepFrame(1);
     }, 1000 / project.fps);
     return () => window.clearInterval(interval);
-  }, [playing, project.fps]);
+  }, [playing, mode, project.fps]);
 
   // frame stepping shortcuts
   useEffect(() => {

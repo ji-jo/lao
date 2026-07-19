@@ -7,11 +7,17 @@ import LetterEIcon from "@/components/ui/letter-e-icon";
 import LetterPIcon from "@/components/ui/letter-p-icon";
 import ArrowBackUpIcon from "@/components/ui/arrow-back-up-icon";
 import HistoryCircleIcon from "@/components/ui/history-circle-icon";
+import PlayerIcon from "@/components/ui/player-icon";
+import CameraIcon from "@/components/ui/camera-icon";
 import { StageCanvas } from "@/components/StageCanvas";
+import { PreviewStage } from "@/components/PreviewStage";
 import { InspectPanel } from "@/components/panels/InspectPanel";
 import { Timeline } from "@/components/timeline/Timeline";
 import { useTools, type ToolId } from "@/state/tools";
 import { useProject } from "@/state/project";
+import { usePlayback } from "@/state/playback";
+import { useReference } from "@/state/reference";
+import { useRef } from "react";
 
 const TOOL_ITEMS = [
   { id: "select", label: "Select", icon: <MousePointer2Icon size={16} />, shortcut: "V" },
@@ -34,6 +40,9 @@ export default function App() {
   const setTool = useTools((s) => s.setTool);
   const undo = useProject((s) => s.undo);
   const redo = useProject((s) => s.redo);
+  const mode = usePlayback((s) => s.mode);
+  const setMode = usePlayback((s) => s.setMode);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -55,32 +64,69 @@ export default function App() {
 
   return (
     <div className="relative h-dvh w-dvw overflow-hidden bg-background text-foreground">
-      <StageCanvas />
+      {mode === "draw" ? <StageCanvas /> : <PreviewStage />}
 
-      {/* floating tool bar */}
-      <div className="absolute left-1/2 top-4 -translate-x-1/2">
-        <ExpandableActionBar
-          items={TOOL_ITEMS}
-          activeId={tool}
-          onAction={(item) => setTool(item.id as ToolId)}
-        />
-      </div>
-
-      {/* floating history bar */}
-      <div className="absolute right-4 top-4">
+      {/* floating mode bar */}
+      <div className="absolute left-4 top-4">
         <ExpandableActionBar
           size="sm"
+          activeId={mode}
           items={[
-            { id: "undo", label: "Undo", icon: <ArrowBackUpIcon size={14} />, shortcut: "Ctrl+Z", onClick: undo },
-            { id: "redo", label: "Redo", icon: <HistoryCircleIcon size={14} />, shortcut: "Ctrl+Shift+Z", onClick: redo },
+            { id: "draw", label: "Draw", icon: <PenIcon size={14} />, onClick: () => setMode("draw") },
+            { id: "preview", label: "Preview", icon: <PlayerIcon size={14} />, onClick: () => setMode("preview") },
+            ...(mode === "preview"
+              ? [{
+                  id: "reference",
+                  label: "Reference",
+                  icon: <CameraIcon size={14} />,
+                  onClick: () => fileInputRef.current?.click(),
+                }]
+              : []),
           ]}
+        />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,video/*"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) useReference.getState().setReference(file);
+            e.target.value = "";
+          }}
         />
       </div>
 
+      {/* floating tool bar (draw mode) */}
+      {mode === "draw" && (
+        <div className="absolute left-1/2 top-4 -translate-x-1/2">
+          <ExpandableActionBar
+            items={TOOL_ITEMS}
+            activeId={tool}
+            onAction={(item) => setTool(item.id as ToolId)}
+          />
+        </div>
+      )}
+
+      {/* floating history bar */}
+      {mode === "draw" && (
+        <div className="absolute right-4 top-4">
+          <ExpandableActionBar
+            size="sm"
+            items={[
+              { id: "undo", label: "Undo", icon: <ArrowBackUpIcon size={14} />, shortcut: "Ctrl+Z", onClick: undo },
+              { id: "redo", label: "Redo", icon: <HistoryCircleIcon size={14} />, shortcut: "Ctrl+Shift+Z", onClick: redo },
+            ]}
+          />
+        </div>
+      )}
+
       {/* floating inspect panel */}
-      <div className="absolute right-4 top-1/2 -translate-y-1/2">
-        <InspectPanel />
-      </div>
+      {mode === "draw" && (
+        <div className="absolute right-4 top-1/2 -translate-y-1/2">
+          <InspectPanel />
+        </div>
+      )}
 
       {/* floating timeline */}
       <div className="pointer-events-none absolute bottom-4 left-1/2 flex -translate-x-1/2 justify-center">
