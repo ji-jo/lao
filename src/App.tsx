@@ -10,8 +10,13 @@ import HistoryCircleIcon from "@/components/ui/history-circle-icon";
 import PlayerIcon from "@/components/ui/player-icon";
 import CameraIcon from "@/components/ui/camera-icon";
 import DownloadIcon from "@/components/ui/download-icon";
+import SaveIcon from "@/components/ui/save-icon";
+import UploadIcon from "@/components/ui/upload-icon";
 import { ExportDialog } from "@/components/panels/ExportDialog";
+import { saveLaoFile, openLaoFile, parseLao } from "@/file/laoFile";
+import { startAutosave, readAutosave, clearAutosave } from "@/file/autosave";
 import { useState } from "react";
+import type { Project } from "@/model/types";
 import { StageCanvas } from "@/components/StageCanvas";
 import { PreviewStage } from "@/components/PreviewStage";
 import { InspectPanel } from "@/components/panels/InspectPanel";
@@ -47,6 +52,30 @@ export default function App() {
   const setMode = usePlayback((s) => s.setMode);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  const [recovered, setRecovered] = useState<Project | null>(null);
+
+  async function handleSave() {
+    await saveLaoFile(useProject.getState().project);
+  }
+  async function handleOpen() {
+    const project = await openLaoFile();
+    if (project) useProject.getState().loadProject(project);
+  }
+
+  // autosave + crash recovery
+  useEffect(() => {
+    const stop = startAutosave();
+    void readAutosave().then((saved) => {
+      if (!saved?.project) return;
+      const hasArt = saved.project.layers.some((l) =>
+        l.frames.some((f) => f && f.strokes.length > 0),
+      );
+      const current = useProject.getState();
+      const untouched = current.undoStack.length === 0 && current.redoStack.length === 0;
+      if (hasArt && untouched) setRecovered(saved.project);
+    });
+    return stop;
+  }, []);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -59,6 +88,16 @@ export default function App() {
         else undo();
         return;
       }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        void saveLaoFile(useProject.getState().project);
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o") {
+        e.preventDefault();
+        void openLaoFile().then((p) => p && useProject.getState().loadProject(p));
+        return;
+      }
       const t = SHORTCUTS[e.key.toLowerCase()];
       if (t && !e.ctrlKey && !e.metaKey && !e.altKey) setTool(t);
     }
@@ -67,7 +106,18 @@ export default function App() {
   }, [setTool, undo, redo]);
 
   return (
-    <div className="relative h-dvh w-dvw overflow-hidden bg-background text-foreground">
+    <div
+      className="relative h-dvh w-dvw overflow-hidden bg-background text-foreground"
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        e.preventDefault();
+        const file = e.dataTransfer.files?.[0];
+        if (!file || !file.name.endsWith(".lao")) return;
+        void file.text().then((text) => {
+          useProject.getState().loadProject(parseLao(text));
+        });
+      }}
+    >
       {mode === "draw" ? <StageCanvas /> : <PreviewStage />}
 
       {/* floating mode bar */}
@@ -86,6 +136,18 @@ export default function App() {
                   onClick: () => fileInputRef.current?.click(),
                 }]
               : []),
+            {
+              id: "save",
+              label: "Save .lao",
+              icon: <SaveIcon size={14} />,
+              onClick: () => void handleSave(),
+            },
+            {
+              id: "open",
+              label: "Open",
+              icon: <UploadIcon size={14} />,
+              onClick: () => void handleOpen(),
+            },
             {
               id: "export",
               label: "Export",
@@ -142,6 +204,33 @@ export default function App() {
       <div className="pointer-events-none absolute bottom-4 left-1/2 flex -translate-x-1/2 justify-center">
         <Timeline />
       </div>
+
+      {/* autosave recovery banner */}
+      {recovered && (
+        <div className="absolute left-1/2 top-16 flex -translate-x-1/2 items-center gap-3 rounded-2xl border border-border bg-card/95 px-4 py-2.5 text-sm shadow-2xl backdrop-blur-xl">
+          <span className="text-muted-foreground">Recovered an unsaved session.</span>
+          <button
+            type="button"
+            className="font-semibold text-foreground hover:underline"
+            onClick={() => {
+              useProject.getState().loadProject(recovered);
+              setRecovered(null);
+            }}
+          >
+            Restore
+          </button>
+          <button
+            type="button"
+            className="text-muted-foreground hover:text-foreground"
+            onClick={() => {
+              void clearAutosave();
+              setRecovered(null);
+            }}
+          >
+            Discard
+          </button>
+        </div>
+      )}
 
       <ExportDialog open={exportOpen} onOpenChange={setExportOpen} />
     </div>

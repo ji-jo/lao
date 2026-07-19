@@ -34,6 +34,7 @@ interface ProjectState {
   addLayer: () => void;
   toggleLayerVisible: (layerIndex: number) => void;
 
+  loadProject: (project: Project) => void;
   undo: () => void;
   redo: () => void;
 }
@@ -185,6 +186,15 @@ export const useProject = create<ProjectState>((set, get) => {
       if (!layer) return;
       commit(replaceLayer(project, li, { ...layer, visible: !layer.visible }));
     },
+
+    loadProject: (project) =>
+      set({
+        project,
+        layerIndex: 0,
+        frameIndex: 0,
+        undoStack: [],
+        redoStack: [],
+      }),
 
     undo: () =>
       set((s) => {
