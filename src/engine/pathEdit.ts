@@ -45,6 +45,36 @@ export function warpPoints(
   });
 }
 
+/** Translate every point by (dx, dy). */
+export function translatePoints(
+  points: StrokePoint[],
+  dx: number,
+  dy: number,
+): StrokePoint[] {
+  if (dx === 0 && dy === 0) return points;
+  return points.map((p) => ({ ...p, x: p.x + dx, y: p.y + dy }));
+}
+
+/** Axis-aligned bbox of points in project space; null if empty. */
+export function pointsBounds(
+  points: StrokePoint[],
+): { minX: number; minY: number; maxX: number; maxY: number } | null {
+  if (!points.length) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of points) {
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
+  }
+  if (!Number.isFinite(minX)) return null;
+  return { minX, minY, maxX, maxY };
+}
+
 /** Shift+draw: replace the freehand path with an interpolated straight line. */
 export function straightLinePoints(from: StrokePoint, to: StrokePoint): StrokePoint[] {
   const STEPS = 24;

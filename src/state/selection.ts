@@ -9,9 +9,18 @@ interface SelectionState {
   toggle: (id: string) => void;
   clear: () => void;
   selectAll: () => void;
+  /** drop ids that no longer exist in the active cel */
+  prune: () => void;
 }
 
-export const useSelection = create<SelectionState>((set) => ({
+function currentCelStrokeIds(): string[] {
+  const p = useProject.getState();
+  const layer = p.project.layers[p.layerIndex];
+  const cel = layer ? resolveCel(layer, p.frameIndex) : null;
+  return cel ? cel.strokes.map((s) => s.id) : [];
+}
+
+export const useSelection = create<SelectionState>((set, get) => ({
   ids: [],
   set: (ids) => set({ ids }),
   toggle: (id) =>
@@ -19,11 +28,11 @@ export const useSelection = create<SelectionState>((set) => ({
       ids: s.ids.includes(id) ? s.ids.filter((x) => x !== id) : [...s.ids, id],
     })),
   clear: () => set({ ids: [] }),
-  selectAll: () => {
-    const p = useProject.getState();
-    const layer = p.project.layers[p.layerIndex];
-    const cel = layer ? resolveCel(layer, p.frameIndex) : null;
-    set({ ids: cel ? cel.strokes.map((s) => s.id) : [] });
+  selectAll: () => set({ ids: currentCelStrokeIds() }),
+  prune: () => {
+    const valid = new Set(currentCelStrokeIds());
+    const next = get().ids.filter((id) => valid.has(id));
+    if (next.length !== get().ids.length) set({ ids: next });
   },
 }));
 
@@ -31,5 +40,9 @@ export const useSelection = create<SelectionState>((set) => ({
 useProject.subscribe((s, prev) => {
   if (s.frameIndex !== prev.frameIndex || s.layerIndex !== prev.layerIndex) {
     useSelection.getState().clear();
+    return;
+  }
+  if (s.project !== prev.project) {
+    useSelection.getState().prune();
   }
 });

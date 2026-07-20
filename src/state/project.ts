@@ -7,10 +7,19 @@ import {
   type Layer,
   type Project,
   type Stroke,
+  type StrokeClip,
 } from "@/model/types";
 import { useTools } from "@/state/tools";
+import { usePlayback } from "@/state/playback";
+import { translatePoints } from "@/engine/pathEdit";
+import {
+  allProjectStrokes,
+  projectClipEndMs,
+  strokeDurationMs,
+} from "@/engine/strokeProgress";
 
 const MAX_UNDO = 100;
+const MIN_CLIP_MS = 80;
 
 interface ProjectState {
   project: Project;
@@ -28,16 +37,27 @@ interface ProjectState {
   pasteStrokes: (strokes: Stroke[]) => string[];
   deleteStrokes: (ids: string[]) => void;
   replaceStrokePoints: (strokeId: string, points: Stroke["points"]) => void;
+  /** translate many strokes in one undo step */
+  translateStrokes: (ids: string[], dx: number, dy: number) => void;
+  updateStrokeClip: (strokeId: string, clip: StrokeClip) => void;
   addKeyframe: () => void;
   duplicateFrameForward: () => void;
   deleteKeyframe: () => void;
+  /** Grow/shrink timeline length by delta (negative shrinks; min 1). */
   extendTimeline: (frames: number) => void;
+  /** Remove one exposure index from every layer and shrink frameCount. */
+  removeFrameAt: (index: number) => void;
   setProjectSettings: (
     patch: Partial<
-      Pick<Project, "name" | "width" | "height" | "fps" | "frameCount" | "background">
+      Pick<
+        Project,
+        "name" | "width" | "height" | "fps" | "frameCount" | "background" | "workflow"
+      >
     >,
   ) => void;
   addLayer: () => void;
+  deleteLayer: (layerIndex: number) => void;
+  reorderLayer: (from: number, to: number) => void;
   toggleLayerVisible: (layerIndex: number) => void;
 
   loadProject: (project: Project) => void;
@@ -60,6 +80,29 @@ function emptyCel(): Frame {
   return { id: crypto.randomUUID(), strokes: [] };
 }
 
+function cloneCel(cel: Frame): Frame {
+  return {
+    id: crypto.randomUUID(),
+    strokes: cel.strokes.map((st) => ({
+      ...st,
+      id: crypto.randomUUID(),
+      points: st.points.map((p) => ({ ...p })),
+      clip: st.clip ? { ...st.clip } : undefined,
+    })),
+  };
+}
+
+function ensureAnimatronLength(project: Project): Project {
+  const endMs = projectClipEndMs(allProjectStrokes(project.layers));
+  const need = Math.max(project.frameCount, Math.ceil(endMs / 1000 * project.fps) + 1);
+  if (need === project.frameCount) return project;
+  return { ...project, frameCount: need };
+}
+
+function nextAnimatronClipStart(project: Project): number {
+  return projectClipEndMs(allProjectStrokes(project.layers));
+}
+
 export const useProject = create<ProjectState>((set, get) => {
   /** history-recording update */
   function commit(next: Project) {
@@ -68,6 +111,62 @@ export const useProject = create<ProjectState>((set, get) => {
       undoStack: [...s.undoStack.slice(-MAX_UNDO + 1), s.project],
       redoStack: [],
     }));
+  }
+
+  function addStrokeAnimatron(stroke: Stroke) {
+    const s = get();
+    let { project } = s;
+    const { autoKey } = useTools.getState();
+    const durationMs = Math.max(MIN_CLIP_MS, strokeDurationMs(stroke));
+    const startMs = autoKey ? nextAnimatronClipStart(project) : 0;
+    const clipped: Stroke = {
+      ...stroke,
+      clip: { startMs, durationMs },
+    };
+
+    const active = project.layers[s.layerIndex];
+    const activeCel = active?.frames.find((f) => f) ?? null;
+    const activeEmpty = !!active && (!activeCel || activeCel.strokes.length === 0);
+
+    if (activeEmpty && active) {
+      // reuse the empty active layer for the first path
+      const layer: Layer = {
+        ...active,
+        name: active.name.startsWith("Layer") ? `Path 1` : active.name,
+        isStatic: false,
+        frames: [{ id: crypto.randomUUID(), strokes: [clipped] }],
+      };
+      project = ensureAnimatronLength({
+        ...replaceLayer(project, s.layerIndex, layer),
+        workflow: "animatron",
+      });
+      commit(project);
+      usePlayback.getState().setWorkflow("animatron");
+      return;
+    }
+
+    // insert new layer immediately below the previous path's layer
+    const insertAt = Math.min(s.layerIndex + 1, project.layers.length);
+    const layer: Layer = {
+      id: crypto.randomUUID(),
+      name: `Path ${project.layers.length + 1}`,
+      visible: true,
+      isStatic: false,
+      frames: [{ id: crypto.randomUUID(), strokes: [clipped] }],
+    };
+    const layers = [
+      ...project.layers.slice(0, insertAt),
+      layer,
+      ...project.layers.slice(insertAt),
+    ];
+    project = ensureAnimatronLength({
+      ...project,
+      layers,
+      workflow: "animatron",
+    });
+    commit(project);
+    set({ layerIndex: insertAt });
+    usePlayback.getState().setWorkflow("animatron");
   }
 
   return {
@@ -88,6 +187,11 @@ export const useProject = create<ProjectState>((set, get) => {
       }),
 
     addStroke: (stroke) => {
+      if (usePlayback.getState().workflow === "animatron") {
+        addStrokeAnimatron(stroke);
+        return;
+      }
+
       const s = get();
       const { autoKey } = useTools.getState();
       let { project, layerIndex, frameIndex } = s;
@@ -120,7 +224,13 @@ export const useProject = create<ProjectState>((set, get) => {
         if (layer.isStatic) {
           cel = emptyCel();
         } else if (autoKey || resolveCelIndex(layer, frameIndex) === null) {
-          cel = emptyCel();
+          // seed from held cel so prior art stays (flipbook expectation)
+          const heldIdx = resolveCelIndex(layer, frameIndex);
+          if (heldIdx !== null && autoKey) {
+            cel = cloneCel(layer.frames[heldIdx]!);
+          } else {
+            cel = emptyCel();
+          }
         } else {
           // draw onto the held cel (extends the exposure's artwork)
           celIndex = resolveCelIndex(layer, frameIndex)!;
@@ -176,6 +286,44 @@ export const useProject = create<ProjectState>((set, get) => {
       commit(replaceLayer(project, layerIndex, setCel(layer, celIndex, { ...cel, strokes })));
     },
 
+    translateStrokes: (ids, dx, dy) => {
+      if (!ids.length || (dx === 0 && dy === 0)) return;
+      const { project, layerIndex, frameIndex } = get();
+      const layer = project.layers[layerIndex];
+      if (!layer) return;
+      const celIndex = resolveCelIndex(layer, layer.isStatic ? 0 : frameIndex);
+      if (celIndex === null) return;
+      const cel = layer.frames[celIndex]!;
+      const idSet = new Set(ids);
+      let changed = false;
+      const strokes = cel.strokes.map((s) => {
+        if (!idSet.has(s.id)) return s;
+        changed = true;
+        return { ...s, points: translatePoints(s.points, dx, dy) };
+      });
+      if (!changed) return;
+      commit(replaceLayer(project, layerIndex, setCel(layer, celIndex, { ...cel, strokes })));
+    },
+
+    updateStrokeClip: (strokeId, clip) => {
+      const { project } = get();
+      let found = false;
+      const layers = project.layers.map((layer) => {
+        const frames = layer.frames.map((cel) => {
+          if (!cel) return cel;
+          const strokes = cel.strokes.map((s) => {
+            if (s.id !== strokeId) return s;
+            found = true;
+            return { ...s, clip: { ...clip } };
+          });
+          return strokes === cel.strokes ? cel : { ...cel, strokes };
+        });
+        return { ...layer, frames };
+      });
+      if (!found) return;
+      commit(ensureAnimatronLength({ ...project, layers }));
+    },
+
     addKeyframe: () => {
       const { project, layerIndex, frameIndex } = get();
       const layer = project.layers[layerIndex];
@@ -183,7 +331,7 @@ export const useProject = create<ProjectState>((set, get) => {
       commit(replaceLayer(project, layerIndex, setCel(layer, frameIndex, emptyCel())));
     },
 
-    /** duplicate the current cel onto the next frame and move there — the core draw→flip→fix loop */
+    /** duplicate the current cel onto the next frame and move there — the core draw→flip→draw loop */
     duplicateFrameForward: () => {
       const s = get();
       const { project, layerIndex, frameIndex } = s;
@@ -191,9 +339,7 @@ export const useProject = create<ProjectState>((set, get) => {
       if (!layer || layer.isStatic) return;
       const cel = resolveCel(layer, frameIndex);
       const target = frameIndex + 1;
-      const copy: Frame = cel
-        ? { id: crypto.randomUUID(), strokes: cel.strokes.map((st) => ({ ...st, id: crypto.randomUUID() })) }
-        : emptyCel();
+      const copy: Frame = cel ? cloneCel(cel) : emptyCel();
       let next = replaceLayer(project, layerIndex, setCel(layer, target, copy));
       if (target >= next.frameCount) next = { ...next, frameCount: target + 1 };
       commit(next);
@@ -209,8 +355,47 @@ export const useProject = create<ProjectState>((set, get) => {
     },
 
     extendTimeline: (frames) => {
-      const { project } = get();
-      commit({ ...project, frameCount: project.frameCount + frames });
+      const { project, frameIndex } = get();
+      if (frames === 0) return;
+      const nextCount = Math.max(1, project.frameCount + frames);
+      if (nextCount === project.frameCount) return;
+
+      let next: Project = { ...project, frameCount: nextCount };
+      if (nextCount < project.frameCount) {
+        next = {
+          ...next,
+          layers: next.layers.map((layer) =>
+            layer.isStatic
+              ? layer
+              : { ...layer, frames: layer.frames.slice(0, nextCount) },
+          ),
+        };
+      }
+      commit(next);
+      if (frameIndex >= nextCount) {
+        set({ frameIndex: nextCount - 1 });
+      }
+    },
+
+    removeFrameAt: (index) => {
+      const { project, frameIndex } = get();
+      if (project.frameCount <= 1) return;
+      if (index < 0 || index >= project.frameCount) return;
+
+      const layers = project.layers.map((layer) => {
+        if (layer.isStatic) return layer;
+        const frames = layer.frames.slice();
+        if (index < frames.length) frames.splice(index, 1);
+        return { ...layer, frames };
+      });
+      const nextCount = project.frameCount - 1;
+      commit({ ...project, layers, frameCount: nextCount });
+      set({
+        frameIndex: Math.min(
+          frameIndex > index ? frameIndex - 1 : frameIndex,
+          nextCount - 1,
+        ),
+      });
     },
 
     setProjectSettings: (patch) => {
@@ -231,6 +416,28 @@ export const useProject = create<ProjectState>((set, get) => {
       set({ layerIndex: project.layers.length });
     },
 
+    deleteLayer: (li) => {
+      const { project, layerIndex } = get();
+      if (project.layers.length <= 1) return;
+      if (li < 0 || li >= project.layers.length) return;
+      const layers = project.layers.filter((_, i) => i !== li);
+      commit({ ...project, layers });
+      set({
+        layerIndex: Math.min(layerIndex >= li ? Math.max(0, layerIndex - 1) : layerIndex, layers.length - 1),
+      });
+    },
+
+    reorderLayer: (from, to) => {
+      const { project } = get();
+      if (from === to || from < 0 || to < 0 || from >= project.layers.length || to >= project.layers.length)
+        return;
+      const layers = project.layers.slice();
+      const [item] = layers.splice(from, 1);
+      layers.splice(to, 0, item);
+      commit({ ...project, layers });
+      set({ layerIndex: to });
+    },
+
     toggleLayerVisible: (li) => {
       const { project } = get();
       const layer = project.layers[li];
@@ -238,14 +445,16 @@ export const useProject = create<ProjectState>((set, get) => {
       commit(replaceLayer(project, li, { ...layer, visible: !layer.visible }));
     },
 
-    loadProject: (project) =>
+    loadProject: (project) => {
       set({
         project,
         layerIndex: 0,
         frameIndex: 0,
         undoStack: [],
         redoStack: [],
-      }),
+      });
+      usePlayback.getState().setWorkflow(project.workflow ?? "stopmotion");
+    },
 
     undo: () =>
       set((s) => {

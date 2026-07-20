@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
-import { Player } from "@remotion/player";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Player, type PlayerRef } from "@remotion/player";
 import { useProject } from "@/state/project";
 import { usePlayback } from "@/state/playback";
 import { useReference } from "@/state/reference";
@@ -14,8 +14,14 @@ export function PreviewStage() {
   const frameIndex = useProject((s) => s.frameIndex);
   const reference = useReference();
   const seekGuard = useRef(false);
+  const [playerReady, setPlayerReady] = useState(false);
 
-  // follow the Player's clock in our store so the timeline playhead tracks it
+  const attachPlayer = useCallback((instance: PlayerRef | null) => {
+    playerRef.current = instance;
+    setPlayerReady(!!instance);
+  }, []);
+
+  // attach listeners whenever the Player instance is ready
   useEffect(() => {
     const player = playerRef.current;
     if (!player) return;
@@ -29,12 +35,16 @@ export function PreviewStage() {
     player.addEventListener("frameupdate", onFrame);
     player.addEventListener("play", onPlay);
     player.addEventListener("pause", onPause);
+    if (player.getCurrentFrame() !== frameIndex) {
+      player.seekTo(frameIndex);
+    }
     return () => {
       player.removeEventListener("frameupdate", onFrame);
       player.removeEventListener("play", onPlay);
       player.removeEventListener("pause", onPause);
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-bind when Player mounts
+  }, [playerReady]);
 
   // timeline scrubbing → seek the player
   useEffect(() => {
@@ -45,21 +55,23 @@ export function PreviewStage() {
   }, [frameIndex]);
 
   return (
-    <div className="absolute inset-0 grid place-items-center bg-[#0b0b0d] p-6 pb-32">
+    <div className="absolute inset-0 bg-[#0b0b0d] p-6 pb-32">
+      {/* Remotion fit-container: absolute inset + aspect-ratio; width-only on Player */}
       <div
-        className="relative max-h-full max-w-full overflow-hidden rounded-lg border border-border shadow-2xl"
+        className="absolute inset-6 bottom-32 m-auto max-h-full max-w-full overflow-hidden rounded-lg border border-border shadow-2xl"
         style={{ aspectRatio: `${project.width} / ${project.height}` }}
       >
         <Player
-          ref={playerRef}
+          ref={attachPlayer}
           component={LaoComposition}
           inputProps={{ project }}
           durationInFrames={Math.max(project.frameCount, 1)}
           compositionWidth={project.width}
           compositionHeight={project.height}
           fps={project.fps}
+          initialFrame={frameIndex}
           loop
-          style={{ width: "100%", height: "100%" }}
+          style={{ width: "100%" }}
         />
       </div>
 

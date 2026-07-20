@@ -1,5 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ExpandableActionBar } from "@/components/motion/expandable-action-bar";
+import { WorkflowBar, FLOAT_BAR_H } from "@/components/chrome/WorkflowBar";
 import MousePointer2Icon from "@/components/ui/mouse-pointer-2-icon";
 import PenIcon from "@/components/ui/pen-icon";
 import PaintIcon from "@/components/ui/paint-icon";
@@ -7,15 +8,10 @@ import LetterEIcon from "@/components/ui/letter-e-icon";
 import LetterPIcon from "@/components/ui/letter-p-icon";
 import ArrowBackUpIcon from "@/components/ui/arrow-back-up-icon";
 import HistoryCircleIcon from "@/components/ui/history-circle-icon";
-import PlayerIcon from "@/components/ui/player-icon";
 import CameraIcon from "@/components/ui/camera-icon";
-import DownloadIcon from "@/components/ui/download-icon";
-import SaveIcon from "@/components/ui/save-icon";
-import UploadIcon from "@/components/ui/upload-icon";
 import { ExportDialog } from "@/components/panels/ExportDialog";
 import { saveLaoFile, openLaoFile, parseLao } from "@/file/laoFile";
 import { startAutosave, readAutosave, clearAutosave } from "@/file/autosave";
-import { useState } from "react";
 import type { Project } from "@/model/types";
 import { StageCanvas } from "@/components/StageCanvas";
 import { PreviewStage } from "@/components/PreviewStage";
@@ -26,17 +22,17 @@ import { useProject } from "@/state/project";
 import { usePlayback } from "@/state/playback";
 import { useReference } from "@/state/reference";
 import { useSelection } from "@/state/selection";
+import { useViewport } from "@/state/viewport";
 import { copyStrokes, readClipboard } from "@/state/clipboard";
 import { resolveCel } from "@/model/types";
 import { ShaderSnapshotMount } from "@/components/ShaderBackground";
-import { useRef } from "react";
 
 const TOOL_ITEMS = [
-  { id: "select", label: "Select", icon: <MousePointer2Icon size={16} />, shortcut: "V" },
-  { id: "ink", label: "Ink", icon: <PenIcon size={16} />, shortcut: "B" },
-  { id: "pencil", label: "Pencil", icon: <LetterPIcon size={16} />, shortcut: "P" },
-  { id: "marker", label: "Marker", icon: <PaintIcon size={16} />, shortcut: "M" },
-  { id: "eraser", label: "Eraser", icon: <LetterEIcon size={16} />, shortcut: "E" },
+  { id: "select", label: "Select", icon: <MousePointer2Icon size={14} />, shortcut: "V" },
+  { id: "ink", label: "Ink", icon: <PenIcon size={14} />, shortcut: "B" },
+  { id: "pencil", label: "Pencil", icon: <LetterPIcon size={14} />, shortcut: "P" },
+  { id: "marker", label: "Marker", icon: <PaintIcon size={14} />, shortcut: "M" },
+  { id: "eraser", label: "Eraser", icon: <LetterEIcon size={14} />, shortcut: "E" },
 ];
 
 const SHORTCUTS: Record<string, ToolId> = {
@@ -52,8 +48,7 @@ export default function App() {
   const setTool = useTools((s) => s.setTool);
   const undo = useProject((s) => s.undo);
   const redo = useProject((s) => s.redo);
-  const mode = usePlayback((s) => s.mode);
-  const setMode = usePlayback((s) => s.setMode);
+  const stage = usePlayback((s) => s.stage);
   const background = useProject((s) => s.project.background);
   const aspect = useProject((s) => s.project.width / s.project.height);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -88,6 +83,26 @@ export default function App() {
       const target = e.target as HTMLElement;
       if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
         return;
+
+      // zoom: Ctrl/Cmd + / - / = / 0
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === "+" || e.key === "=") {
+          e.preventDefault();
+          useViewport.getState().zoomIn();
+          return;
+        }
+        if (e.key === "-" || e.key === "_") {
+          e.preventDefault();
+          useViewport.getState().zoomOut();
+          return;
+        }
+        if (e.key === "0") {
+          e.preventDefault();
+          useViewport.getState().resetZoom();
+          return;
+        }
+      }
+
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
         if (e.shiftKey) redo();
@@ -143,7 +158,6 @@ export default function App() {
       }
       const k = e.key.toLowerCase();
       if (k === "a") {
-        // select all strokes in the current cel (and switch to the select tool)
         useSelection.getState().selectAll();
         useTools.getState().setTool("select");
         return;
@@ -172,99 +186,103 @@ export default function App() {
         });
       }}
     >
-      {mode === "draw" ? <StageCanvas /> : <PreviewStage />}
+      {stage === "draw" ? <StageCanvas /> : <PreviewStage />}
 
-      {/* hidden shader instance for export snapshots */}
       {background?.kind === "shader" && (
         <ShaderSnapshotMount background={background} aspect={aspect} />
       )}
 
-      {/* floating mode + tool cluster (mode bar sits left of the draw panel) */}
-      <div className="absolute left-1/2 top-4 flex -translate-x-1/2 items-start gap-2">
-        <ExpandableActionBar
-          size="sm"
-          activeId={mode}
-          items={[
-            { id: "draw", label: "Draw", icon: <PenIcon size={14} />, onClick: () => setMode("draw") },
-            { id: "preview", label: "Preview", icon: <PlayerIcon size={14} />, onClick: () => setMode("preview") },
-            ...(mode === "preview"
-              ? [{
-                  id: "reference",
-                  label: "Reference",
-                  icon: <CameraIcon size={14} />,
-                  onClick: () => fileInputRef.current?.click(),
-                }]
-              : []),
-            {
-              id: "save",
-              label: "Save .lao",
-              icon: <SaveIcon size={14} />,
-              onClick: () => void handleSave(),
-            },
-            {
-              id: "open",
-              label: "Open",
-              icon: <UploadIcon size={14} />,
-              onClick: () => void handleOpen(),
-            },
-            {
-              id: "export",
-              label: "Export",
-              icon: <DownloadIcon size={14} />,
-              onClick: () => setExportOpen(true),
-            },
-          ]}
+      {/* top-left: workflow / File */}
+      <div className="absolute left-4 top-4 z-20">
+        <WorkflowBar
+          onSave={() => void handleSave()}
+          onOpen={() => void handleOpen()}
+          onExport={() => setExportOpen(true)}
         />
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*,video/*"
-          className="hidden"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) useReference.getState().setReference(file);
-            e.target.value = "";
-          }}
-        />
+      </div>
 
-        {/* draw panel */}
-        {mode === "draw" && (
+      {/* top-center: tools */}
+      {stage === "draw" && (
+        <div
+          className="absolute left-1/2 top-4 z-20 flex -translate-x-1/2 items-center"
+          style={{ height: FLOAT_BAR_H }}
+        >
           <ExpandableActionBar
+            size="sm"
             items={TOOL_ITEMS}
             activeId={tool}
             onAction={(item) => setTool(item.id as ToolId)}
+            className="!min-h-[42px] h-[42px]"
           />
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* floating history bar */}
-      {mode === "draw" && (
+      {stage === "preview" && (
+        <div className="absolute left-1/2 top-4 z-20 -translate-x-1/2">
+          <ExpandableActionBar
+            size="sm"
+            items={[
+              {
+                id: "reference",
+                label: "Reference",
+                icon: <CameraIcon size={14} />,
+                onClick: () => fileInputRef.current?.click(),
+              },
+            ]}
+            className="!min-h-[42px] h-[42px]"
+          />
+        </div>
+      )}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*,video/*"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) useReference.getState().setReference(file);
+          e.target.value = "";
+        }}
+      />
+
+      {stage === "draw" && (
         <div className="absolute right-4 top-4">
           <ExpandableActionBar
             size="sm"
             items={[
-              { id: "undo", label: "Undo", icon: <ArrowBackUpIcon size={14} />, shortcut: "Ctrl+Z", onClick: undo },
-              { id: "redo", label: "Redo", icon: <HistoryCircleIcon size={14} />, shortcut: "Ctrl+Shift+Z", onClick: redo },
+              {
+                id: "undo",
+                label: "Undo",
+                icon: <ArrowBackUpIcon size={14} />,
+                shortcut: "Ctrl+Z",
+                onClick: undo,
+              },
+              {
+                id: "redo",
+                label: "Redo",
+                icon: <HistoryCircleIcon size={14} />,
+                shortcut: "Ctrl+Shift+Z",
+                onClick: redo,
+              },
             ]}
+            className="!min-h-[42px] h-[42px]"
           />
         </div>
       )}
 
-      {/* floating inspect panel */}
-      {mode === "draw" && (
-        <div className="absolute right-4 top-1/2 -translate-y-1/2">
+      {/* Settings: mid-center-right, expands left */}
+      {stage === "draw" && (
+        <div className="absolute right-4 top-1/2 z-20 -translate-y-1/2">
           <InspectPanel />
         </div>
       )}
 
-      {/* floating timeline */}
       <div className="pointer-events-none absolute bottom-4 left-1/2 flex -translate-x-1/2 justify-center">
         <Timeline />
       </div>
 
-      {/* autosave recovery banner */}
       {recovered && (
-        <div className="absolute left-1/2 top-16 flex -translate-x-1/2 items-center gap-3 rounded-2xl border border-border bg-card/95 px-4 py-2.5 text-sm shadow-2xl backdrop-blur-xl">
+        <div className="absolute left-1/2 top-16 z-30 flex -translate-x-1/2 items-center gap-3 rounded-2xl border border-border bg-card/95 px-4 py-2.5 text-sm shadow-2xl backdrop-blur-xl">
           <span className="text-muted-foreground">Recovered an unsaved session.</span>
           <button
             type="button"

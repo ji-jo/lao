@@ -11,6 +11,13 @@ export interface StrokePoint {
   t: number;
 }
 
+export interface StrokeClip {
+  /** ms from composition start when this path begins */
+  startMs: number;
+  /** ms duration of the draw-on / hold window */
+  durationMs: number;
+}
+
 export interface Stroke {
   id: string;
   brush: BrushKind;
@@ -22,6 +29,8 @@ export interface Stroke {
   seed: number;
   /** whether this stroke boils in animate/preview mode */
   jitter: boolean;
+  /** Animatron clip timing (ignored in stop-motion paint) */
+  clip?: StrokeClip;
 }
 
 export interface Frame {
@@ -50,6 +59,8 @@ export type Background =
   | { kind: "image"; src: string; fit: BackgroundFit }
   | { kind: "shader"; preset: ShaderPresetId; colors: string[]; speed: number };
 
+export type ProjectWorkflow = "stopmotion" | "animatron";
+
 export interface Project {
   version: 1;
   name: string;
@@ -60,6 +71,8 @@ export interface Project {
   frameCount: number;
   layers: Layer[];
   background?: Background;
+  /** which editor workflow owns this document; default stopmotion when missing */
+  workflow?: ProjectWorkflow;
 }
 
 /**

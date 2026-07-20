@@ -215,3 +215,25 @@
     @apply font-sans;
     }
 }
+
+/* react-custom-scroll — match dark floating chrome */
+.lao-custom-scroll .rcs-custom-scrollbar {
+  width: 10px;
+  right: 2px;
+}
+
+.lao-custom-scroll .rcs-inner-handle,
+.lao-custom-scroll .lao-scroll-handle {
+  background: color-mix(in oklch, var(--muted-foreground) 45%, transparent);
+  border-radius: 999px;
+  width: 6px;
+  margin-inline: auto;
+  transition: background 120ms ease;
+}
+
+.lao-custom-scroll .rcs-custom-scrollbar:hover .rcs-inner-handle,
+.lao-custom-scroll .rcs-custom-scrollbar:hover .lao-scroll-handle,
+.lao-custom-scroll.rcs-scroll-handle-dragged .rcs-inner-handle,
+.lao-custom-scroll.rcs-scroll-handle-dragged .lao-scroll-handle {
+  background: color-mix(in oklch, var(--foreground) 55%, transparent);
+}

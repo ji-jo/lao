@@ -70,12 +70,13 @@ const LABEL_TRANSITION: Transition = {
 };
 
 const SIZE_CLASS: Record<ExpandableActionBarSize, string> = {
-  sm: "min-h-9 gap-1 p-1 text-xs",
-  md: "min-h-11 gap-1.5 p-1.5 text-sm",
+  /** 42px shell — matches WorkflowBar / Settings chip */
+  sm: "h-[42px] min-h-[42px] gap-1 p-1 text-xs",
+  md: "h-[42px] min-h-[42px] gap-1.5 p-1.5 text-sm",
 };
 
 const ITEM_SIZE_CLASS: Record<ExpandableActionBarSize, string> = {
-  sm: "h-7 min-w-7 px-1.5",
+  sm: "h-8 min-w-8 px-2",
   md: "h-8 min-w-8 px-2",
 };
 
@@ -229,7 +230,7 @@ export function ExpandableActionBar({
               >
                 {isHighlighted ? (
                   <motion.span
-                    layoutId="action-bar-highlight"
+                    layoutId={`${layoutId}-highlight`}
                     className="absolute inset-0 -z-10 rounded-full bg-primary/[0.07]"
                     transition={ITEM_TRANSITION}
                   />
