@@ -32,17 +32,10 @@ bun run build        # tsc -b && vite build
 
 ## Hard product constraints (D's explicit decisions — do not violate)
 
-1. **UI components ONLY from fluid + beui.** Both registries are wired into
-   `components.json`, so use the short form:
-   `npx shadcn@latest add -y -o @fluid/<name>` · `npx shadcn@latest add -y -o @beui/<name>`
-   (indexes: `https://www.fluidfunctionalism.com/r/registry.json`,
-   `https://beui.dev/r/registry.json` — 71 beui components).
-   Installed fluid: button, slider, tooltip, dialog, select, switch, color-picker,
-   input-group, dropdown, scroll-area, tabs, custom-scroll.
-   Installed beui: dock, dynamic-island, command-palette, expandable-tabs, morphing-modal,
-   animated-toast-stack, expandable-action-bar, overflow-actions, popover, range-slider.
-   The beui MCP (`claude mcp add --transport http beui https://mcp.beui.dev/mcp`) is only
-   for docs/search — it is NOT required to install components.
+1. **UI components ONLY from the fluid functionalism registry:**
+   `npx shadcn@latest add https://www.fluidfunctionalism.com/r/<name>.json -y -o`
+   (index at `/r/registry.json`; already installed: button, slider, tooltip, dialog, select,
+   switch, color-picker, input-group, dropdown, scroll-area).
 2. **Icons ONLY from itshover:** `npx shadcn@latest add https://itshover.com/r/<name>-icon.json`.
    264 icons; there is **no eraser/pause/plus/undo icon** — use substitutes (letter-e-icon,
    letter-p-icon, x-icon rotated, arrow-back-up-icon, history-circle-icon, stack-3-icon…).

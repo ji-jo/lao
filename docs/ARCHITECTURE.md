@@ -70,21 +70,11 @@ powers boil, warp editing, copy/paste, and clean re-rendering at any resolution.
   selection overlay + warp handles + **group move**, backgrounds, draft compositing.
 - `remotion/LaoComposition.tsx` + `components/PreviewStage.tsx` — full-quality playback via
   `@remotion/player` (fit-container sizing + callback `playerRef`); timeline ⟷ player sync.
-- `components/timeline/Timeline.tsx` — floating transport; Draw/Preview stage toggles;
-  **frame count is a single slider** (drag right adds frames, left trims from the end,
-  1–240) — no +/− steppers; stop-motion grid **or** `ClipTimeline` for Animatron.
-- `components/chrome/` — the floating UI, all beui + fluid:
-  - `WorkspaceTabs` (`@beui/expandable-tabs`, top-left): Mode panel (workflow + stage)
-    and File panel (Save / Open / Export).
-  - `StatusIsland` (`@beui/dynamic-island`, top-center): compact pill = tool · frame · fps;
-    unfurls into Brush (color/size/boil/auto-key) and Canvas (background + size) views.
-  - `ToolDock` (`@beui/dock`, bottom, stacked above the timeline): tools, frame ops
-    (duplicate / empty cel / onion), undo-redo.
-  - `CommandBar` (`@beui/command-palette`): Ctrl+K over every action.
-  - `Toasts` (`@beui/animated-toast-stack`) fed by the `state/toasts.ts` bridge so
-    non-React code can notify; autosave recovery is a toast action.
-- `components/panels/ExportDialog` — `@beui/morphing-modal` + fluid Button/Tabs
-  (Video Type MP4/WebM/GIF, aspect/res/fps chips).
+- `components/timeline/Timeline.tsx` — floating transport; Draw/Preview stage toggles
+  (Expand icon); range extend 1–120; stop-motion grid **or** `ClipTimeline` for Animatron.
+- Top-left `@beui/overflow-actions`: Stop Motion / Animatron + File overflow (Save/Open/Extract).
+- `components/panels/` — horizontal auto-collapsing InspectPanel; ExportDialog (Video Type
+  MP4/WebM/GIF, aspect/res/fps chips, Soft Extrude CTA).
 - `components/ShaderBackground.tsx` — 6 paper-design shader presets + hidden snapshot mount.
 
 ## Files & persistence — `src/file/`
