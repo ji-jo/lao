@@ -1,13 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ExpandableActionBar } from "@/components/motion/expandable-action-bar";
-import { WorkflowBar, FLOAT_BAR_H } from "@/components/chrome/WorkflowBar";
-import MousePointer2Icon from "@/components/ui/mouse-pointer-2-icon";
-import { PenNib } from "reicon-react";
-import PaintIcon from "@/components/ui/paint-icon";
-import LetterEIcon from "@/components/ui/letter-e-icon";
-import LetterPIcon from "@/components/ui/letter-p-icon";
-import ArrowBackUpIcon from "@/components/ui/arrow-back-up-icon";
-import HistoryCircleIcon from "@/components/ui/history-circle-icon";
+import { WorkflowBar } from "@/components/chrome/WorkflowBar";
 import CameraIcon from "@/components/ui/camera-icon";
 import { ExportDialog } from "@/components/panels/ExportDialog";
 import { saveLaoFile, openLaoFile, parseLao } from "@/file/laoFile";
@@ -15,7 +8,8 @@ import { startAutosave, readAutosave, clearAutosave } from "@/file/autosave";
 import type { Project } from "@/model/types";
 import { StageCanvas } from "@/components/StageCanvas";
 import { PreviewStage } from "@/components/PreviewStage";
-import { InspectPanel } from "@/components/panels/InspectPanel";
+import { StatusIsland } from "@/components/chrome/StatusIsland";
+import { ToolDock } from "@/components/chrome/ToolDock";
 import { Timeline } from "@/components/timeline/Timeline";
 import { useTools, type ToolId } from "@/state/tools";
 import { useProject } from "@/state/project";
@@ -27,14 +21,6 @@ import { copyStrokes, readClipboard } from "@/state/clipboard";
 import { resolveCel } from "@/model/types";
 import { ShaderSnapshotMount } from "@/components/ShaderBackground";
 
-const TOOL_ITEMS = [
-  { id: "select", label: "Select", icon: <MousePointer2Icon size={14} />, shortcut: "V" },
-  { id: "ink", label: "Ink", icon: <PenNib size={16} />, shortcut: "B" },
-  { id: "pencil", label: "Pencil", icon: <LetterPIcon size={14} />, shortcut: "P" },
-  { id: "marker", label: "Marker", icon: <PaintIcon size={14} />, shortcut: "M" },
-  { id: "eraser", label: "Eraser", icon: <LetterEIcon size={14} />, shortcut: "E" },
-];
-
 const SHORTCUTS: Record<string, ToolId> = {
   v: "select",
   b: "ink",
@@ -44,7 +30,6 @@ const SHORTCUTS: Record<string, ToolId> = {
 };
 
 export default function App() {
-  const tool = useTools((s) => s.tool);
   const setTool = useTools((s) => s.setTool);
   const undo = useProject((s) => s.undo);
   const redo = useProject((s) => s.redo);
@@ -201,19 +186,12 @@ export default function App() {
         />
       </div>
 
-      {/* top-center: tools */}
+      {/* top-center: ink + canvas status island (settings live inside) */}
       {stage === "draw" && (
-        <div
-          className="absolute left-1/2 top-4 z-20 flex -translate-x-1/2 items-center"
-          style={{ height: FLOAT_BAR_H }}
-        >
-          <ExpandableActionBar
-            size="sm"
-            items={TOOL_ITEMS}
-            activeId={tool}
-            onAction={(item) => setTool(item.id as ToolId)}
-            className="!min-h-[42px] h-[42px]"
-          />
+        <div className="pointer-events-none absolute inset-x-0 top-4 z-20 flex justify-center">
+          <div className="pointer-events-auto">
+            <StatusIsland />
+          </div>
         </div>
       )}
 
@@ -245,40 +223,12 @@ export default function App() {
         }}
       />
 
-      {stage === "draw" && (
-        <div className="absolute right-4 top-4">
-          <ExpandableActionBar
-            size="sm"
-            items={[
-              {
-                id: "undo",
-                label: "Undo",
-                icon: <ArrowBackUpIcon size={14} />,
-                shortcut: "Ctrl+Z",
-                onClick: undo,
-              },
-              {
-                id: "redo",
-                label: "Redo",
-                icon: <HistoryCircleIcon size={14} />,
-                shortcut: "Ctrl+Shift+Z",
-                onClick: redo,
-              },
-            ]}
-            className="!min-h-[42px] h-[42px]"
-          />
+      {/* bottom: tool dock stacked above the timeline */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex flex-col items-center gap-3">
+        {stage === "draw" && <ToolDock />}
+        <div className="pointer-events-auto max-w-[calc(100vw-2rem)]">
+          <Timeline />
         </div>
-      )}
-
-      {/* Settings: mid-center-right, expands left */}
-      {stage === "draw" && (
-        <div className="absolute right-4 top-1/2 z-20 -translate-y-1/2">
-          <InspectPanel />
-        </div>
-      )}
-
-      <div className="pointer-events-none absolute bottom-4 left-1/2 flex -translate-x-1/2 justify-center">
-        <Timeline />
       </div>
 
       {recovered && (
