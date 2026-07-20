@@ -19,8 +19,8 @@ import {
 import { EASE_OUT } from "@/lib/ease";
 import { useHoverCapable } from "@/lib/hooks/use-hover-capable";
 import { cn } from "@/lib/utils";
-import DotsHorizontalIcon from "@/components/ui/dots-horizontal-icon";
-import XIcon from "@/components/ui/x-icon";
+import EllipsisIcon from "@/components/ui/ellipsis-icon";
+import EllipsisCloseIcon from "@/components/ui/ellipsis-close-icon";
 
 export type OverflowActionsSize = "sm" | "md";
 
@@ -289,9 +289,9 @@ export function OverflowActions({
               className="inline-grid place-items-center"
             >
               {isExpanded ? (
-                <XIcon size={size === "sm" ? 14 : 16} />
+                <EllipsisCloseIcon size={size === "sm" ? 18 : 20} />
               ) : (
-                <DotsHorizontalIcon size={size === "sm" ? 14 : 16} />
+                <EllipsisIcon size={size === "sm" ? 18 : 20} />
               )}
             </motion.span>
           </AnimatePresence>

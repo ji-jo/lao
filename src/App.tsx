@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ExpandableActionBar } from "@/components/motion/expandable-action-bar";
 import { WorkflowBar, FLOAT_BAR_H } from "@/components/chrome/WorkflowBar";
 import MousePointer2Icon from "@/components/ui/mouse-pointer-2-icon";
-import PenIcon from "@/components/ui/pen-icon";
+import { PenNib } from "reicon-react";
 import PaintIcon from "@/components/ui/paint-icon";
 import LetterEIcon from "@/components/ui/letter-e-icon";
 import LetterPIcon from "@/components/ui/letter-p-icon";
@@ -29,7 +29,7 @@ import { ShaderSnapshotMount } from "@/components/ShaderBackground";
 
 const TOOL_ITEMS = [
   { id: "select", label: "Select", icon: <MousePointer2Icon size={14} />, shortcut: "V" },
-  { id: "ink", label: "Ink", icon: <PenIcon size={14} />, shortcut: "B" },
+  { id: "ink", label: "Ink", icon: <PenNib size={16} />, shortcut: "B" },
   { id: "pencil", label: "Pencil", icon: <LetterPIcon size={14} />, shortcut: "P" },
   { id: "marker", label: "Marker", icon: <PaintIcon size={14} />, shortcut: "M" },
   { id: "eraser", label: "Eraser", icon: <LetterEIcon size={14} />, shortcut: "E" },

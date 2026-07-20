@@ -13,6 +13,7 @@ import {
 } from "@/components/motion/popover";
 import { Button } from "@/components/ui/button";
 import { CustomScroll } from "@/components/ui/custom-scroll";
+import { HorizontalScroll } from "@/components/ui/horizontal-scroll";
 import {
   DropdownMenu,
   DropdownTrigger,
@@ -29,7 +30,7 @@ import LayersIcon from "@/components/ui/layers-icon";
 import Stack3Icon from "@/components/ui/stack-3-icon";
 import EyeIcon from "@/components/ui/eye-icon";
 import EyeOffIcon from "@/components/ui/eye-off-icon";
-import PenIcon from "@/components/ui/pen-icon";
+import { PenNib } from "reicon-react";
 import ExpandIcon from "@/components/ui/expand-icon";
 import DotsHorizontalIcon from "@/components/ui/dots-horizontal-icon";
 import LayerGripIcon from "@/components/ui/layer-grip-icon";
@@ -302,7 +303,7 @@ export function Timeline() {
             onClick={() => setStage("draw")}
             active={stage === "draw"}
           >
-            <PenIcon size={14} />
+            <PenNib size={15} />
           </TBtn>
           <TBtn
             label="Preview"
@@ -319,10 +320,13 @@ export function Timeline() {
       ) : (
         <div className="h-40 max-h-40 min-h-0 w-full min-w-0">
           <CustomScroll heightRelativeToParent="100%" allowOuterScroll>
+          <div className="flex min-w-0 items-start">
+          {/* pinned layer labels */}
+          <div className="shrink-0">
           {project.layers.map((layer, li) => (
             <div
               key={layer.id}
-              className="flex items-center gap-1 py-0.5"
+              className="flex h-6 items-center gap-1 py-0.5"
               onDragOver={(e) => e.preventDefault()}
               onDrop={() => {
                 const from = dragLayerRef.current;
@@ -387,7 +391,14 @@ export function Timeline() {
                   />
                 </DropdownContent>
               </DropdownMenu>
-              <div className="flex min-w-0 flex-1 gap-px overflow-x-auto">
+            </div>
+          ))}
+          </div>
+
+          {/* frame cells — every layer shares ONE horizontal scrollbar */}
+          <HorizontalScroll className="min-w-0 flex-1" id="timeline-frames">
+            {project.layers.map((layer, li) => (
+              <div key={layer.id} className="flex h-6 items-center gap-px py-0.5">
                 {frames.map((fi) => {
                   const isKey = layer.isStatic ? fi === 0 : !!layer.frames[fi];
                   const isHold =
@@ -418,8 +429,9 @@ export function Timeline() {
                   );
                 })}
               </div>
-            </div>
-          ))}
+            ))}
+          </HorizontalScroll>
+          </div>
           </CustomScroll>
         </div>
       )}
