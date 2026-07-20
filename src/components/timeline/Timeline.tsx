@@ -74,7 +74,6 @@ export function Timeline() {
   const workflow = usePlayback((s) => s.workflow);
   const setStage = usePlayback((s) => s.setStage);
 
-  const [extendBy, setExtendBy] = useState(12);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const dragLayerRef = useRef<number | null>(null);
   const extendTimeline = useProject((s) => s.extendTimeline);
@@ -90,17 +89,12 @@ export function Timeline() {
   const toggleLayerVisible = useProject((s) => s.toggleLayerVisible);
   const toggleOnionSkin = usePlayback((s) => s.toggleOnionSkin);
 
-  function applyExtend(n = extendBy) {
-    const frames = Math.max(1, Math.min(120, Math.round(Number(n))));
-    if (!Number.isFinite(frames) || frames < 1) return;
-    extendTimeline(frames);
-  }
-
-  function applyShrink(n = extendBy) {
-    const frames = Math.max(1, Math.min(120, Math.round(Number(n))));
-    if (!Number.isFinite(frames) || frames < 1) return;
-    if (project.frameCount <= 1) return;
-    extendTimeline(-Math.min(frames, project.frameCount - 1));
+  /** Slider-driven frame count: right adds frames, left trims from the end. */
+  function setFrameCount(next: number) {
+    const target = Math.max(1, Math.min(240, Math.round(Number(next))));
+    if (!Number.isFinite(target)) return;
+    const delta = target - useProject.getState().project.frameCount;
+    if (delta !== 0) extendTimeline(delta);
   }
 
   function togglePlaying() {
@@ -259,41 +253,27 @@ export function Timeline() {
           <LayersIcon size={14} />
         </TBtn>
 
-        <div className="mx-1 flex h-5 max-h-5 items-center gap-1.5">
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            title={`Remove ${Math.min(extendBy, project.frameCount - 1)} frames from the end`}
-            onClick={() => applyShrink(extendBy)}
-            disabled={project.frameCount <= 1}
-            className="h-5 max-h-5 min-h-0 shrink-0 rounded-md px-2 text-[10px] font-semibold tabular-nums"
-          >
-            −{extendBy}
-          </Button>
-          <div className="h-5 w-28 shrink-0">
+        {/* Frame count: drag right to add frames, left to delete from the end. */}
+        <div className="mx-1 flex h-5 max-h-5 items-center gap-2">
+          <span className="shrink-0 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+            Frames
+          </span>
+          <div className="h-5 w-36 shrink-0">
             <RangeSlider
-              value={extendBy}
-              onValueChange={(v) => setExtendBy(v)}
-              onValueCommit={(v) => setExtendBy(v)}
+              value={project.frameCount}
+              onValueChange={setFrameCount}
+              onValueCommit={setFrameCount}
               min={1}
-              max={120}
+              max={240}
               step={1}
               showTicks={false}
-              aria-label="Frames to add or remove"
+              aria-label="Number of frames in the timeline"
               className="h-5 max-h-5 bg-muted/80"
             />
           </div>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            title={`Add ${extendBy} frames to the timeline`}
-            onClick={() => applyExtend(extendBy)}
-            className="h-5 max-h-5 min-h-0 shrink-0 rounded-md px-2 text-[10px] font-semibold tabular-nums"
-          >
-            +{extendBy}
-          </Button>
+          <span className="w-7 shrink-0 text-right font-mono text-[11px] tabular-nums text-foreground">
+            {project.frameCount}
+          </span>
         </div>
 
         <div className="ml-auto flex items-center gap-0.5 rounded-xl border border-border/60 bg-background/40 p-0.5">
