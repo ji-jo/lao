@@ -1,8 +1,12 @@
 # Architecture
 
-Stack: Vite + React 19 + TypeScript, zustand, Canvas2D + perfect-freehand,
-@remotion/player (preview), mediabunny + gifenc (export), Tailwind v4,
-fluid-functionalism/itshover/beui shadcn registries, @paper-design/shaders-react (backgrounds).
+Stack: Vite + React 19 + TypeScript (dev server **http://localhost:5173**), zustand,
+Canvas2D + perfect-freehand, @remotion/player (preview), mediabunny + gifenc (export),
+Tailwind v4, @paper-design/shaders-react (backgrounds).
+
+UI + icons come from **four sources only** (see AGENTS.md §"Hard product constraints"):
+fluid functionalism + beui (components), itshover + reicon.dev/`reicon-react` (icons).
+No other component library or icon pack.
 
 ## Data model — `src/model/types.ts`
 

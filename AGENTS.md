@@ -24,27 +24,67 @@ Read [docs/ROADMAP.md](docs/ROADMAP.md) for parked features (incl. the **Animatr
 
 ```bash
 npm install          # deps (exFAT-safe)
-bun run dev          # vite dev server
+bun run dev          # vite dev server → http://localhost:5173
 bun test             # unit tests (src/**/*.test.ts, excluded from app tsconfig)
 npx tsc -b           # type-check (must stay clean)
 bun run build        # tsc -b && vite build
 ```
 
-## Hard product constraints (D's explicit decisions — do not violate)
+**Dev server URL is `http://localhost:5173`.** `vite.config.ts` honours `$PORT` and falls
+back to 5173; if 5173 is busy it will pick another port — free 5173 or read the port Vite
+prints, but 5173 is the canonical local port for this app.
 
-1. **UI components ONLY from the fluid functionalism registry:**
-   `npx shadcn@latest add https://www.fluidfunctionalism.com/r/<name>.json -y -o`
-   (index at `/r/registry.json`; already installed: button, slider, tooltip, dialog, select,
-   switch, color-picker, input-group, dropdown, scroll-area).
-2. **Icons ONLY from itshover:** `npx shadcn@latest add https://itshover.com/r/<name>-icon.json`.
+## Hard product constraints (D's explicit decisions — DO NOT VIOLATE)
+
+There are exactly **four** allowed sources for UI + icons. Never add any other component
+library, icon pack, or design system. If something you need isn't in one of these, build it
+by hand with Tailwind + the existing tokens — do not reach for a new dependency.
+
+1. **UI components — fluid functionalism** (`@fluid`, wired in `components.json`):
+   `npx shadcn@latest add -y -o @fluid/<name>`
+   (or the URL form `https://www.fluidfunctionalism.com/r/<name>.json`; index at `/r/registry.json`).
+   Installed: button, slider, tooltip, dialog, select, switch, color-picker, input-group,
+   dropdown, scroll-area, tabs, custom-scroll.
+2. **UI components — beui** (`@beui`, wired in `components.json`):
+   `npx shadcn@latest add -y -o @beui/<name>` (index at `https://beui.dev/r/registry.json`, 71 items).
+   Installed: expandable-action-bar, overflow-actions, popover, range-slider, dock, dynamic-island.
+   The beui MCP (`claude mcp add --transport http beui https://mcp.beui.dev/mcp`) is docs/search
+   only — NOT required to install components.
+3. **Icons — itshover** (animated SVG icons):
+   `npx shadcn@latest add -y -o https://itshover.com/r/<name>-icon.json`.
    264 icons; there is **no eraser/pause/plus/undo icon** — use substitutes (letter-e-icon,
-   letter-p-icon, x-icon rotated, arrow-back-up-icon, history-circle-icon, stack-3-icon…).
-3. **Every panel floats** — pattern from `@beui/expandable-action-bar`
-   (`src/components/motion/expandable-action-bar.tsx`). No docked sidebars.
-4. **No 3D** (no .obj, no three.js). **No ffmpeg.wasm** — export is mediabunny (WebCodecs)
+   letter-p-icon, x-icon, arrow-back-up-icon, history-circle-icon, stack-3-icon…).
+4. **Icons — reicon.dev** (`reicon-react`, 2674+ icons, tree-shakeable):
+   `import { PenNib } from "reicon-react"; <PenNib size={24} />`. Already used for the pen icon.
+   Prefer reicon when itshover lacks a good match; both are allowed.
+   - D-supplied one-off SVGs live in `src/assets/icons/` and are hand-wrapped as
+     `currentColor` components (see `ellipsis-icon.tsx`, `ellipsis-close-icon.tsx`) — that's fine
+     for bespoke marks, but for general icons use itshover or reicon.
+
+5. **Every panel floats** — no docked sidebars. Patterns: `@beui/dock` (bottom tool rail),
+   `@beui/dynamic-island` (top ink/canvas status + settings), `@beui/overflow-actions`
+   (top-left Stop-motion/Animatron + File), `@beui/expandable-action-bar`.
+6. **No 3D** (no .obj, no three.js). **No ffmpeg.wasm** — export is mediabunny (WebCodecs)
    + gifenc. **No fabric/p5/two.js/paper.js as engines** (evaluated & rejected; steal ideas only).
-5. Boil/jitter must stay **deterministic** (seeded) so preview === export. Tests enforce it.
-6. Keep `npx tsc -b` clean and `bun test` green before every commit.
+7. Boil/jitter must stay **deterministic** (seeded) so preview === export. Tests enforce it.
+8. Keep `npx tsc -b` clean and `bun test` green before every commit.
+
+## Current UI layout (as of the latest commit)
+
+- **Top-left** — `@beui/overflow-actions`: Stop-motion / Animatron toggle + File overflow
+  (Save / Open / Export). Ellipsis / close toggle uses D's SVGs (`ellipsis-icon`,
+  `ellipsis-close-icon`).
+- **Top-center (Draw stage)** — `@beui/dynamic-island` "status island": compact pill shows
+  `tool · frame/total · fps`; tap expands into Brush (color/size/boil/auto-key) and Canvas
+  (background + size) settings. This IS the settings panel — there is no separate InspectPanel.
+- **Bottom (Draw stage)** — `@beui/dock` tool rail stacked above the timeline: Select/Ink/
+  Pencil/Marker/Eraser + duplicate-frame / empty-cel / onion + undo/redo. Ink uses reicon
+  `PenNib`.
+- **Bottom** — the floating `Timeline`; frame rows share ONE horizontal scrollbar
+  (`src/components/ui/horizontal-scroll.tsx` — react-custom-scroll is vertical-only, so this
+  is a hand-rolled X scroller); layer labels are a pinned left column. Animatron swaps the
+  frame grid for `ClipTimeline`.
+- **Export** — fluid `Dialog` (`panels/ExportDialog.tsx`).
 
 ## Keyboard map (implemented)
 
