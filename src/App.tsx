@@ -1,19 +1,22 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { StageCanvas } from "@/components/StageCanvas";
-import { PreviewStage } from "@/components/PreviewStage";
-import { ShaderSnapshotMount } from "@/components/ShaderBackground";
-import { Timeline } from "@/components/timeline/Timeline";
-import { ExportDialog } from "@/components/panels/ExportDialog";
-import { WorkspaceTabs } from "@/components/chrome/WorkspaceTabs";
-import { StatusIsland } from "@/components/chrome/StatusIsland";
-import { ToolDock } from "@/components/chrome/ToolDock";
-import { CommandBar } from "@/components/chrome/CommandBar";
-import { Toasts } from "@/components/chrome/Toasts";
-import { Tooltip } from "@/components/ui/tooltip";
+import { useEffect, useRef, useState } from "react";
+import { ExpandableActionBar } from "@/components/motion/expandable-action-bar";
+import { WorkflowBar, FLOAT_BAR_H } from "@/components/chrome/WorkflowBar";
+import MousePointer2Icon from "@/components/ui/mouse-pointer-2-icon";
+import PenIcon from "@/components/ui/pen-icon";
+import PaintIcon from "@/components/ui/paint-icon";
+import LetterEIcon from "@/components/ui/letter-e-icon";
+import LetterPIcon from "@/components/ui/letter-p-icon";
+import ArrowBackUpIcon from "@/components/ui/arrow-back-up-icon";
+import HistoryCircleIcon from "@/components/ui/history-circle-icon";
 import CameraIcon from "@/components/ui/camera-icon";
+import { ExportDialog } from "@/components/panels/ExportDialog";
 import { saveLaoFile, openLaoFile, parseLao } from "@/file/laoFile";
 import { startAutosave, readAutosave, clearAutosave } from "@/file/autosave";
-import { notify } from "@/state/toasts";
+import type { Project } from "@/model/types";
+import { StageCanvas } from "@/components/StageCanvas";
+import { PreviewStage } from "@/components/PreviewStage";
+import { InspectPanel } from "@/components/panels/InspectPanel";
+import { Timeline } from "@/components/timeline/Timeline";
 import { useTools, type ToolId } from "@/state/tools";
 import { useProject } from "@/state/project";
 import { usePlayback } from "@/state/playback";
@@ -22,6 +25,15 @@ import { useSelection } from "@/state/selection";
 import { useViewport } from "@/state/viewport";
 import { copyStrokes, readClipboard } from "@/state/clipboard";
 import { resolveCel } from "@/model/types";
+import { ShaderSnapshotMount } from "@/components/ShaderBackground";
+
+const TOOL_ITEMS = [
+  { id: "select", label: "Select", icon: <MousePointer2Icon size={14} />, shortcut: "V" },
+  { id: "ink", label: "Ink", icon: <PenIcon size={14} />, shortcut: "B" },
+  { id: "pencil", label: "Pencil", icon: <LetterPIcon size={14} />, shortcut: "P" },
+  { id: "marker", label: "Marker", icon: <PaintIcon size={14} />, shortcut: "M" },
+  { id: "eraser", label: "Eraser", icon: <LetterEIcon size={14} />, shortcut: "E" },
+];
 
 const SHORTCUTS: Record<string, ToolId> = {
   v: "select",
@@ -32,6 +44,7 @@ const SHORTCUTS: Record<string, ToolId> = {
 };
 
 export default function App() {
+  const tool = useTools((s) => s.tool);
   const setTool = useTools((s) => s.setTool);
   const undo = useProject((s) => s.undo);
   const redo = useProject((s) => s.redo);
@@ -40,31 +53,17 @@ export default function App() {
   const aspect = useProject((s) => s.project.width / s.project.height);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  const [recovered, setRecovered] = useState<Project | null>(null);
 
-  const handleSave = useCallback(async () => {
-    try {
-      const saved = await saveLaoFile(useProject.getState().project);
-      if (saved) notify.success("Project saved", "Written as a .lao file");
-    } catch (err) {
-      notify.error("Save failed", err instanceof Error ? err.message : String(err));
-    }
-  }, []);
+  async function handleSave() {
+    await saveLaoFile(useProject.getState().project);
+  }
+  async function handleOpen() {
+    const project = await openLaoFile();
+    if (project) useProject.getState().loadProject(project);
+  }
 
-  const handleOpen = useCallback(async () => {
-    try {
-      const project = await openLaoFile();
-      if (project) {
-        useProject.getState().loadProject(project);
-        notify.success("Project opened", project.name || "untitled");
-      }
-    } catch (err) {
-      notify.error("Could not open file", err instanceof Error ? err.message : String(err));
-    }
-  }, []);
-
-  const handleExport = useCallback(() => setExportOpen(true), []);
-
-  // autosave + crash recovery (recovery offered as a toast action)
+  // autosave + crash recovery
   useEffect(() => {
     const stop = startAutosave();
     void readAutosave().then((saved) => {
@@ -74,22 +73,7 @@ export default function App() {
       );
       const current = useProject.getState();
       const untouched = current.undoStack.length === 0 && current.redoStack.length === 0;
-      if (!hasArt || !untouched) return;
-      notify.info("Recovered an unsaved session");
-      // separate toast carries the action so it stays until answered
-      import("@/state/toasts").then(({ toast }) =>
-        toast({
-          title: "Restore previous work?",
-          description: saved.project.name || "untitled",
-          status: "info",
-          duration: 20000,
-          action: {
-            label: "Restore",
-            onClick: () => useProject.getState().loadProject(saved.project),
-          },
-        }),
-      );
-      void clearAutosave;
+      if (hasArt && untouched) setRecovered(saved.project);
     });
     return stop;
   }, []);
@@ -100,8 +84,8 @@ export default function App() {
       if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
         return;
 
+      // zoom: Ctrl/Cmd + / - / = / 0
       if (e.ctrlKey || e.metaKey) {
-        const k = e.key.toLowerCase();
         if (e.key === "+" || e.key === "=") {
           e.preventDefault();
           useViewport.getState().zoomIn();
@@ -117,53 +101,52 @@ export default function App() {
           useViewport.getState().resetZoom();
           return;
         }
-        if (k === "z") {
-          e.preventDefault();
-          if (e.shiftKey) redo();
-          else undo();
-          return;
-        }
-        if (k === "s") {
-          e.preventDefault();
-          void handleSave();
-          return;
-        }
-        if (k === "o") {
-          e.preventDefault();
-          void handleOpen();
-          return;
-        }
-        if (k === "a") {
-          e.preventDefault();
-          useSelection.getState().selectAll();
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        void saveLaoFile(useProject.getState().project);
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o") {
+        e.preventDefault();
+        void openLaoFile().then((p) => p && useProject.getState().loadProject(p));
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        useSelection.getState().selectAll();
+        useTools.getState().setTool("select");
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+        const ids = useSelection.getState().ids;
+        if (!ids.length) return;
+        e.preventDefault();
+        const ps = useProject.getState();
+        const layer = ps.project.layers[ps.layerIndex];
+        const cel = layer ? resolveCel(layer, ps.frameIndex) : null;
+        if (cel) copyStrokes(cel.strokes.filter((s) => ids.includes(s.id)));
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
+        const strokes = readClipboard();
+        if (!strokes.length) return;
+        e.preventDefault();
+        const newIds = useProject.getState().pasteStrokes(strokes);
+        if (newIds.length) {
+          useSelection.getState().set(newIds);
           useTools.getState().setTool("select");
-          return;
-        }
-        if (k === "c") {
-          const ids = useSelection.getState().ids;
-          if (!ids.length) return;
-          e.preventDefault();
-          const ps = useProject.getState();
-          const layer = ps.project.layers[ps.layerIndex];
-          const cel = layer ? resolveCel(layer, ps.frameIndex) : null;
-          if (cel) copyStrokes(cel.strokes.filter((s) => ids.includes(s.id)));
-          return;
-        }
-        if (k === "v") {
-          const strokes = readClipboard();
-          if (!strokes.length) return;
-          e.preventDefault();
-          const newIds = useProject.getState().pasteStrokes(strokes);
-          if (newIds.length) {
-            useSelection.getState().set(newIds);
-            useTools.getState().setTool("select");
-          }
-          return;
         }
         return;
       }
-
-      if (e.altKey) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key === "Delete" || e.key === "Backspace") {
         const ids = useSelection.getState().ids;
         if (ids.length) {
@@ -188,7 +171,7 @@ export default function App() {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [setTool, undo, redo, handleSave, handleOpen]);
+  }, [setTool, undo, redo]);
 
   return (
     <div
@@ -199,12 +182,7 @@ export default function App() {
         const file = e.dataTransfer.files?.[0];
         if (!file || !file.name.endsWith(".lao")) return;
         void file.text().then((text) => {
-          try {
-            useProject.getState().loadProject(parseLao(text));
-            notify.success("Project opened", file.name);
-          } catch (err) {
-            notify.error("Not a valid .lao file", err instanceof Error ? err.message : undefined);
-          }
+          useProject.getState().loadProject(parseLao(text));
         });
       }}
     >
@@ -214,47 +192,47 @@ export default function App() {
         <ShaderSnapshotMount background={background} aspect={aspect} />
       )}
 
-      {/* top-left: workspace + file */}
-      <div className="absolute left-4 top-4 z-30">
-        <WorkspaceTabs onSave={handleSave} onOpen={handleOpen} onExport={handleExport} />
+      {/* top-left: workflow / File */}
+      <div className="absolute left-4 top-4 z-20">
+        <WorkflowBar
+          onSave={() => void handleSave()}
+          onOpen={() => void handleOpen()}
+          onExport={() => setExportOpen(true)}
+        />
       </div>
 
-      {/* top-center: status island (settings live inside) */}
-      <div className="pointer-events-none absolute inset-x-0 top-4 z-20 flex justify-center">
-        <div className="pointer-events-auto">
-          <StatusIsland />
+      {/* top-center: tools */}
+      {stage === "draw" && (
+        <div
+          className="absolute left-1/2 top-4 z-20 flex -translate-x-1/2 items-center"
+          style={{ height: FLOAT_BAR_H }}
+        >
+          <ExpandableActionBar
+            size="sm"
+            items={TOOL_ITEMS}
+            activeId={tool}
+            onAction={(item) => setTool(item.id as ToolId)}
+            className="!min-h-[42px] h-[42px]"
+          />
         </div>
-      </div>
+      )}
 
-      {/* top-right: reference (preview) + command hint */}
-      <div className="absolute right-4 top-4 z-20 flex items-center gap-2">
-        {stage === "preview" && (
-          <Tooltip content="Attach reference image or video" side="bottom">
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              aria-label="Attach reference"
-              className="grid h-[42px] w-[42px] place-items-center rounded-full border border-border/70 bg-card/95 text-muted-foreground shadow-2xl backdrop-blur-xl transition-colors hover:text-foreground"
-            >
-              <CameraIcon size={17} />
-            </button>
-          </Tooltip>
-        )}
-        <Tooltip content="Command palette" side="bottom">
-          <button
-            type="button"
-            onClick={() =>
-              window.dispatchEvent(
-                new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }),
-              )
-            }
-            className="flex h-[42px] items-center gap-1.5 rounded-full border border-border/70 bg-card/95 px-3.5 font-mono text-[11px] text-muted-foreground shadow-2xl backdrop-blur-xl transition-colors hover:text-foreground"
-          >
-            <span className="text-[13px]">⌘</span>K
-          </button>
-        </Tooltip>
-      </div>
-
+      {stage === "preview" && (
+        <div className="absolute left-1/2 top-4 z-20 -translate-x-1/2">
+          <ExpandableActionBar
+            size="sm"
+            items={[
+              {
+                id: "reference",
+                label: "Reference",
+                icon: <CameraIcon size={14} />,
+                onClick: () => fileInputRef.current?.click(),
+              },
+            ]}
+            className="!min-h-[42px] h-[42px]"
+          />
+        </div>
+      )}
       <input
         ref={fileInputRef}
         type="file"
@@ -267,17 +245,69 @@ export default function App() {
         }}
       />
 
-      {/* bottom stack: tool dock above the timeline */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex flex-col items-center gap-3">
-        {stage === "draw" && <ToolDock />}
-        <div className="pointer-events-auto max-w-[calc(100vw-2rem)]">
-          <Timeline />
+      {stage === "draw" && (
+        <div className="absolute right-4 top-4">
+          <ExpandableActionBar
+            size="sm"
+            items={[
+              {
+                id: "undo",
+                label: "Undo",
+                icon: <ArrowBackUpIcon size={14} />,
+                shortcut: "Ctrl+Z",
+                onClick: undo,
+              },
+              {
+                id: "redo",
+                label: "Redo",
+                icon: <HistoryCircleIcon size={14} />,
+                shortcut: "Ctrl+Shift+Z",
+                onClick: redo,
+              },
+            ]}
+            className="!min-h-[42px] h-[42px]"
+          />
         </div>
+      )}
+
+      {/* Settings: mid-center-right, expands left */}
+      {stage === "draw" && (
+        <div className="absolute right-4 top-1/2 z-20 -translate-y-1/2">
+          <InspectPanel />
+        </div>
+      )}
+
+      <div className="pointer-events-none absolute bottom-4 left-1/2 flex -translate-x-1/2 justify-center">
+        <Timeline />
       </div>
 
-      <CommandBar onSave={handleSave} onOpen={handleOpen} onExport={handleExport} />
+      {recovered && (
+        <div className="absolute left-1/2 top-16 z-30 flex -translate-x-1/2 items-center gap-3 rounded-2xl border border-border bg-card/95 px-4 py-2.5 text-sm shadow-2xl backdrop-blur-xl">
+          <span className="text-muted-foreground">Recovered an unsaved session.</span>
+          <button
+            type="button"
+            className="font-semibold text-foreground hover:underline"
+            onClick={() => {
+              useProject.getState().loadProject(recovered);
+              setRecovered(null);
+            }}
+          >
+            Restore
+          </button>
+          <button
+            type="button"
+            className="text-muted-foreground hover:text-foreground"
+            onClick={() => {
+              void clearAutosave();
+              setRecovered(null);
+            }}
+          >
+            Discard
+          </button>
+        </div>
+      )}
+
       <ExportDialog open={exportOpen} onOpenChange={setExportOpen} />
-      <Toasts />
     </div>
   );
 }

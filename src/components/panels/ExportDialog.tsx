@@ -1,11 +1,15 @@
 import { useMemo, useState } from "react";
-import { MorphingModal } from "@/components/motion/morphing-modal";
-import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { Tabs, TabsList, TabItem } from "@/components/ui/tabs";
 import { CustomScroll } from "@/components/ui/custom-scroll";
 import { useProject } from "@/state/project";
 import { exportProject, downloadBlob, type ExportFormat } from "@/export/exportProject";
-import { notify } from "@/state/toasts";
 import { cn } from "@/lib/utils";
 
 type AspectId = "canvas" | "16:9" | "9:16" | "1:1" | "5:4" | "4:3" | "21:9" | "custom";
@@ -116,14 +120,8 @@ export function ExportDialog({
         setProgress,
       );
       downloadBlob(blob, `${project.name || "animation"}.${format}`);
-      notify.success(
-        `Exported ${format.toUpperCase()}`,
-        `${dims.w}×${dims.h} · ${project.frameCount} frames`,
-      );
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setError(message);
-      notify.error("Export failed", message);
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       useProject.setState({ project: prev });
       setProgress(null);
@@ -131,21 +129,19 @@ export function ExportDialog({
   }
 
   return (
-    <MorphingModal
-      viewId={open ? "export" : null}
-      onClose={() => onOpenChange(false)}
-      placement="center"
-      className="w-full max-w-lg overflow-hidden rounded-3xl border border-border/70 bg-card/95 p-0 shadow-2xl backdrop-blur-2xl"
-    >
-      <div className="flex max-h-[min(90vh,640px)] flex-col">
-        <div className="shrink-0 p-6 pb-2">
-          <h2 className="text-lg font-semibold text-foreground">Export</h2>
-          <p className="mt-1 text-[13px] text-muted-foreground">
-            Render the whole sequence to a video file.
-          </p>
-        </div>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[min(90vh,640px)] max-w-lg gap-0 overflow-hidden p-0 sm:max-w-lg">
+        <div className="flex max-h-[min(90vh,640px)] flex-col">
+          <div className="shrink-0 p-6 pb-2">
+            <DialogHeader>
+              <DialogTitle>Export</DialogTitle>
+              <DialogDescription>
+                Render the scene to an image or the whole sequence to a video.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
 
-        <div className="min-h-0 flex-1 px-6 pb-2">
+          <div className="min-h-0 flex-1 px-6 pb-2">
             <CustomScroll flex="1" heightRelativeToParent="100%">
               <div className="space-y-5 pb-2">
                 <div>
@@ -220,30 +216,27 @@ export function ExportDialog({
                 {error && <div className="text-xs text-red-400">{error}</div>}
               </div>
             </CustomScroll>
-        </div>
+          </div>
 
-        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border/70 px-6 py-4">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => onOpenChange(false)}
-          >
-            Close
-          </Button>
-          <Button
-            type="button"
-            variant="primary"
-            loading={progress !== null}
-            disabled={progress !== null}
-            onClick={() => void run()}
-          >
-            {progress !== null
-              ? `Rendering ${Math.round(progress * 100)}%`
-              : "Export video"}
-          </Button>
+          <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border px-6 py-4">
+            <button
+              type="button"
+              onClick={() => onOpenChange(false)}
+              className="rounded-2xl px-4 py-2.5 text-sm text-muted-foreground hover:text-foreground"
+            >
+              Close
+            </button>
+            <button
+              type="button"
+              disabled={progress !== null}
+              onClick={() => void run()}
+              className="px-10 py-3.5 bg-gradient-to-br from-[#f5f5f7] to-[#e8e8ed] text-gray-700 font-semibold rounded-3xl shadow-[0_20px_40px_-10px_rgba(0,0,0,0.1),0_-8px_16px_-8px_rgba(255,255,255,0.5)] active:shadow-[inset_0_8px_16px_-8px_rgba(0,0,0,0.2),inset_0_-8px_16px_-8px_rgba(255,255,255,0.4)] transition-all duration-300 disabled:opacity-50"
+            >
+              Export Video
+            </button>
+          </div>
         </div>
-      </div>
-    </MorphingModal>
+      </DialogContent>
+    </Dialog>
   );
 }
