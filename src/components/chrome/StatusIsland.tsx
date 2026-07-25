@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { useTools } from "@/state/tools";
 import { useProject } from "@/state/project";
 import { usePlayback } from "@/state/playback";
+import { useViewport } from "@/state/viewport";
 import { SHADER_PRESETS } from "@/components/ShaderBackground";
 import type { Background, BackgroundFit, ShaderPresetId } from "@/model/types";
 
@@ -71,12 +72,14 @@ export function StatusIsland() {
   const [view, setView] = useState<IslandView>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
-  const { tool, color, size, autoKey, jitterByDefault } = useTools();
-  const { setColor, setSize, toggleAutoKey, toggleJitterByDefault } = useTools();
+  const { tool, color, size, autoKey, jitterByDefault, grainByDefault } = useTools();
+  const { setColor, setSize, toggleAutoKey, toggleJitterByDefault, toggleGrainByDefault } =
+    useTools();
   const project = useProject((s) => s.project);
   const frameIndex = useProject((s) => s.frameIndex);
   const setProjectSettings = useProject((s) => s.setProjectSettings);
   const workflow = usePlayback((s) => s.workflow);
+  const zoom = useViewport((s) => s.zoom);
   const background = project.background ?? ({ kind: "none" } as Background);
 
   const autoLabel = workflow === "animatron" ? "Auto-record" : "Auto-key";
@@ -122,6 +125,14 @@ export function StatusIsland() {
             </span>
             <span className="text-muted-foreground">·</span>
             <span className="font-mono text-muted-foreground">{project.fps}fps</span>
+            {zoom !== 1 && (
+              <>
+                <span className="text-muted-foreground">·</span>
+                <span className="font-mono tabular-nums text-muted-foreground">
+                  {Math.round(zoom * 100)}%
+                </span>
+              </>
+            )}
           </button>
         }
       >
@@ -148,6 +159,12 @@ export function StatusIsland() {
                   label="Boil lines"
                   checked={jitterByDefault}
                   onToggle={toggleJitterByDefault}
+                  className="w-full !justify-between"
+                />
+                <Switch
+                  label="Paper grain"
+                  checked={grainByDefault}
+                  onToggle={toggleGrainByDefault}
                   className="w-full !justify-between"
                 />
                 <Switch

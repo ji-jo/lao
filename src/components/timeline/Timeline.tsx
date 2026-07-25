@@ -1,69 +1,51 @@
-import { useEffect, useRef, useState } from "react";
-import { cn } from "@/lib/utils";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useProject } from "@/state/project";
 import { usePlayback } from "@/state/playback";
 import { playerRef } from "@/state/playerRef";
-import { resolveCelIndex } from "@/model/types";
 import { ClipTimeline } from "@/components/timeline/ClipTimeline";
-import { RangeSlider } from "@/components/motion/range-slider";
-import {
-  Popover,
-  PopoverTrigger,
-  PopoverContent,
-} from "@/components/motion/popover";
-import { Button } from "@/components/ui/button";
-import { CustomScroll } from "@/components/ui/custom-scroll";
-import { HorizontalScroll } from "@/components/ui/horizontal-scroll";
-import {
-  DropdownMenu,
-  DropdownTrigger,
-  DropdownContent,
-} from "@/components/ui/dropdown";
-import { MenuItem } from "@/components/ui/menu-item";
 import { Tooltip } from "@/components/ui/tooltip";
-import PlayerIcon from "@/components/ui/player-icon";
-import RightChevron from "@/components/ui/right-chevron";
-import KeyframesIcon from "@/components/ui/keyframes-icon";
-import CopyIcon from "@/components/ui/copy-icon";
-import TrashIcon from "@/components/ui/trash-icon";
-import LayersIcon from "@/components/ui/layers-icon";
-import Stack3Icon from "@/components/ui/stack-3-icon";
-import EyeIcon from "@/components/ui/eye-icon";
-import EyeOffIcon from "@/components/ui/eye-off-icon";
-import { PenNib } from "reicon-react";
-import ExpandIcon from "@/components/ui/expand-icon";
-import DotsHorizontalIcon from "@/components/ui/dots-horizontal-icon";
-import LayerGripIcon from "@/components/ui/layer-grip-icon";
+import { AnimationPanel } from "@/components/panels/AnimationPanel";
+import { PAPER } from "@/components/chrome/paper-tokens";
+import {
+  SkipStartIcon,
+  PrevIcon,
+  NextIcon,
+  PlayTriIcon,
+  PauseTriIcon,
+  LoopIcon,
+  ClearFrameIcon,
+  EaseCurveGlyph,
+  OnionRingsGlyph,
+  LayerCountGlyph,
+  FrameCountGlyph,
+  StagePenGlyph,
+  StagePreviewGlyph,
+  StepperBox,
+  DockSep,
+  DockBtn,
+  SquareBtn,
+} from "@/components/timeline/TimelineDockParts";
+import {
+  TimelineLayerRow,
+  CELLS_INSET,
+  CELL_GAP,
+  LAYER_ROW_GAP,
+  LAYER_ROW_H,
+  LAYER_ROW_PITCH,
+} from "@/components/timeline/TimelineLayerRow";
+import { ScrollBarX, ScrollThumbY } from "@/components/timeline/TimelineScrollBars";
+import { TimelineTimingBar } from "@/components/timeline/TimelineTimingBar";
 
-function TBtn({
-  label,
-  onClick,
-  active,
-  disabled,
-  children,
-}: {
-  label: string;
-  onClick: () => void;
-  active?: boolean;
-  disabled?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <Tooltip content={label}>
-      <button
-        type="button"
-        onClick={onClick}
-        disabled={disabled}
-        className={cn(
-          "grid h-7 w-7 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-primary/10 hover:text-foreground disabled:opacity-40",
-          active && "bg-primary/15 text-foreground",
-        )}
-      >
-        {children}
-      </button>
-    </Tooltip>
-  );
-}
+/** Frame-cell zoom (pinch / ctrl+wheel): width scales, row height stays fixed. */
+const BASE_CELL_WIDTH = 16;
+const MIN_CELL_ZOOM = 0.6;
+const MAX_CELL_ZOOM = 2.75;
+
+/**
+ * Rows viewport cap — Paper 2P6-0 pins the whole player at 232px, which leaves
+ * 5 full layer rows plus a sliver of the 6th so the overflow reads as scrollable.
+ */
+const ROWS_MAX_H = 5 * LAYER_ROW_H + 4 * LAYER_ROW_GAP + 18;
 
 export function Timeline() {
   const project = useProject((s) => s.project);
@@ -71,33 +53,174 @@ export function Timeline() {
   const layerIndex = useProject((s) => s.layerIndex);
   const playing = usePlayback((s) => s.playing);
   const onionSkin = usePlayback((s) => s.onionSkin);
+  const loop = usePlayback((s) => s.loop);
+  const toggleLoop = usePlayback((s) => s.toggleLoop);
   const stage = usePlayback((s) => s.stage);
   const workflow = usePlayback((s) => s.workflow);
   const setStage = usePlayback((s) => s.setStage);
 
-  const [extendBy, setExtendBy] = useState(12);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const dragLayerRef = useRef<number | null>(null);
+  /**
+   * Layer reorder. Pointer-driven on purpose: HTML5 drag-and-drop renders a
+   * browser drag image of the grip's stacking context, which reads as "the
+   * whole timeline panel is being dragged". Here the row itself lifts.
+   */
+  const [layerDrag, setLayerDrag] = useState<{ from: number; dy: number } | null>(null);
+  const layerDragRef = useRef<{ from: number; startY: number } | null>(null);
   const extendTimeline = useProject((s) => s.extendTimeline);
-  const removeFrameAt = useProject((s) => s.removeFrameAt);
   const setFrameIndex = useProject((s) => s.setFrameIndex);
   const setLayerIndex = useProject((s) => s.setLayerIndex);
   const stepFrame = useProject((s) => s.stepFrame);
   const addKeyframe = useProject((s) => s.addKeyframe);
-  const duplicateFrameForward = useProject((s) => s.duplicateFrameForward);
   const addLayer = useProject((s) => s.addLayer);
   const deleteLayer = useProject((s) => s.deleteLayer);
   const reorderLayer = useProject((s) => s.reorderLayer);
   const toggleLayerVisible = useProject((s) => s.toggleLayerVisible);
   const toggleOnionSkin = usePlayback((s) => s.toggleOnionSkin);
+  const animationPanelOpen = usePlayback((s) => s.animationPanelOpen);
+  const toggleAnimationPanel = usePlayback((s) => s.toggleAnimationPanel);
+  const isAnimatron = workflow === "animatron";
+  const [collapsed, setCollapsed] = useState(false);
+  const [openMenuIndex, setOpenMenuIndex] = useState<number | null>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
+  const rowsVpRef = useRef<HTMLDivElement>(null);
+  const dragCollapseRef = useRef<{ startY: number; collapsed: boolean } | null>(null);
+  const [cellZoom, setCellZoom] = useState(1);
+  const cellWidth = Math.round(BASE_CELL_WIDTH * cellZoom);
 
-  function applyExtend(n = extendBy) {
+  /** one shared X offset for every layer row (see TimelineScrollBars) */
+  const [scrollX, setScrollX] = useState(0);
+  const [rowsWidth, setRowsWidth] = useState(0);
+  const cellsWidth = Math.max(0, rowsWidth - CELLS_INSET);
+  const contentWidth = project.frameCount * (cellWidth + CELL_GAP) - CELL_GAP;
+  const maxScrollX = Math.max(0, contentWidth - cellsWidth);
+
+  const onPinchZoom = useCallback((deltaY: number) => {
+    setCellZoom((z) => {
+      const next = z * (1 - deltaY * 0.01);
+      return Math.min(MAX_CELL_ZOOM, Math.max(MIN_CELL_ZOOM, next));
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    const vp = rowsVpRef.current;
+    if (!vp) return;
+    const measure = () => setRowsWidth(vp.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(vp);
+    return () => ro.disconnect();
+  }, [collapsed, isAnimatron]);
+
+  useEffect(() => {
+    setScrollX((x) => Math.min(x, maxScrollX));
+  }, [maxScrollX]);
+
+  /** zoom out until every frame fits the visible cells lane (timing bar ⇤) */
+  function fitFramesToWidth() {
+    if (cellsWidth <= 0 || project.frameCount < 1) return;
+    const perCell = cellsWidth / project.frameCount;
+    const target = (perCell - CELL_GAP) / BASE_CELL_WIDTH;
+    setCellZoom(Math.min(MAX_CELL_ZOOM, Math.max(MIN_CELL_ZOOM, target)));
+    setScrollX(0);
+  }
+
+  /** bring the playhead column back into view (timing bar target dot) */
+  function revealPlayhead() {
+    const pitch = cellWidth + CELL_GAP;
+    const left = frameIndex * pitch;
+    setScrollX((x) => {
+      if (left < x) return left;
+      if (left + cellWidth > x + cellsWidth) {
+        return Math.min(maxScrollX, left + cellWidth - cellsWidth);
+      }
+      return x;
+    });
+  }
+
+  const layerCount = project.layers.length;
+  const dropIndex = layerDrag
+    ? Math.max(
+        0,
+        Math.min(layerCount - 1, layerDrag.from + Math.round(layerDrag.dy / LAYER_ROW_PITCH)),
+      )
+    : null;
+
+  /**
+   * The lifted row follows the pointer; every row between its origin and the
+   * drop slot slides one pitch the other way, so the gap opens where it lands.
+   */
+  function rowDragOffset(li: number) {
+    if (!layerDrag || dropIndex === null) return 0;
+    const { from, dy } = layerDrag;
+    if (li === from) return dy;
+    if (from < dropIndex && li > from && li <= dropIndex) return -LAYER_ROW_PITCH;
+    if (from > dropIndex && li >= dropIndex && li < from) return LAYER_ROW_PITCH;
+    return 0;
+  }
+
+  useEffect(() => {
+    if (!layerDrag) return;
+    function targetIndex(from: number, dy: number) {
+      return Math.max(
+        0,
+        Math.min(layerCount - 1, from + Math.round(dy / LAYER_ROW_PITCH)),
+      );
+    }
+    function onMove(e: PointerEvent) {
+      const drag = layerDragRef.current;
+      if (!drag) return;
+      setLayerDrag({ from: drag.from, dy: e.clientY - drag.startY });
+    }
+    function onUp(e: PointerEvent) {
+      const drag = layerDragRef.current;
+      layerDragRef.current = null;
+      setLayerDrag(null);
+      if (!drag) return;
+      const to = targetIndex(drag.from, e.clientY - drag.startY);
+      if (to !== drag.from) reorderLayer(drag.from, to);
+    }
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [layerDrag, layerCount, reorderLayer]);
+
+  /**
+   * Wheel over the rows: ctrl/pinch zooms the cells, deltaX (or shift+wheel)
+   * pans frames, and a plain wheel falls through to the native vertical scroll
+   * whenever there are more layers than fit. Native listener because React
+   * registers `wheel` passively, so `preventDefault` there is a no-op.
+   */
+  useEffect(() => {
+    const vp = rowsVpRef.current;
+    if (!vp) return;
+    function onWheel(e: WheelEvent) {
+      if (e.ctrlKey) {
+        e.preventDefault();
+        onPinchZoom(e.deltaY);
+        return;
+      }
+      const canScrollY = vp!.scrollHeight - vp!.clientHeight > 1;
+      const dx = e.deltaX || (e.shiftKey || !canScrollY ? e.deltaY : 0);
+      if (!dx) return;
+      e.preventDefault();
+      setScrollX((x) => Math.max(0, Math.min(maxScrollX, x + dx)));
+    }
+    vp.addEventListener("wheel", onWheel, { passive: false });
+    return () => vp.removeEventListener("wheel", onWheel);
+  }, [onPinchZoom, maxScrollX]);
+
+  function applyExtend(n: number) {
     const frames = Math.max(1, Math.min(120, Math.round(Number(n))));
     if (!Number.isFinite(frames) || frames < 1) return;
     extendTimeline(frames);
   }
 
-  function applyShrink(n = extendBy) {
+  function applyShrink(n: number) {
     const frames = Math.max(1, Math.min(120, Math.round(Number(n))));
     if (!Number.isFinite(frames) || frames < 1) return;
     if (project.frameCount <= 1) return;
@@ -138,303 +261,287 @@ export function Timeline() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [stepFrame]);
 
-  const frames = Array.from({ length: project.frameCount }, (_, i) => i);
-  const isAnimatron = workflow === "animatron";
+  /**
+   * Collapse handle (Paper 9JI-0 / 8NJ-0): drag down past ~24px and the track
+   * drops away, leaving the 58px handle+transport peek. Drag back up (or click)
+   * restores it.
+   */
+  function onCollapsePointerDown(e: React.PointerEvent) {
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    dragCollapseRef.current = { startY: e.clientY, collapsed };
+  }
+  function onCollapsePointerMove(e: React.PointerEvent) {
+    const drag = dragCollapseRef.current;
+    if (!drag) return;
+    const dy = e.clientY - drag.startY;
+    if (dy > 24) setCollapsed(true);
+    else if (dy < -24) setCollapsed(false);
+  }
+  function onCollapsePointerUp(e: React.PointerEvent) {
+    const drag = dragCollapseRef.current;
+    dragCollapseRef.current = null;
+    // a tap (no meaningful travel) toggles
+    if (drag && Math.abs(e.clientY - drag.startY) <= 4) setCollapsed(!drag.collapsed);
+  }
 
   return (
-    <div className="pointer-events-auto w-fit max-w-[calc(100vw-2rem)] rounded-2xl border border-border bg-card/90 px-2 py-2 shadow-2xl backdrop-blur-xl">
-      {/* transport + frame ops — keep row ~42px */}
-      <div className="mb-2 flex h-[42px] items-center gap-1">
-        <TBtn label="Back 1 frame ( , )" onClick={() => stepFrame(-1)}>
-          <span className="rotate-180">
-            <RightChevron size={14} />
-          </span>
-        </TBtn>
-        <TBtn
-          label={playing ? "Pause (Enter)" : "Play (Enter)"}
-          onClick={togglePlaying}
-          active={playing}
+    <div ref={shellRef} className="relative flex flex-col items-center">
+      {animationPanelOpen && (
+        <div className="pointer-events-auto mb-3">
+          <AnimationPanel />
+        </div>
+      )}
+      {/*
+        Paper 5S8-0: 704 wide, 6px top / 12px bottom / 16px side padding,
+        handle → transport 12px, transport → track 16px.
+      */}
+      <div
+        className="pointer-events-auto relative w-full overflow-hidden rounded-[16px] antialiased"
+        style={{
+          backgroundColor: PAPER.surface,
+          outline: `0.4px solid ${PAPER.outlineSubtle}`,
+          paddingTop: 6,
+          paddingBottom: 12,
+          paddingLeft: 16,
+          paddingRight: 16,
+        }}
+      >
+      {/* collapse handle — Paper 9JI-0 */}
+      <div
+        className="mx-auto -mt-1 mb-2 flex cursor-grab touch-none items-center justify-center py-1 active:cursor-grabbing"
+        onPointerDown={onCollapsePointerDown}
+        onPointerMove={onCollapsePointerMove}
+        onPointerUp={onCollapsePointerUp}
+        role="button"
+        tabIndex={0}
+        aria-expanded={!collapsed}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setCollapsed((c) => !c);
+          }
+        }}
+        title={collapsed ? "Drag up to expand timeline" : "Drag down to collapse timeline"}
+      >
+        <span
+          className="h-1 w-[34px] shrink-0 rounded-full"
+          style={{ backgroundColor: PAPER.handle }}
+        />
+      </div>
+      {/* transport row — Paper 5S8-0 */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5 overflow-clip px-1 py-[3px]">
+          <DockBtn label="First frame" onClick={() => setFrameIndex(0)}>
+            <SkipStartIcon />
+          </DockBtn>
+          <DockBtn label="Back one frame" onClick={() => stepFrame(-1)}>
+            <PrevIcon />
+          </DockBtn>
+          <DockBtn label={playing ? "Pause" : "Play"} onClick={togglePlaying} active={playing}>
+            {playing ? <PauseTriIcon /> : <PlayTriIcon />}
+          </DockBtn>
+          <DockBtn label="Forward one frame" onClick={() => stepFrame(1)}>
+            <NextIcon />
+          </DockBtn>
+        </div>
+
+        <DockBtn label={loop ? "Loop on" : "Loop off"} onClick={toggleLoop} active={loop}>
+          <LoopIcon active={loop} />
+        </DockBtn>
+
+        <DockBtn
+          label="Empty cel — stop the held drawing here, start fresh"
+          onClick={addKeyframe}
         >
-          <PlayerIcon size={14} />
-        </TBtn>
-        <TBtn label="Forward 1 frame ( . )" onClick={() => stepFrame(1)}>
-          <RightChevron size={14} />
-        </TBtn>
-        <div className="mx-2 flex h-5 items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
-          <span className="tabular-nums">
+          <ClearFrameIcon />
+        </DockBtn>
+
+        <div className="flex items-center gap-2.5">
+          <span
+            className="text-[10px] leading-3 text-white opacity-50 tabular-nums"
+            style={{ fontFamily: PAPER.fontMono }}
+          >
             {String(frameIndex + 1).padStart(2, "0")} / {project.frameCount}
           </span>
-          <label className="inline-flex h-5 items-center gap-1 rounded-md border border-border bg-background/40 px-1.5">
-            <input
-              type="number"
-              key={project.fps}
-              defaultValue={project.fps}
-              min={1}
-              max={60}
-              title="Frames per second"
-              onBlur={(e) => {
-                const v = Math.round(Number(e.target.value));
-                if (Number.isFinite(v) && v >= 1 && v <= 60 && v !== project.fps)
-                  useProject.getState().setProjectSettings({ fps: v });
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                e.stopPropagation();
-              }}
-              className="w-8 bg-transparent text-center text-[11px] text-foreground outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
-            />
-            <span className="opacity-60">fps</span>
-          </label>
+          <StepperBox
+            value={project.fps}
+            onDec={() => {
+              if (project.fps > 1) useProject.getState().setProjectSettings({ fps: project.fps - 1 });
+            }}
+            onInc={() => {
+              if (project.fps < 60) useProject.getState().setProjectSettings({ fps: project.fps + 1 });
+            }}
+            decDisabled={project.fps <= 1}
+            incDisabled={project.fps >= 60}
+            decLabel="Slower"
+            incLabel="Faster"
+            trailing={
+              <span className="text-[10px] leading-3 text-white opacity-20" style={{ fontFamily: PAPER.fontMono }}>
+                fps
+              </span>
+            }
+          />
         </div>
 
-        {!isAnimatron && (
-          <>
-            <div className="mx-1 h-4 w-px bg-border" />
-            <TBtn
-              label="Empty cel — stop the held drawing here, start fresh"
-              onClick={addKeyframe}
-            >
-              <KeyframesIcon size={14} />
-            </TBtn>
-            <TBtn label="Duplicate frame → next" onClick={duplicateFrameForward}>
-              <CopyIcon size={14} />
-            </TBtn>
-            <Popover
-              open={deleteOpen}
-              onOpenChange={setDeleteOpen}
-              side="top"
-              align="center"
-              sideOffset={12}
-              panelRadius={14}
-            >
-              <PopoverTrigger>
-                <button
-                  type="button"
-                  disabled={project.frameCount <= 1}
-                  className={cn(
-                    "grid h-7 w-7 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-primary/10 hover:text-foreground disabled:opacity-40",
-                  )}
-                  aria-label="Delete frame"
-                  title="Delete frame"
-                >
-                  <TrashIcon size={14} />
-                </button>
-              </PopoverTrigger>
-              <PopoverContent className="flex w-48 flex-col gap-3 p-3">
-                <p className="text-[12px] leading-snug text-popover-foreground">
-                  Delete frame {String(frameIndex + 1).padStart(2, "0")}?
-                </p>
-                <div className="flex items-center justify-end gap-1.5">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 min-h-0 px-2 text-[11px]"
-                    onClick={() => setDeleteOpen(false)}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="h-7 min-h-0 px-2 text-[11px] text-red-500 hover:text-red-400"
-                    onClick={() => {
-                      removeFrameAt(frameIndex);
-                      setDeleteOpen(false);
-                    }}
-                  >
-                    Delete
-                  </Button>
-                </div>
-              </PopoverContent>
-            </Popover>
-            <div className="mx-1 h-4 w-px bg-border" />
-            <TBtn label="Onion skin" onClick={toggleOnionSkin} active={onionSkin}>
-              <Stack3Icon size={14} />
-            </TBtn>
-          </>
-        )}
+        <DockSep />
 
-        <TBtn label="Add layer" onClick={addLayer}>
-          <LayersIcon size={14} />
-        </TBtn>
-
-        <div className="mx-1 flex h-5 max-h-5 items-center gap-1.5">
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            title={`Remove ${Math.min(extendBy, project.frameCount - 1)} frames from the end`}
-            onClick={() => applyShrink(extendBy)}
-            disabled={project.frameCount <= 1}
-            className="h-5 max-h-5 min-h-0 shrink-0 rounded-md px-2 text-[10px] font-semibold tabular-nums"
+        <div className="flex items-center gap-3">
+          <SquareBtn
+            label="Animation easing"
+            onClick={toggleAnimationPanel}
+            active={animationPanelOpen}
           >
-            −{extendBy}
-          </Button>
-          <div className="h-5 w-28 shrink-0">
-            <RangeSlider
-              value={extendBy}
-              onValueChange={(v) => setExtendBy(v)}
-              onValueCommit={(v) => setExtendBy(v)}
-              min={1}
-              max={120}
-              step={1}
-              showTicks={false}
-              aria-label="Frames to add or remove"
-              className="h-5 max-h-5 bg-muted/80"
-            />
-          </div>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            title={`Add ${extendBy} frames to the timeline`}
-            onClick={() => applyExtend(extendBy)}
-            className="h-5 max-h-5 min-h-0 shrink-0 rounded-md px-2 text-[10px] font-semibold tabular-nums"
-          >
-            +{extendBy}
-          </Button>
+            <EaseCurveGlyph />
+          </SquareBtn>
+          <SquareBtn label="Onion skin" onClick={toggleOnionSkin} active={onionSkin}>
+            {(bg) => <OnionRingsGlyph stroke={bg} />}
+          </SquareBtn>
         </div>
 
-        <div className="ml-auto flex items-center gap-0.5 rounded-xl border border-border/60 bg-background/40 p-0.5">
-          <TBtn
-            label="Draw"
-            onClick={() => setStage("draw")}
-            active={stage === "draw"}
-          >
-            <PenNib size={15} />
-          </TBtn>
-          <TBtn
-            label="Preview"
-            onClick={() => setStage("preview")}
-            active={stage === "preview"}
-          >
-            <ExpandIcon size={14} />
-          </TBtn>
+        <DockSep />
+
+        <StepperBox
+          leading={<LayerCountGlyph />}
+          value={project.layers.length}
+          onDec={() => {
+            if (project.layers.length > 1) deleteLayer(project.layers.length - 1);
+          }}
+          onInc={addLayer}
+          decDisabled={project.layers.length <= 1}
+          decLabel="Remove layer"
+          incLabel="Add layer"
+        />
+
+        <StepperBox
+          leading={<FrameCountGlyph />}
+          value={project.frameCount}
+          onDec={() => applyShrink(1)}
+          onInc={() => applyExtend(1)}
+          decDisabled={project.frameCount <= 1}
+          decLabel="Fewer frames"
+          incLabel="More frames"
+        />
+
+        {/* Draw / Preview segmented toggle */}
+        <div
+          className="flex h-6 items-center overflow-clip rounded-lg p-0.5"
+          style={{ backgroundColor: PAPER.segmentBg, outline: `1px solid ${PAPER.borderHairline}` }}
+        >
+          <Tooltip content="Draw">
+            <button
+              type="button"
+              onClick={() => setStage("draw")}
+              aria-label="Draw"
+              aria-pressed={stage === "draw"}
+              className="grid h-5 w-8 place-items-center rounded-[7px] transition-colors"
+              style={{
+                backgroundColor: stage === "draw" ? PAPER.segmentActive : "transparent",
+                opacity: stage === "draw" ? 1 : 0.7,
+              }}
+            >
+              <StagePenGlyph size={12} />
+            </button>
+          </Tooltip>
+          <Tooltip content="Preview">
+            <button
+              type="button"
+              onClick={() => setStage("preview")}
+              aria-label="Preview"
+              aria-pressed={stage === "preview"}
+              className="grid h-5 w-8 place-items-center rounded-[7px] transition-colors"
+              style={{
+                backgroundColor: stage === "preview" ? PAPER.segmentActive : "transparent",
+                opacity: stage === "preview" ? 1 : 0.7,
+              }}
+            >
+              <StagePreviewGlyph size={12} />
+            </button>
+          </Tooltip>
         </div>
       </div>
 
-      {isAnimatron ? (
-        <ClipTimeline />
+      {collapsed ? null : isAnimatron ? (
+        <div className="mt-4">
+          <ClipTimeline />
+        </div>
       ) : (
-        <div className="h-40 max-h-40 min-h-0 w-full min-w-0">
-          <CustomScroll heightRelativeToParent="100%" allowOuterScroll>
-          <div className="flex min-w-0 items-start">
-          {/* pinned layer labels */}
-          <div className="shrink-0">
-          {project.layers.map((layer, li) => (
-            <div
-              key={layer.id}
-              className="flex h-6 items-center gap-1 py-0.5"
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={() => {
-                const from = dragLayerRef.current;
-                if (from !== null && from !== li) reorderLayer(from, li);
-                dragLayerRef.current = null;
-              }}
-            >
-              <button
-                type="button"
-                draggable
-                onDragStart={() => {
-                  dragLayerRef.current = li;
+        /* exposure sheet — Paper 3X4-0: one #0D0D0D card per layer, 4px apart */
+        <div className="relative mt-4">
+          {/* timing ruler above the stack — Paper 5YT-0 (5YS-0 puts it 4px up) */}
+          <div className="mb-1">
+            <TimelineTimingBar
+              frameCount={project.frameCount}
+              fps={project.fps}
+              frameIndex={frameIndex}
+              cellWidth={cellWidth}
+              scrollLeft={scrollX}
+              zoom={cellZoom}
+              zoomMin={MIN_CELL_ZOOM}
+              zoomMax={MAX_CELL_ZOOM}
+              onScrub={setFrameIndex}
+              onZoom={(z) => setCellZoom(Math.min(MAX_CELL_ZOOM, Math.max(MIN_CELL_ZOOM, z)))}
+              onFitToWidth={fitFramesToWidth}
+              onRevealPlayhead={revealPlayhead}
+              onCollapse={() => setCollapsed(true)}
+            />
+          </div>
+          <div
+            ref={rowsVpRef}
+            className="flex flex-col overflow-y-auto overscroll-contain [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            style={{ gap: LAYER_ROW_GAP, maxHeight: ROWS_MAX_H }}
+          >
+            {project.layers.map((layer, li) => (
+              <TimelineLayerRow
+                key={layer.id}
+                layer={layer}
+                active={li === layerIndex}
+                frameCount={project.frameCount}
+                frameIndex={frameIndex}
+                cellWidth={cellWidth}
+                scrollLeft={scrollX}
+                canDelete={project.layers.length > 1}
+                menuOpen={openMenuIndex === li}
+                onMenuOpenChange={(open) => setOpenMenuIndex(open ? li : null)}
+                onSelectLayer={() => setLayerIndex(li)}
+                onToggleVisible={() => toggleLayerVisible(li)}
+                onSelectCell={(fi) => {
+                  setLayerIndex(li);
+                  setFrameIndex(fi);
                 }}
-                onDragEnd={() => {
-                  dragLayerRef.current = null;
+                dragging={layerDrag?.from === li}
+                dragOffset={rowDragOffset(li)}
+                // the lifted row tracks the pointer 1:1; the rows making room ease
+                animateOffset={layerDrag?.from !== li}
+                onGripPointerDown={(e) => {
+                  e.preventDefault();
+                  layerDragRef.current = { from: li, startY: e.clientY };
+                  setLayerDrag({ from: li, dy: 0 });
                 }}
-                className="grid h-5 w-5 shrink-0 cursor-grab place-items-center text-muted-foreground active:cursor-grabbing hover:text-foreground"
-                aria-label="Drag to reorder layer"
-                title="Drag to reorder"
-              >
-                <LayerGripIcon size={12} />
-              </button>
-              <button
-                type="button"
-                onClick={() => toggleLayerVisible(li)}
-                className="grid h-5 w-5 shrink-0 place-items-center text-muted-foreground hover:text-foreground"
-              >
-                {layer.visible ? <EyeIcon size={12} /> : <EyeOffIcon size={12} />}
-              </button>
-              <button
-                type="button"
-                onClick={() => setLayerIndex(li)}
-                className={cn(
-                  "w-20 shrink-0 truncate rounded px-1.5 text-left text-[11px]",
-                  li === layerIndex
-                    ? "bg-primary/15 text-foreground"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {layer.name}
-                {layer.isStatic && <span className="ml-1 opacity-50">∞</span>}
-              </button>
-              <DropdownMenu>
-                <DropdownTrigger
-                  render={
-                    <button
-                      type="button"
-                      className="grid h-5 w-5 shrink-0 place-items-center text-muted-foreground hover:text-foreground"
-                      aria-label="Layer menu"
-                    >
-                      <DotsHorizontalIcon size={12} />
-                    </button>
-                  }
-                />
-                <DropdownContent align="start" className="min-w-36">
-                  <MenuItem
-                    label="Delete Layer"
-                    index={0}
-                    onSelect={() => deleteLayer(li)}
-                    className="text-red-500 [&_span]:text-red-500"
-                    disabled={project.layers.length <= 1}
-                  />
-                </DropdownContent>
-              </DropdownMenu>
-            </div>
-          ))}
+                onDelete={() => deleteLayer(li)}
+              />
+            ))}
           </div>
 
-          {/* frame cells — every layer shares ONE horizontal scrollbar */}
-          <HorizontalScroll className="min-w-0 flex-1" id="timeline-frames">
-            {project.layers.map((layer, li) => (
-              <div key={layer.id} className="flex h-6 items-center gap-px py-0.5">
-                {frames.map((fi) => {
-                  const isKey = layer.isStatic ? fi === 0 : !!layer.frames[fi];
-                  const isHold =
-                    !isKey && !layer.isStatic && resolveCelIndex(layer, fi) !== null;
-                  const isPlayhead = fi === frameIndex;
-                  return (
-                    <button
-                      key={fi}
-                      type="button"
-                      onClick={() => {
-                        setLayerIndex(li);
-                        setFrameIndex(fi);
-                      }}
-                      className={cn(
-                        "grid h-5 w-4 shrink-0 place-items-center rounded-sm border",
-                        isPlayhead
-                          ? "border-primary/60 bg-primary/20"
-                          : "border-border/60 bg-background/40 hover:bg-primary/10",
-                      )}
-                      title={`Frame ${fi + 1}`}
-                    >
-                      {isKey ? (
-                        <span className="h-1.5 w-1.5 rounded-full bg-foreground/90" />
-                      ) : isHold ? (
-                        <span className="h-px w-2 bg-muted-foreground/50" />
-                      ) : null}
-                    </button>
-                  );
-                })}
-              </div>
-            ))}
-          </HorizontalScroll>
-          </div>
-          </CustomScroll>
+          {/* vertical thumb parks in the modal's right gutter — Paper 41E-0 */}
+          <ScrollThumbY viewportRef={rowsVpRef} className="-right-3" />
+
+          {/* frames overflow the row width — one bar drives every row.
+              Only mounted while it's needed, so the player keeps Paper's 102px
+              height whenever the frames fit. */}
+          {maxScrollX > 0 && (
+            <div style={{ paddingLeft: CELLS_INSET }} className="mt-1">
+              <ScrollBarX
+                scrollLeft={scrollX}
+                viewportWidth={cellsWidth}
+                contentWidth={contentWidth}
+                onScroll={setScrollX}
+                controls="timeline-frames"
+              />
+            </div>
+          )}
         </div>
       )}
+      </div>
     </div>
   );
 }

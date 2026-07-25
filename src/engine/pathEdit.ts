@@ -55,6 +55,38 @@ export function translatePoints(
   return points.map((p) => ({ ...p, x: p.x + dx, y: p.y + dy }));
 }
 
+/** Scale + rotate every point around a pivot (project space). */
+export function transformPoints(
+  points: StrokePoint[],
+  pivotX: number,
+  pivotY: number,
+  scale: number,
+  rotationRad: number,
+): StrokePoint[] {
+  if (scale === 1 && rotationRad === 0) return points;
+  const cos = Math.cos(rotationRad);
+  const sin = Math.sin(rotationRad);
+  return points.map((p) => {
+    let x = (p.x - pivotX) * scale;
+    let y = (p.y - pivotY) * scale;
+    const rx = x * cos - y * sin;
+    const ry = x * sin + y * cos;
+    return { ...p, x: rx + pivotX, y: ry + pivotY };
+  });
+}
+
+export function boundsCenter(bounds: {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}): { x: number; y: number } {
+  return {
+    x: (bounds.minX + bounds.maxX) / 2,
+    y: (bounds.minY + bounds.maxY) / 2,
+  };
+}
+
 /** Axis-aligned bbox of points in project space; null if empty. */
 export function pointsBounds(
   points: StrokePoint[],

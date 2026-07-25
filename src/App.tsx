@@ -5,11 +5,14 @@ import CameraIcon from "@/components/ui/camera-icon";
 import { ExportDialog } from "@/components/panels/ExportDialog";
 import { saveLaoFile, openLaoFile, parseLao } from "@/file/laoFile";
 import { startAutosave, readAutosave, clearAutosave } from "@/file/autosave";
-import type { Project } from "@/model/types";
+import { createEmptyProject, type Project } from "@/model/types";
 import { StageCanvas } from "@/components/StageCanvas";
 import { PreviewStage } from "@/components/PreviewStage";
-import { StatusIsland } from "@/components/chrome/StatusIsland";
-import { ToolDock } from "@/components/chrome/ToolDock";
+import { ToolDock, ReferenceBox } from "@/components/chrome/ToolDock";
+import { SettingsDocks } from "@/components/chrome/SettingsDocks";
+import { ZoomDock } from "@/components/chrome/ZoomDock";
+import { FeedbackDock } from "@/components/chrome/FeedbackDock";
+import { PAPER } from "@/components/chrome/paper-tokens";
 import { Timeline } from "@/components/timeline/Timeline";
 import { useTools, type ToolId } from "@/state/tools";
 import { useProject } from "@/state/project";
@@ -20,13 +23,23 @@ import { useViewport } from "@/state/viewport";
 import { copyStrokes, readClipboard } from "@/state/clipboard";
 import { resolveCel } from "@/model/types";
 import { ShaderSnapshotMount } from "@/components/ShaderBackground";
+import { paintBackground } from "@/engine/background";
+import { paintProjectFrame } from "@/engine/paintFrame";
+import { copyArtboardToClipboard } from "@/export/clipboardShot";
+import { getShaderSnapshotCanvas } from "@/components/ShaderBackground";
 
 const SHORTCUTS: Record<string, ToolId> = {
   v: "select",
   b: "ink",
   p: "pencil",
-  m: "marker",
+  f: "fill",
   e: "eraser",
+  t: "text",
+  h: "hand",
+  s: "shapes",
+  r: "rect",
+  o: "circle",
+  l: "line",
 };
 
 export default function App() {
@@ -34,11 +47,14 @@ export default function App() {
   const undo = useProject((s) => s.undo);
   const redo = useProject((s) => s.redo);
   const stage = usePlayback((s) => s.stage);
+  const setStage = usePlayback((s) => s.setStage);
   const background = useProject((s) => s.project.background);
   const aspect = useProject((s) => s.project.width / s.project.height);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [recovered, setRecovered] = useState<Project | null>(null);
+  const [referenceOpen, setReferenceOpen] = useState(false);
 
   async function handleSave() {
     await saveLaoFile(useProject.getState().project);
@@ -47,8 +63,19 @@ export default function App() {
     const project = await openLaoFile();
     if (project) useProject.getState().loadProject(project);
   }
+  function handleNew() {
+    const hasArt = useProject.getState().project.layers.some((l) =>
+      l.frames.some((f) => f && f.strokes.length > 0),
+    );
+    if (hasArt) {
+      const ok = window.confirm("Start a new file? Save current session first?");
+      if (ok) void handleSave().finally(() => useProject.getState().loadProject(createEmptyProject()));
+      else return;
+    } else {
+      useProject.getState().loadProject(createEmptyProject());
+    }
+  }
 
-  // autosave + crash recovery
   useEffect(() => {
     const stop = startAutosave();
     void readAutosave().then((saved) => {
@@ -69,7 +96,17 @@ export default function App() {
       if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
         return;
 
-      // zoom: Ctrl/Cmd + / - / = / 0
+      if (e.key === "Escape") {
+        if (usePlayback.getState().stage === "preview") {
+          e.preventDefault();
+          setStage("draw");
+          return;
+        }
+        useTools.getState().setShapesOpen(false);
+        usePlayback.getState().setAnimationPanelOpen(false);
+        return;
+      }
+
       if (e.ctrlKey || e.metaKey) {
         if (e.key === "+" || e.key === "=") {
           e.preventDefault();
@@ -83,55 +120,76 @@ export default function App() {
         }
         if (e.key === "0") {
           e.preventDefault();
-          useViewport.getState().resetZoom();
+          useViewport.getState().resetView();
+          return;
+        }
+        if (e.key.toLowerCase() === "z") {
+          e.preventDefault();
+          if (e.shiftKey) redo();
+          else undo();
+          return;
+        }
+        if (e.key.toLowerCase() === "s") {
+          e.preventDefault();
+          void saveLaoFile(useProject.getState().project);
+          return;
+        }
+        if (e.key.toLowerCase() === "o") {
+          e.preventDefault();
+          void openLaoFile().then((p) => p && useProject.getState().loadProject(p));
+          return;
+        }
+        if (e.key.toLowerCase() === "n") {
+          e.preventDefault();
+          handleNew();
+          return;
+        }
+        if (e.key.toLowerCase() === "a") {
+          e.preventDefault();
+          useSelection.getState().selectAll();
+          useTools.getState().setTool("select");
+          return;
+        }
+        if (e.key.toLowerCase() === "c" && !e.shiftKey) {
+          const ids = useSelection.getState().ids;
+          if (!ids.length) return;
+          e.preventDefault();
+          const ps = useProject.getState();
+          const layer = ps.project.layers[ps.layerIndex];
+          const cel = layer ? resolveCel(layer, ps.frameIndex) : null;
+          if (cel) copyStrokes(cel.strokes.filter((s) => ids.includes(s.id)));
+          return;
+        }
+        if (e.shiftKey && e.key.toLowerCase() === "c") {
+          e.preventDefault();
+          const ps = useProject.getState().project;
+          void copyArtboardToClipboard(ps.width, ps.height, (ctx) => {
+            const shaderCanvas =
+              ps.background?.kind === "shader" ? getShaderSnapshotCanvas() : null;
+            const hasBg = paintBackground(ctx, ps, { shaderCanvas });
+            if (!hasBg) {
+              ctx.fillStyle = "#141416";
+              ctx.fillRect(0, 0, ps.width, ps.height);
+            }
+            paintProjectFrame(ctx, ps, useProject.getState().frameIndex, { clear: false });
+          }).catch(() => undefined);
+          return;
+        }
+        if (e.key.toLowerCase() === "v") {
+          const strokes = readClipboard();
+          if (!strokes.length) return;
+          e.preventDefault();
+          const newIds = useProject.getState().pasteStrokes(strokes);
+          if (newIds.length) {
+            useSelection.getState().set(newIds);
+            useTools.getState().setTool("select");
+          }
           return;
         }
       }
 
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
-        e.preventDefault();
-        if (e.shiftKey) redo();
-        else undo();
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
-        e.preventDefault();
-        void saveLaoFile(useProject.getState().project);
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o") {
-        e.preventDefault();
-        void openLaoFile().then((p) => p && useProject.getState().loadProject(p));
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
-        e.preventDefault();
-        useSelection.getState().selectAll();
-        useTools.getState().setTool("select");
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
-        const ids = useSelection.getState().ids;
-        if (!ids.length) return;
-        e.preventDefault();
-        const ps = useProject.getState();
-        const layer = ps.project.layers[ps.layerIndex];
-        const cel = layer ? resolveCel(layer, ps.frameIndex) : null;
-        if (cel) copyStrokes(cel.strokes.filter((s) => ids.includes(s.id)));
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
-        const strokes = readClipboard();
-        if (!strokes.length) return;
-        e.preventDefault();
-        const newIds = useProject.getState().pasteStrokes(strokes);
-        if (newIds.length) {
-          useSelection.getState().set(newIds);
-          useTools.getState().setTool("select");
-        }
-        return;
-      }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
+
       if (e.key === "Delete" || e.key === "Backspace") {
         const ids = useSelection.getState().ids;
         if (ids.length) {
@@ -141,6 +199,26 @@ export default function App() {
         }
         return;
       }
+
+      if (e.key === "1") {
+        setReferenceOpen(true);
+        return;
+      }
+      if (e.key === "2") {
+        imageInputRef.current?.click();
+        return;
+      }
+
+      // shape shortcuts with shift
+      if (e.key.toLowerCase() === "r") {
+        setTool(e.shiftKey ? "diamond" : "rect");
+        return;
+      }
+      if (e.key.toLowerCase() === "l") {
+        setTool(e.shiftKey ? "arrow" : "line");
+        return;
+      }
+
       const k = e.key.toLowerCase();
       if (k === "a") {
         useSelection.getState().selectAll();
@@ -156,11 +234,12 @@ export default function App() {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [setTool, undo, redo]);
+  }, [setTool, undo, redo, setStage]);
 
   return (
     <div
-      className="relative h-dvh w-dvw overflow-hidden bg-background text-foreground"
+      className="relative h-dvh w-dvw overflow-hidden text-foreground antialiased"
+      style={{ backgroundColor: PAPER.bg }}
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault();
@@ -177,23 +256,17 @@ export default function App() {
         <ShaderSnapshotMount background={background} aspect={aspect} />
       )}
 
-      {/* top-left: workflow / File */}
-      <div className="absolute left-4 top-4 z-20">
+      <div
+        className="absolute z-20"
+        style={{ left: PAPER.insetX, top: PAPER.insetTop }}
+      >
         <WorkflowBar
           onSave={() => void handleSave()}
           onOpen={() => void handleOpen()}
           onExport={() => setExportOpen(true)}
+          onNew={handleNew}
         />
       </div>
-
-      {/* top-center: ink + canvas status island (settings live inside) */}
-      {stage === "draw" && (
-        <div className="pointer-events-none absolute inset-x-0 top-4 z-20 flex justify-center">
-          <div className="pointer-events-auto">
-            <StatusIsland />
-          </div>
-        </div>
-      )}
 
       {stage === "preview" && (
         <div className="absolute left-1/2 top-4 z-20 -translate-x-1/2">
@@ -204,13 +277,16 @@ export default function App() {
                 id: "reference",
                 label: "Reference",
                 icon: <CameraIcon size={14} />,
-                onClick: () => fileInputRef.current?.click(),
+                onClick: () => setReferenceOpen(true),
               },
             ]}
             className="!min-h-[42px] h-[42px]"
           />
         </div>
       )}
+
+      <ReferenceBox open={referenceOpen} onClose={() => setReferenceOpen(false)} />
+
       <input
         ref={fileInputRef}
         type="file"
@@ -222,14 +298,65 @@ export default function App() {
           e.target.value = "";
         }}
       />
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          // MVP: open as reference for now; canvas image layers land next
+          const file = e.target.files?.[0];
+          if (file) {
+            useReference.getState().setReference(file);
+            setReferenceOpen(true);
+          }
+          e.target.value = "";
+        }}
+      />
 
-      {/* bottom: tool dock stacked above the timeline */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex flex-col items-center gap-3">
-        {stage === "draw" && <ToolDock />}
-        <div className="pointer-events-auto max-w-[calc(100vw-2rem)]">
+      {stage === "draw" && (
+        <div
+          className="absolute z-20"
+          style={{ right: PAPER.insetX, top: PAPER.insetTop }}
+        >
+          <ToolDock
+            onReference={() => setReferenceOpen(true)}
+            onAddImage={() => imageInputRef.current?.click()}
+          />
+        </div>
+      )}
+
+      <div
+        className="pointer-events-none absolute inset-x-0 z-20 flex flex-col items-center"
+        style={{ bottom: PAPER.insetBottom }}
+      >
+        {stage === "draw" && (
+          <div className="pointer-events-auto" style={{ marginBottom: PAPER.settingGap }}>
+            <SettingsDocks />
+          </div>
+        )}
+        <div className="pointer-events-auto" style={{ width: PAPER.timelineWidth, maxWidth: "calc(100vw - 124px)" }}>
           <Timeline />
         </div>
       </div>
+
+      {stage === "draw" && (
+        <div
+          className="absolute z-20"
+          style={{ left: PAPER.insetX, bottom: PAPER.insetBottom }}
+        >
+          <ZoomDock />
+        </div>
+      )}
+
+      {stage === "draw" && (
+        <div
+          className="absolute z-20"
+          style={{ right: PAPER.insetX, bottom: PAPER.insetBottom }}
+        >
+          <FeedbackDock />
+        </div>
+      )}
 
       {recovered && (
         <div className="absolute left-1/2 top-16 z-30 flex -translate-x-1/2 items-center gap-3 rounded-2xl border border-border bg-card/95 px-4 py-2.5 text-sm shadow-2xl backdrop-blur-xl">

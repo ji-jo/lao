@@ -1,7 +1,7 @@
 import { resolveCel, type Project, type Stroke } from "@/model/types";
 import { renderStrokes } from "@/engine/renderer";
 import { boilDisplacement } from "@/engine/boil";
-import { strokeAtTime } from "@/engine/strokeProgress";
+import { clipFadeOpacity, strokeAtTime } from "@/engine/strokeProgress";
 
 let celCanvas: HTMLCanvasElement | OffscreenCanvas | null = null;
 
@@ -32,8 +32,6 @@ function strokesForFrame(project: Project, frame: number, layerStrokes: Stroke[]
 /**
  * Paint one timeline frame of the whole project at full quality with boil
  * applied — the single source of truth for preview playback AND export.
- * The context is expected to be project-resolution (width×height).
- * Background is left transparent; callers fill if they need opaque output.
  */
 export function paintProjectFrame(
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
@@ -41,15 +39,15 @@ export function paintProjectFrame(
   frame: number,
   opts: { clear?: boolean } = {},
 ) {
-  const { width, height } = project;
+  const { width, height, fps } = project;
   if (opts.clear !== false) ctx.clearRect(0, 0, width, height);
 
   const scratch = getCelCanvas(width, height);
   const scratchCtx = scratch.getContext("2d") as CanvasRenderingContext2D;
+  const timeMs = (frame / Math.max(fps, 1)) * 1000;
 
   for (const layer of project.layers) {
     if (!layer.visible) continue;
-    // Animatron: art lives on each layer's first cel; stop-motion uses exposure
     const cel =
       project.workflow === "animatron"
         ? layer.frames.find((f) => f) ?? null
@@ -57,11 +55,28 @@ export function paintProjectFrame(
     if (!cel || cel.strokes.length === 0) continue;
     const strokes = strokesForFrame(project, frame, cel.strokes);
     if (!strokes.length) continue;
-    scratchCtx.clearRect(0, 0, width, height);
-    renderStrokes(scratchCtx, strokes, {
-      quality: "full",
-      displaced: boilDisplacement(strokes, frame),
-    });
-    ctx.drawImage(scratch, 0, 0);
+
+    if (project.workflow === "animatron") {
+      for (const s of strokes) {
+        const alpha = clipFadeOpacity(s, timeMs, fps);
+        if (alpha <= 0) continue;
+        scratchCtx.clearRect(0, 0, width, height);
+        renderStrokes(scratchCtx, [s], {
+          quality: "full",
+          displaced: boilDisplacement([s], frame),
+        });
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.drawImage(scratch, 0, 0);
+        ctx.restore();
+      }
+    } else {
+      scratchCtx.clearRect(0, 0, width, height);
+      renderStrokes(scratchCtx, strokes, {
+        quality: "full",
+        displaced: boilDisplacement(strokes, frame),
+      });
+      ctx.drawImage(scratch, 0, 0);
+    }
   }
 }

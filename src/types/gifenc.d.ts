@@ -20,7 +20,14 @@ declare module "gifenc" {
     reset(): void;
   }
   export function GIFEncoder(): GIFEncoderInstance;
-  export function quantize(rgba: Uint8ClampedArray | Uint8Array, maxColors: number): number[][];
+  export function quantize(
+    rgba: Uint8ClampedArray | Uint8Array,
+    maxColors: number,
+    options?: {
+      format?: "rgb565" | "rgb444" | "rgba4444";
+      oneBitAlpha?: boolean | number;
+    },
+  ): number[][];
   export function applyPalette(
     rgba: Uint8ClampedArray | Uint8Array,
     palette: number[][],

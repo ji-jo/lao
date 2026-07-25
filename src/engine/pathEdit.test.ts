@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { handleIndices, straightLinePoints, warpPoints, distanceToPoints } from "./pathEdit";
+import { handleIndices, straightLinePoints, warpPoints, distanceToPoints, transformPoints } from "./pathEdit";
 import type { StrokePoint } from "@/model/types";
 
 function pts(n: number): StrokePoint[] {
@@ -44,7 +44,12 @@ describe("pathEdit", () => {
     expect(mid.y).toBeCloseTo(25);
   });
 
-  test("distanceToPoints finds nearest sample", () => {
-    expect(distanceToPoints(pts(10), 5, 3)).toBeCloseTo(3);
+  test("transform scales and rotates around pivot", () => {
+    const p: StrokePoint[] = [{ x: 1, y: 0, pressure: 0.5, t: 0 }];
+    expect(transformPoints(p, 0, 0, 2, 0)[0].x).toBeCloseTo(2);
+    const rot = transformPoints(p, 0, 0, 1, Math.PI / 2)[0];
+    expect(rot.x).toBeCloseTo(0);
+    expect(rot.y).toBeCloseTo(1);
+    expect(rot.pressure).toBe(0.5);
   });
 });

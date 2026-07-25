@@ -3,6 +3,7 @@ import {
   createEmptyProject,
   resolveCel,
   resolveCelIndex,
+  DEFAULT_CLIP_EASING,
   type Frame,
   type Layer,
   type Project,
@@ -11,7 +12,7 @@ import {
 } from "@/model/types";
 import { useTools } from "@/state/tools";
 import { usePlayback } from "@/state/playback";
-import { translatePoints } from "@/engine/pathEdit";
+import { translatePoints, transformPoints } from "@/engine/pathEdit";
 import {
   allProjectStrokes,
   projectClipEndMs,
@@ -39,6 +40,14 @@ interface ProjectState {
   replaceStrokePoints: (strokeId: string, points: Stroke["points"]) => void;
   /** translate many strokes in one undo step */
   translateStrokes: (ids: string[], dx: number, dy: number) => void;
+  /** scale + rotate many strokes around a pivot in one undo step */
+  transformStrokes: (
+    ids: string[],
+    pivotX: number,
+    pivotY: number,
+    scale: number,
+    rotationRad: number,
+  ) => void;
   updateStrokeClip: (strokeId: string, clip: StrokeClip) => void;
   addKeyframe: () => void;
   duplicateFrameForward: () => void;
@@ -121,7 +130,7 @@ export const useProject = create<ProjectState>((set, get) => {
     const startMs = autoKey ? nextAnimatronClipStart(project) : 0;
     const clipped: Stroke = {
       ...stroke,
-      clip: { startMs, durationMs },
+      clip: { startMs, durationMs, easing: { ...DEFAULT_CLIP_EASING } },
     };
 
     const active = project.layers[s.layerIndex];
@@ -305,6 +314,29 @@ export const useProject = create<ProjectState>((set, get) => {
       commit(replaceLayer(project, layerIndex, setCel(layer, celIndex, { ...cel, strokes })));
     },
 
+    transformStrokes: (ids, pivotX, pivotY, scale, rotationRad) => {
+      if (!ids.length || (scale === 1 && rotationRad === 0)) return;
+      const { project, layerIndex, frameIndex } = get();
+      const layer = project.layers[layerIndex];
+      if (!layer) return;
+      const celIndex = resolveCelIndex(layer, layer.isStatic ? 0 : frameIndex);
+      if (celIndex === null) return;
+      const cel = layer.frames[celIndex]!;
+      const idSet = new Set(ids);
+      let changed = false;
+      const strokes = cel.strokes.map((s) => {
+        if (!idSet.has(s.id)) return s;
+        changed = true;
+        return {
+          ...s,
+          points: transformPoints(s.points, pivotX, pivotY, scale, rotationRad),
+          size: Math.max(0.5, s.size * scale),
+        };
+      });
+      if (!changed) return;
+      commit(replaceLayer(project, layerIndex, setCel(layer, celIndex, { ...cel, strokes })));
+    },
+
     updateStrokeClip: (strokeId, clip) => {
       const { project } = get();
       let found = false;
@@ -327,7 +359,7 @@ export const useProject = create<ProjectState>((set, get) => {
     addKeyframe: () => {
       const { project, layerIndex, frameIndex } = get();
       const layer = project.layers[layerIndex];
-      if (!layer || layer.isStatic || layer.frames[frameIndex]) return;
+      if (!layer || layer.isStatic) return;
       commit(replaceLayer(project, layerIndex, setCel(layer, frameIndex, emptyCel())));
     },
 

@@ -1,5 +1,6 @@
 import { getStroke } from "perfect-freehand";
 import type { Stroke, StrokePoint } from "@/model/types";
+import { grainTile } from "@/engine/grain";
 
 export type RenderQuality = "draft" | "full";
 
@@ -43,6 +44,27 @@ function outlinePath(points: StrokePoint[], stroke: Stroke, quality: RenderQuali
   return path;
 }
 
+function applyGrain(
+  ctx: CanvasRenderingContext2D,
+  path: Path2D,
+  stroke: Stroke,
+  quality: RenderQuality,
+) {
+  ctx.save();
+  ctx.clip(path);
+  const tile = grainTile(stroke.seed);
+  const pattern = ctx.createPattern(tile, "repeat");
+  if (!pattern) {
+    ctx.restore();
+    return;
+  }
+  ctx.fillStyle = pattern;
+  ctx.globalCompositeOperation = "multiply";
+  ctx.globalAlpha = quality === "draft" ? 0.28 : 0.38;
+  ctx.fill(path);
+  ctx.restore();
+}
+
 export function renderStroke(
   ctx: CanvasRenderingContext2D,
   stroke: Stroke,
@@ -69,7 +91,9 @@ export function renderStroke(
     ctx.arc(p.x, p.y, (stroke.size / 2) * Math.max(p.pressure, 0.3), 0, Math.PI * 2);
     ctx.fill();
   } else {
-    ctx.fill(outlinePath(points, stroke, opts.quality));
+    const path = outlinePath(points, stroke, opts.quality);
+    ctx.fill(path);
+    if (stroke.grain && stroke.brush !== "eraser") applyGrain(ctx, path, stroke, opts.quality);
   }
   ctx.restore();
 }

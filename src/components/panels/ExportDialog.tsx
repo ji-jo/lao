@@ -7,6 +7,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabItem } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
 import { CustomScroll } from "@/components/ui/custom-scroll";
 import { useProject } from "@/state/project";
 import { exportProject, downloadBlob, type ExportFormat } from "@/export/exportProject";
@@ -81,6 +82,7 @@ export function ExportDialog({
 }) {
   const project = useProject((s) => s.project);
   const [format, setFormat] = useState<ExportFormat>("mp4");
+  const [transparent, setTransparent] = useState(false);
   const [aspect, setAspect] = useState<AspectId>("canvas");
   const [res, setRes] = useState<ResId>("1080p");
   const [fps, setFps] = useState(30);
@@ -118,6 +120,7 @@ export function ExportDialog({
         useProject.getState().project,
         format,
         setProgress,
+        { transparent },
       );
       downloadBlob(blob, `${project.name || "animation"}.${format}`);
     } catch (err) {
@@ -154,9 +157,23 @@ export function ExportDialog({
                       <TabItem value="mp4" label="MP4" />
                       <TabItem value="webm" label="WebM" />
                       <TabItem value="gif" label="GIF" />
+                      <TabItem value="apng" label="APNG" />
                     </TabsList>
                   </Tabs>
                 </div>
+
+                <Switch
+                  label="Transparent background"
+                  checked={transparent}
+                  onToggle={() => setTransparent((v) => !v)}
+                  disabled={format === "mp4"}
+                  className="w-full !justify-between rounded-2xl border border-border bg-background/40 px-4 py-3"
+                />
+                {format === "mp4" && (
+                  <p className="text-xs text-muted-foreground">
+                    MP4 has no alpha — use WebM, GIF, or APNG for transparency.
+                  </p>
+                )}
 
                 <div>
                   <div className="mb-2 text-sm text-foreground/90">Aspect ratio</div>

@@ -63,10 +63,13 @@ interface DialogContentProps
    *  `<Dialog modal={false}>` — to scope a dialog to a bounded region, e.g. a
    *  docs preview. Defaults to the document body / full-viewport behaviour. */
   container?: HTMLElement | null;
+  /** Skip the built-in top-right close button, e.g. when the panel supplies
+   *  its own close control matching a pixel-perfect design (Paper Help modal). */
+  hideClose?: boolean;
 }
 
 const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
-  ({ className, children, size = "sm", container, ...props }, ref) => {
+  ({ className, children, size = "sm", container, hideClose, ...props }, ref) => {
     const XIcon = useIcon("x");
     const open = useContext(DialogOpenContext);
     const shape = useShape();
@@ -132,16 +135,18 @@ const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
           >
             <SurfaceProvider value={dialogLevel}>
               {children}
-              <DialogPrimitive.Close asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="absolute right-3 top-3"
-                >
-                  <XIcon />
-                  <span className="sr-only">Close</span>
-                </Button>
-              </DialogPrimitive.Close>
+              {!hideClose && (
+                <DialogPrimitive.Close asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="absolute right-3 top-3"
+                  >
+                    <XIcon />
+                    <span className="sr-only">Close</span>
+                  </Button>
+                </DialogPrimitive.Close>
+              )}
             </SurfaceProvider>
           </motion.div>
         </DialogPrimitive.Content>

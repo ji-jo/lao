@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useProject } from "@/state/project";
-import { useTools } from "@/state/tools";
+import { useTools, isBrushTool } from "@/state/tools";
 import { usePlayback } from "@/state/playback";
 import { useSelection } from "@/state/selection";
 import { useViewport } from "@/state/viewport";
@@ -11,6 +11,8 @@ import {
   straightLinePoints,
   warpPoints,
   translatePoints,
+  transformPoints,
+  boundsCenter,
   handleIndices,
   distanceToPoints,
   pointsBounds,
@@ -65,6 +67,24 @@ export function StageCanvas() {
     w: number;
     h: number;
   } | null>(null);
+  const panRef = useRef<{
+    startX: number;
+    startY: number;
+    startPanX: number;
+    startPanY: number;
+  } | null>(null);
+  const transformRef = useRef<{
+    mode: "scale" | "rotate";
+    ids: string[];
+    pivotX: number;
+    pivotY: number;
+    startDist: number;
+    startAngle: number;
+    scale: number;
+    rotation: number;
+    snapshots: Map<string, { points: StrokePoint[]; size: number }>;
+  } | null>(null);
+  const spaceRef = useRef(false);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -72,6 +92,7 @@ export function StageCanvas() {
     const pressure = new PressureTracker();
     let strokeStart = 0;
     let handleSpots: { strokeId: string; index: number; sx: number; sy: number }[] = [];
+    let transformSpots: { kind: "scale" | "rotate"; sx: number; sy: number }[] = [];
 
     const artCanvas = document.createElement("canvas");
     artRef.current = artCanvas;
@@ -94,12 +115,12 @@ export function StageCanvas() {
       canvas.width = parent.clientWidth;
       canvas.height = parent.clientHeight;
       const { pw, ph } = projectSize();
-      const zoom = useViewport.getState().zoom;
+      const { zoom, panX, panY } = useViewport.getState();
       const scale = Math.min(canvas.width / pw, canvas.height / ph) * 0.82 * zoom;
       fitRef.current = {
         scale,
-        ox: (canvas.width - pw * scale) / 2,
-        oy: (canvas.height - ph * scale) / 2,
+        ox: (canvas.width - pw * scale) / 2 + panX,
+        oy: (canvas.height - ph * scale) / 2 + panY,
       };
       artCanvas.width = Math.max(Math.round(pw * DRAFT_SCALE), 1);
       artCanvas.height = Math.max(Math.round(ph * DRAFT_SCALE), 1);
@@ -187,6 +208,7 @@ export function StageCanvas() {
       const live = liveRef.current;
       const warp = warpRef.current;
       const move = moveRef.current;
+      const xf = transformRef.current;
       const animatron = ps.project.workflow === "animatron";
       const timeMs = (ps.frameIndex / Math.max(ps.project.fps, 1)) * 1000;
       ps.project.layers.forEach((layer, li) => {
@@ -197,6 +219,24 @@ export function StageCanvas() {
         const isTarget = li === ps.layerIndex;
         if (!cel && !(isTarget && live)) return;
         let strokes = cel?.strokes ?? [];
+        if (xf && isTarget) {
+          strokes = strokes.map((s) => {
+            if (!xf.ids.includes(s.id)) return s;
+            const snap = xf.snapshots.get(s.id);
+            if (!snap) return s;
+            return {
+              ...s,
+              points: transformPoints(
+                snap.points,
+                xf.pivotX,
+                xf.pivotY,
+                xf.scale,
+                xf.rotation,
+              ),
+              size: Math.max(0.5, snap.size * xf.scale),
+            };
+          });
+        }
         if (animatron && pb.playing) {
           strokes = strokes
             .map((s) => {
@@ -263,6 +303,7 @@ export function StageCanvas() {
 
       // --- selection overlay (select tool) ---
       handleSpots = [];
+      transformSpots = [];
       selBBoxRef.current = null;
       try {
         const selIds = useSelection.getState().ids;
@@ -296,6 +337,38 @@ export function StageCanvas() {
             ctx.setLineDash([5, 4]);
             ctx.strokeRect(rx, ry, rw, rh);
             ctx.setLineDash([]);
+
+            const cx = bx + ((bounds.minX + bounds.maxX) / 2) * scale;
+            const corners = [
+              { sx: bx + bounds.minX * scale, sy: by + bounds.minY * scale },
+              { sx: bx + bounds.maxX * scale, sy: by + bounds.minY * scale },
+              { sx: bx + bounds.minX * scale, sy: by + bounds.maxY * scale },
+              { sx: bx + bounds.maxX * scale, sy: by + bounds.maxY * scale },
+            ];
+            for (const c of corners) {
+              transformSpots.push({ kind: "scale", sx: c.sx, sy: c.sy });
+              ctx.fillStyle = "#0e0e11";
+              ctx.strokeStyle = "#2b5cff";
+              ctx.lineWidth = 1.2;
+              ctx.beginPath();
+              ctx.rect(c.sx - 4, c.sy - 4, 8, 8);
+              ctx.fill();
+              ctx.stroke();
+            }
+            const rot = { sx: cx, sy: ry - 22 };
+            transformSpots.push({ kind: "rotate", sx: rot.sx, sy: rot.sy });
+            ctx.beginPath();
+            ctx.moveTo(cx, ry);
+            ctx.lineTo(rot.sx, rot.sy);
+            ctx.strokeStyle = "#2b5cff88";
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            ctx.fillStyle = "#0e0e11";
+            ctx.strokeStyle = "#f5a623";
+            ctx.beginPath();
+            ctx.arc(rot.sx, rot.sy, 5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
           }
           // warp handles for a single selected stroke
           if (selStrokes.length === 1) {
@@ -320,12 +393,55 @@ export function StageCanvas() {
       } catch {
         // never let overlay bugs kill the rAF loop (crash → restore banner)
         handleSpots = [];
+        transformSpots = [];
         selBBoxRef.current = null;
       }
     }
 
+    function celSnapshots(ids: string[], cel: { strokes: Stroke[] }) {
+      const snapshots = new Map<string, { points: StrokePoint[]; size: number }>();
+      for (const s of cel.strokes) {
+        if (ids.includes(s.id)) {
+          snapshots.set(s.id, {
+            points: s.points.map((p) => ({ ...p })),
+            size: s.size,
+          });
+        }
+      }
+      return snapshots;
+    }
+
+    function selectionPivot(ids: string[], cel: { strokes: Stroke[] }) {
+      const allPts: StrokePoint[] = [];
+      for (const s of cel.strokes) {
+        if (ids.includes(s.id)) allPts.push(...s.points);
+      }
+      const bounds = pointsBounds(allPts);
+      return bounds ? boundsCenter(bounds) : null;
+    }
+
+    function beginPan(e: PointerEvent) {
+      try {
+        canvas.setPointerCapture(e.pointerId);
+      } catch {
+        // best-effort
+      }
+      const { panX, panY } = useViewport.getState();
+      panRef.current = {
+        startX: e.clientX,
+        startY: e.clientY,
+        startPanX: panX,
+        startPanY: panY,
+      };
+      canvas.style.cursor = "grabbing";
+    }
+
     function onPointerDown(e: PointerEvent) {
       const tools = useTools.getState();
+      if (e.button === 1 || (spaceRef.current && e.button === 0) || tools.tool === "hand") {
+        beginPan(e);
+        return;
+      }
       if (e.button !== 0) return;
 
       if (tools.tool === "select") {
@@ -334,17 +450,62 @@ export function StageCanvas() {
         const sx = e.clientX - rect.left;
         const sy = e.clientY - rect.top;
 
+        const ps = useProject.getState();
+        const layer = ps.project.layers[ps.layerIndex];
+        const animatron = ps.project.workflow === "animatron";
+        const cel = layer
+          ? animatron
+            ? layer.frames.find((f) => f) ?? null
+            : resolveCel(layer, ps.frameIndex)
+          : null;
+
+        // scale / rotate handles on the selection bbox
+        if (sel.ids.length && cel) {
+          const tspot = transformSpots.find(
+            (h) => Math.hypot(h.sx - sx, h.sy - sy) <= HANDLE_HIT_PX,
+          );
+          const pivot = selectionPivot(sel.ids, cel);
+          const snapshots = celSnapshots(sel.ids, cel);
+          if (tspot && pivot && snapshots.size) {
+            try {
+              canvas.setPointerCapture(e.pointerId);
+            } catch {
+              // best-effort
+            }
+            const { x, y } = toProject(e);
+            if (tspot.kind === "scale") {
+              transformRef.current = {
+                mode: "scale",
+                ids: [...sel.ids],
+                pivotX: pivot.x,
+                pivotY: pivot.y,
+                startDist: Math.hypot(x - pivot.x, y - pivot.y) || 1,
+                startAngle: 0,
+                scale: 1,
+                rotation: 0,
+                snapshots,
+              };
+            } else {
+              transformRef.current = {
+                mode: "rotate",
+                ids: [...sel.ids],
+                pivotX: pivot.x,
+                pivotY: pivot.y,
+                startDist: 1,
+                startAngle: Math.atan2(y - pivot.y, x - pivot.x),
+                scale: 1,
+                rotation: 0,
+                snapshots,
+              };
+            }
+            dirtyRef.current = true;
+            return;
+          }
+        }
+
         // grab a warp handle first
         const spot = handleSpots.find((h) => Math.hypot(h.sx - sx, h.sy - sy) <= HANDLE_HIT_PX);
         if (spot) {
-          const ps = useProject.getState();
-          const layer = ps.project.layers[ps.layerIndex];
-          const animatron = ps.project.workflow === "animatron";
-          const cel = layer
-            ? animatron
-              ? layer.frames.find((f) => f) ?? null
-              : resolveCel(layer, ps.frameIndex)
-            : null;
           const stroke = cel?.strokes.find((s) => s.id === spot.strokeId);
           if (stroke?.points?.length) {
             try {
@@ -376,14 +537,6 @@ export function StageCanvas() {
           sx <= bbox.x + bbox.w &&
           sy <= bbox.y + bbox.h
         ) {
-          const ps = useProject.getState();
-          const layer = ps.project.layers[ps.layerIndex];
-          const animatron = ps.project.workflow === "animatron";
-          const cel = layer
-            ? animatron
-              ? layer.frames.find((f) => f) ?? null
-              : resolveCel(layer, ps.frameIndex)
-            : null;
           if (cel) {
             const snapshots = new Map<string, StrokePoint[]>();
             for (const s of cel.strokes) {
@@ -412,14 +565,6 @@ export function StageCanvas() {
 
         // otherwise pick a stroke (topmost wins), shift toggles
         const { x, y } = toProject(e);
-        const ps = useProject.getState();
-        const layer = ps.project.layers[ps.layerIndex];
-        const animatron = ps.project.workflow === "animatron";
-        const cel = layer
-          ? animatron
-            ? layer.frames.find((f) => f) ?? null
-            : resolveCel(layer, ps.frameIndex)
-          : null;
         let hit: string | null = null;
         if (cel) {
           for (let i = cel.strokes.length - 1; i >= 0; i--) {
@@ -441,6 +586,9 @@ export function StageCanvas() {
         return;
       }
 
+      // only brush tools stamp strokes; shapes/fill/text land in later passes
+      if (!isBrushTool(tools.tool)) return;
+
       try {
         canvas.setPointerCapture(e.pointerId);
       } catch {
@@ -458,6 +606,7 @@ export function StageCanvas() {
           points: [],
           seed: Math.floor(Math.random() * 2 ** 31),
           jitter: tools.jitterByDefault,
+          grain: tools.grainByDefault,
         },
         points: [{ x, y, pressure: p, t: 0 }],
       };
@@ -465,6 +614,28 @@ export function StageCanvas() {
     }
 
     function onPointerMove(e: PointerEvent) {
+      const pan = panRef.current;
+      if (pan) {
+        useViewport.getState().setPan(
+          pan.startPanX + (e.clientX - pan.startX),
+          pan.startPanY + (e.clientY - pan.startY),
+        );
+        dirtyRef.current = true;
+        return;
+      }
+      const xf = transformRef.current;
+      if (xf) {
+        const { x, y } = toProject(e);
+        if (xf.mode === "scale") {
+          const dist = Math.hypot(x - xf.pivotX, y - xf.pivotY) || 0.001;
+          xf.scale = Math.max(0.05, Math.min(20, dist / xf.startDist));
+        } else {
+          const angle = Math.atan2(y - xf.pivotY, x - xf.pivotX);
+          xf.rotation = angle - xf.startAngle;
+        }
+        dirtyRef.current = true;
+        return;
+      }
       const warp = warpRef.current;
       if (warp) {
         const { x, y } = toProject(e);
@@ -502,6 +673,33 @@ export function StageCanvas() {
     }
 
     function onPointerUp(e: PointerEvent) {
+      if (panRef.current) {
+        panRef.current = null;
+        try {
+          canvas.releasePointerCapture(e.pointerId);
+        } catch {
+          // best-effort
+        }
+        canvas.style.cursor = spaceRef.current ? "grab" : "";
+        dirtyRef.current = true;
+        return;
+      }
+      const xf = transformRef.current;
+      if (xf) {
+        transformRef.current = null;
+        try {
+          canvas.releasePointerCapture(e.pointerId);
+        } catch {
+          // best-effort
+        }
+        if (xf.scale !== 1 || xf.rotation !== 0) {
+          useProject
+            .getState()
+            .transformStrokes(xf.ids, xf.pivotX, xf.pivotY, xf.scale, xf.rotation);
+        }
+        dirtyRef.current = true;
+        return;
+      }
       const warp = warpRef.current;
       if (warp) {
         warpRef.current = null;
@@ -560,10 +758,29 @@ export function StageCanvas() {
     }
 
     function onWheel(e: WheelEvent) {
-      if (!(e.ctrlKey || e.metaKey)) return;
       e.preventDefault();
-      if (e.deltaY < 0) useViewport.getState().zoomIn();
-      else if (e.deltaY > 0) useViewport.getState().zoomOut();
+      if (e.ctrlKey || e.metaKey) {
+        if (e.deltaY < 0) useViewport.getState().zoomIn();
+        else if (e.deltaY > 0) useViewport.getState().zoomOut();
+        return;
+      }
+      useViewport.getState().panBy(-e.deltaX, -e.deltaY);
+    }
+
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.code !== "Space" || e.repeat) return;
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
+        return;
+      e.preventDefault();
+      spaceRef.current = true;
+      if (!panRef.current) canvas.style.cursor = "grab";
+    }
+
+    function onKeyUp(e: KeyboardEvent) {
+      if (e.code !== "Space") return;
+      spaceRef.current = false;
+      if (!panRef.current) canvas.style.cursor = "";
     }
 
     canvas.addEventListener("pointerdown", onPointerDown);
@@ -571,10 +788,14 @@ export function StageCanvas() {
     canvas.addEventListener("pointerup", onPointerUp);
     canvas.addEventListener("pointercancel", onPointerUp);
     canvas.addEventListener("wheel", onWheel, { passive: false });
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
 
     return () => {
       cancelScheduled();
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
       unsub();
       unsubPb();
       unsubSel();

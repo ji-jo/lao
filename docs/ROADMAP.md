@@ -10,10 +10,8 @@ Stop Motion vs Animatron workflows, layer-per-path clips, auto-record, clip time
 
 ## 2. Export fidelity
 
-- **Frame-accurate shader export** — shaders currently export as a real-time snapshot from
-  the hidden mount, not per-frame deterministic. Paper shaders accept a `frame`/time control
-  via ShaderMount; drive it per exported frame.
-- Transparent-background export option (WebM alpha / APNG).
+- **Frame-accurate shader export** — **shipped**: export drives Paper `frame` (ms) with `speed=0` per timeline frame at full resolution.
+- **Transparent-background export** — **shipped**: WebM VP9 alpha, GIF/APNG transparency toggle in Export dialog.
 
 ## 3. Line effects from @paper-design/shaders-react
 
@@ -23,11 +21,11 @@ dithering, halftone on strokes. Needs an offscreen art canvas → shader texture
 
 ## 4. Drawing/editing quality of life
 
-- Brush textures/grain (the stamp pipeline in `renderer.ts` is architected for it — BOIL
-  spec §6 in the parent folder's `BOIL_animation_tool_spec.md`).
-- Move/rotate/scale selected strokes — **translate (move) shipped**; rotate/scale still open.
+- Brush textures/grain — **shipped** (seeded paper grain via `grain` stroke flag + Status Island toggle).
+- Move/rotate/scale selected strokes — **shipped** (bbox corner scale, rotation handle, group move).
 - Marquee/lasso selection.
-- Pan/zoom of the canvas (currently fit-to-screen only).
+- Pan/zoom of the canvas — **shipped** (wheel pan, Ctrl/Cmd+wheel or +/- zoom, Space/middle-drag pan, Ctrl/Cmd+0 reset).
+- Paper dock hover/tooltips/conjoined shapes — **in progress** (see `docs/MVP1_REQUIREMENTS.md`).
 - Proper eraser/pencil icons if itshover ever ships them (letter icons are placeholders).
 
 ## 5. From the original BOIL spec (v1 non-goals, still on the horizon)

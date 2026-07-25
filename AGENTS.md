@@ -69,6 +69,39 @@ by hand with Tailwind + the existing tokens — do not reach for a new dependenc
 7. Boil/jitter must stay **deterministic** (seeded) so preview === export. Tests enforce it.
 8. Keep `npx tsc -b` clean and `bun test` green before every commit.
 
+## Design source of truth — Paper (read this before touching any chrome)
+
+All UI chrome is specced pixel-perfect in D's Paper file:
+`https://app.paper.design/file/01KWXWG7GMJVEGMB4Q9N17YDXT` (nodes referenced as `5S8-0`,
+`A08-0`, `A0H-0`, `2W5-0`, …). Match it exactly — padding, gaps, hovers, radii, colors.
+
+**Use the Paper MCP. Do NOT read the design through a browser.**
+Paper Desktop runs a local MCP server (`http://127.0.0.1:29979/mcp`, plugin
+`paper-desktop@paper`) exposing `get_selection`, `get_node_info`, `find_nodes`,
+`get_jsx`, `get_computed_styles`, `get_tokens`, `get_tree_summary`, `get_screenshot`.
+
+Paper's own server instructions: *"use `get_jsx`, `get_computed_styles`, … for exact
+values — do not read sizes or colors from screenshots alone."*
+
+- `get_computed_styles` on one node returns real px/hex. `get_jsx` returns real markup
+  (incl. exact SVG paths). One call beats twenty screenshots.
+- `app.paper.design` in a browser renders to **canvas** — there is no DOM to inspect, so
+  browser automation degrades to eyeballing JPEGs and blind-clicking the wrong nodes.
+  This has produced wrong values repeatedly. Don't do it.
+- If the MCP tools are missing (`mcp__paper__*` absent), the plugin was likely installed
+  mid-session — **MCP servers only connect at startup, so restart Claude Code** (keep Paper
+  Desktop open with the file loaded). Verify the server independently with:
+  `curl -sX POST http://127.0.0.1:29979/mcp -H 'Content-Type: application/json'
+  -H 'Accept: application/json, text/event-stream'
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'`
+- Only fall back to a pasted node export (D right-clicks → Copy as… → SVG / React CSS /
+  Tailwind) when the MCP is genuinely unavailable. Screenshots are a last resort for
+  *review*, never for deriving values.
+
+`src/components/chrome/paper-tokens.ts` is a hand-maintained mirror and **drifts** — its
+`timelineWidth` sat at 686 while Paper said 704, silently squeezing the whole timeline dock.
+Re-verify a token against Paper before trusting it; prefer `get_tokens` where it applies.
+
 ## Current UI layout (as of the latest commit)
 
 - **Top-left** — `@beui/overflow-actions`: Stop-motion / Animatron toggle + File overflow

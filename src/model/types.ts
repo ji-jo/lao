@@ -16,7 +16,26 @@ export interface StrokeClip {
   startMs: number;
   /** ms duration of the draw-on / hold window */
   durationMs: number;
+  /** optional Animatron easing + fade (preview === export) */
+  easing?: ClipEasing;
 }
+
+/** Cubic bezier easing [x1,y1,x2,y2] — Animatron clip timing curves */
+export type Bezier4 = [number, number, number, number];
+
+export interface ClipEasing {
+  bezier: Bezier4;
+  fadeInFrames: number;
+  fadeOutFrames: number;
+  presetId?: string;
+}
+
+export const DEFAULT_CLIP_EASING: ClipEasing = {
+  bezier: [0.44, 0, 0.56, 1],
+  fadeInFrames: 4,
+  fadeOutFrames: 4,
+  presetId: "smooth",
+};
 
 export interface Stroke {
   id: string;
@@ -29,6 +48,8 @@ export interface Stroke {
   seed: number;
   /** whether this stroke boils in animate/preview mode */
   jitter: boolean;
+  /** textured grain fill (pencil-style paper noise) */
+  grain?: boolean;
   /** Animatron clip timing (ignored in stop-motion paint) */
   clip?: StrokeClip;
 }
