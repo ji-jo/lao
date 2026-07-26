@@ -46,6 +46,17 @@ export const PAPER = {
   clipPlayheadLine: "#66261D",
   /** ellipsis / close glyph in the workflow bar — Paper 106-0 */
   ellipsisIcon: "#D9D9D9",
+  /**
+   * Hover treatment for modal primary/secondary/close buttons — out of
+   * Paper's scope (a static design tool doesn't spec interaction), built once
+   * to be reused rather than re-invented per modal. Bg/border only, no
+   * scale/shadow — see `GradientHoverButton`.
+   */
+  primaryBtnHoverGradient:
+    "linear-gradient(in oklab 180deg, oklab(10% 0 -0.01) 0%, oklab(58% -0.03 -0.13) 100%)",
+  secondaryBtnHoverGradient: "linear-gradient(180deg, #313131 0%, #262626 100%)",
+  /** a gradient, not a flat wash — GradientHoverButton pans it to pulse */
+  closeChipHoverWash: "linear-gradient(180deg, rgba(255,255,255,0.3) 0%, rgba(255,255,255,0.08) 100%)",
   insetX: 62,
   insetTop: 24,
   insetBottom: 48,

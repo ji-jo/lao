@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Tabs, TabsList, TabItem } from "@/components/ui/tabs";
 import { SliderComfortable } from "@/components/ui/slider";
+import { GradientHoverButton } from "@/components/ui/gradient-hover-button";
 import { useProject } from "@/state/project";
 import { paintProjectFrame } from "@/engine/paintFrame";
 import { paintBackground } from "@/engine/background";
@@ -62,8 +64,22 @@ function FieldLabel({ children }: { children: string }) {
   );
 }
 
-/** Segmented control — Paper: #121212 track, 1px #292A2A outline, #313131 selected. */
-function Segmented<T extends string>({
+/**
+ * Video Type / Quality — the fluid `Tabs` component (D: "I want to use the
+ * tabs from fluid everywhere but adjust the sizing/width based on the
+ * designs in my product"), resized to Paper `1CQ-0`'s segmented control:
+ * `#121212` track, `1px #292A2A` outline, `#313131` selected chip.
+ *
+ * The selected-chip color is normally the design system's own elevated-
+ * surface level (`surfaceClasses`), which isn't exposed as a prop and, this
+ * deep inside a Dialog, resolves lighter than Paper's flat `#313131`. Rather
+ * than fork `tabs.tsx` or add a prop to the shared component, this overrides
+ * it the same way `SettingsDocks.tsx`'s `OnOffTabs` already does — an
+ * arbitrary descendant selector targeting the indicator by its own built-in
+ * classes. Zero changes to the shared component; every other consumer is
+ * unaffected.
+ */
+function PaperTabs<T extends string>({
   value,
   options,
   onChange,
@@ -75,34 +91,32 @@ function Segmented<T extends string>({
   label: string;
 }) {
   return (
-    <div
-      role="radiogroup"
-      aria-label={label}
-      className="flex items-center gap-1 self-stretch overflow-clip rounded-lg p-0.5"
-      style={{ backgroundColor: PAPER.segmentBg, outline: `1px solid ${PAPER.borderHairline}` }}
-    >
-      {options.map((o) => {
-        const active = o.id === value;
-        return (
-          <button
+    <Tabs value={value} onValueChange={(v) => onChange(v as T)} className="w-full">
+      <TabsList
+        aria-label={label}
+        className={cn(
+          "!w-full !gap-1 !rounded-lg !bg-[#121212] !p-0.5",
+          "!outline !outline-1 !outline-[#292A2A]",
+          // selected chip = Paper #313131 (overrides the fluid surface indicator)
+          "[&>div.absolute.pointer-events-none:first-of-type]:!bg-[#313131]",
+          // hover wash, dimmer than the selected chip — `bg-hover` (the fluid
+          // component's default) isn't defined anywhere in this theme
+          // (grep index.css: zero matches), so the hover indicator rendered
+          // with no color at all. #252525 reuses the same grey this app
+          // already treats as "hovered chip" everywhere else.
+          "[&>div.bg-hover]:!bg-[#252525]",
+        )}
+      >
+        {options.map((o) => (
+          <TabItem
             key={o.id}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            onClick={() => onChange(o.id)}
-            className="flex flex-1 cursor-pointer flex-col items-center justify-center overflow-clip rounded-[7px] px-2 py-1 transition-colors"
-            style={{ backgroundColor: active ? PAPER.segmentActive : PAPER.segmentBg }}
-          >
-            <span
-              className="w-fit content-center text-xs leading-4 text-white opacity-80"
-              style={{ fontFamily: PAPER.fontMono }}
-            >
-              {o.label}
-            </span>
-          </button>
-        );
-      })}
-    </div>
+            value={o.id}
+            label={o.label}
+            className="!h-auto !flex-1 !justify-center !gap-0 !rounded-[7px] !px-2 !py-1 [&_span]:![font-family:'Geist_Mono',ui-monospace,monospace] [&_span]:!text-xs [&_span]:!leading-4"
+          />
+        ))}
+      </TabsList>
+    </Tabs>
   );
 }
 
@@ -193,11 +207,21 @@ export function ExportDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         hideClose
-        className="w-[400px] max-w-[400px] gap-6 overflow-clip border-0 p-4 antialiased sm:max-w-[400px]"
+        className="w-[400px] max-w-[400px] overflow-clip border-0 p-4 antialiased sm:max-w-[400px]"
         // radius inline: the design-system shape context sets 18px on the panel
         // and would win over a `rounded-2xl` class — Paper 1CQ-0 specifies 16px
         style={{ backgroundColor: PAPER.surface, borderRadius: 16 }}
       >
+        {/*
+          DialogContent is NOT a flex container by default — `shape.container`
+          only ever supplies a `rounded-*` class (see shape-context.tsx), so a
+          `gap-*`/`self-stretch` on DialogContent itself is silently inert
+          (it stayed `display: block`, every section gap measured 0px live).
+          Every other Dialog in this codebase supplies its own inner flex
+          wrapper for exactly this reason — this one just skipped it.
+          Paper 1CQ-0: flexDirection column, alignItems end, gap 24px.
+        */}
+        <div className="flex w-full flex-col items-end gap-6">
         {/* header — Redaction 35 title + close chip */}
         <div className="flex items-start justify-between self-stretch">
           <div className="flex flex-col items-start gap-1">
@@ -214,37 +238,39 @@ export function ExportDialog({
               Render the scene to an image or the whole sequence to a video.
             </span>
           </div>
-          <button
-            type="button"
+          <GradientHoverButton
             onClick={() => onOpenChange(false)}
             aria-label="Close"
+            background={PAPER.modeActiveGradient}
+            hoverBackground={PAPER.closeChipHoverWash}
+            backgroundOrigin="border-box"
+            borderColor="#C9C9C933"
+            borderWidth={0.5}
+            durationMs={160}
             className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full"
-            style={{
-              backgroundImage: PAPER.modeActiveGradient,
-              backgroundOrigin: "border-box",
-              border: "0.5px solid #C9C9C933",
-            }}
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0.375 0.375 6 6"
-              style={{ opacity: 0.8, flexShrink: 0 }}
-            >
-              <path
-                d="M4.993 5.258C5.066 5.331 5.184 5.331 5.258 5.258 5.331 5.184 5.331 5.066 5.258 4.993L3.64 3.375 5.258 1.757C5.331 1.684 5.331 1.566 5.258 1.492 5.184 1.419 5.066 1.419 4.993 1.492L3.375 3.11 1.757 1.492C1.684 1.419 1.566 1.419 1.492 1.492 1.42 1.566 1.42 1.684 1.492 1.757L3.11 3.375 1.492 4.993C1.42 5.066 1.42 5.184 1.492 5.258 1.566 5.331 1.684 5.331 1.757 5.258L3.375 3.64 4.993 5.258Z"
-                fill="#FFFFFF"
-              />
-            </svg>
-          </button>
+            {(hovered) => (
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0.375 0.375 6 6"
+                style={{ opacity: hovered ? 1 : 0.8, flexShrink: 0 }}
+              >
+                <path
+                  d="M4.993 5.258C5.066 5.331 5.184 5.331 5.258 5.258 5.331 5.184 5.331 5.066 5.258 4.993L3.64 3.375 5.258 1.757C5.331 1.684 5.331 1.566 5.258 1.492 5.184 1.419 5.066 1.419 4.993 1.492L3.375 3.11 1.757 1.492C1.684 1.419 1.566 1.419 1.492 1.492 1.42 1.566 1.42 1.684 1.492 1.757L3.11 3.375 1.492 4.993C1.42 5.066 1.42 5.184 1.492 5.258 1.566 5.331 1.684 5.331 1.757 5.258L3.375 3.64 4.993 5.258Z"
+                  fill="#FFFFFF"
+                />
+              </svg>
+            )}
+          </GradientHoverButton>
         </div>
 
         {/* Video Type + Quality */}
         <div className="flex items-start gap-4 self-stretch">
           <div className="flex flex-1 flex-col items-start gap-3">
             <FieldLabel>Video Type</FieldLabel>
-            <Segmented
+            <PaperTabs
               label="Video Type"
               value={format}
               options={VIDEO_TYPES}
@@ -253,7 +279,7 @@ export function ExportDialog({
           </div>
           <div className="flex flex-1 flex-col items-start gap-3">
             <FieldLabel>Quality</FieldLabel>
-            <Segmented
+            <PaperTabs
               label="Quality"
               value={quality}
               options={QUALITIES}
@@ -318,43 +344,47 @@ export function ExportDialog({
           <div className="self-stretch text-center text-xs text-red-400">{error}</div>
         )}
 
-        {/* Close / Save */}
+        {/* Close / Save — hover is bg/border-gradient only, see GradientHoverButton */}
         <div className="flex items-start gap-1 self-end">
-          <button
-            type="button"
+          <GradientHoverButton
             onClick={() => onOpenChange(false)}
+            background={PAPER.pillHover}
+            hoverBackground={PAPER.secondaryBtnHoverGradient}
+            hoverBorderColor={PAPER.outline}
             className="flex h-9 w-[120px] shrink-0 cursor-pointer items-center justify-center rounded-full py-1.5"
-            style={{ backgroundColor: PAPER.pillHover }}
           >
-            <span
-              className="text-sm leading-[18px] tracking-[0.02em]"
-              style={{ color: PAPER.text, fontFamily: PAPER.fontSans }}
-            >
-              Close
-            </span>
-          </button>
-          <button
-            type="button"
+            {(hovered) => (
+              <span
+                className="text-sm leading-[18px] tracking-[0.02em] transition-colors"
+                style={{ color: hovered ? "#FFFFFF" : PAPER.text, fontFamily: PAPER.fontSans }}
+              >
+                Close
+              </span>
+            )}
+          </GradientHoverButton>
+          <GradientHoverButton
             disabled={busy}
             onClick={() => void run()}
+            background="linear-gradient(in oklab 180deg, oklab(0% 0 0) 0%, oklab(48.5% -0.018 -0.082) 100%)"
+            hoverBackground={PAPER.primaryBtnHoverGradient}
+            backgroundOrigin="border-box"
+            borderColor={PAPER.frameActiveBorder}
+            hoverBorderColor={PAPER.frameActive}
             className={cn(
               "flex h-9 w-[120px] shrink-0 items-center justify-center rounded-full py-1.5",
-              busy ? "cursor-not-allowed opacity-60" : "cursor-pointer",
+              !busy && "cursor-pointer",
             )}
-            style={{
-              backgroundImage:
-                "linear-gradient(in oklab 180deg, oklab(0% 0 0) 0%, oklab(48.5% -0.018 -0.082) 100%)",
-              backgroundOrigin: "border-box",
-              border: `1px solid ${PAPER.frameActiveBorder}`,
-            }}
           >
-            <span
-              className="content-center text-sm leading-[18px] tracking-[0.02em]"
-              style={{ color: PAPER.text, fontFamily: PAPER.fontSans }}
-            >
-              {busy ? "Saving…" : "Save"}
-            </span>
-          </button>
+            {(hovered) => (
+              <span
+                className="content-center text-sm leading-[18px] tracking-[0.02em] transition-colors"
+                style={{ color: hovered ? "#FFFFFF" : PAPER.text, fontFamily: PAPER.fontSans }}
+              >
+                {busy ? "Saving…" : "Save"}
+              </span>
+            )}
+          </GradientHoverButton>
+        </div>
         </div>
       </DialogContent>
     </Dialog>

@@ -246,6 +246,27 @@
   }
 }
 
+/**
+ * GradientHoverButton (src/components/ui/gradient-hover-button.tsx) — the
+ * hover gradient breathes instead of sitting static once faded in. A
+ * background-image string can't be interpolated by the browser, so this
+ * doesn't tween the gradient's colors; it pans a taller-than-the-box
+ * gradient up and down (`background-size` + `background-position-y`, both
+ * genuinely interpolable), which reads as the gradient itself pulsing.
+ * Runs continuously — GradientHoverButton only makes it *visible* by
+ * crossfading the layer's opacity on hover, so there's no jarring restart
+ * from a fixed position each time the pointer re-enters.
+ */
+@keyframes gradient-hover-pulse {
+  0%,
+  100% {
+    background-position-y: 0%;
+  }
+  50% {
+    background-position-y: 100%;
+  }
+}
+
 /* react-nano-scrollbar — fill sized parents + dark thumbs; hover-only bars */
 .lao-nano-scroll.react-nano-scrollbar-wrapper {
   min-height: 0;
