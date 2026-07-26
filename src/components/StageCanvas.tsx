@@ -7,6 +7,9 @@ import { useViewport } from "@/state/viewport";
 import { renderStrokes, renderStroke } from "@/engine/renderer";
 import { PressureTracker } from "@/engine/pressure";
 import { paintBackground } from "@/engine/background";
+import { getShaderSnapshotCanvas } from "@/components/ShaderBackground";
+import { getImageFilterSnapshotCanvas } from "@/components/ImageFilterBackground";
+import { hasImageFilter } from "@/lib/image-filters";
 import {
   straightLinePoints,
   warpPoints,
@@ -272,14 +275,39 @@ export function StageCanvas() {
       // artboard: project background, or checkerboard when none
       bgCtx.setTransform(DRAFT_SCALE, 0, 0, DRAFT_SCALE, 0, 0);
       bgCtx.clearRect(0, 0, pw, ph);
+      const shaderCanvas =
+        ps.project.background?.kind === "shader"
+          ? getShaderSnapshotCanvas()
+          : null;
+      const imageFilterCanvas = hasImageFilter(ps.project.background)
+        ? getImageFilterSnapshotCanvas()
+        : null;
       const hasBg = paintBackground(bgCtx, ps.project, {
         onImageReady: () => (dirtyRef.current = true),
+        shaderCanvas,
+        imageFilterCanvas,
       });
+      // Keep redrawing so the artboard tracks live WebGL snapshots.
+      if (
+        ps.project.background?.kind === "shader" ||
+        hasImageFilter(ps.project.background)
+      ) {
+        dirtyRef.current = true;
+      }
 
       const bx = ox, by = oy, bw = pw * scale, bh = ph * scale;
+      // Visual 12px corner radius on the artboard (screen px ≈ canvas px here).
+      const artRadius = Math.min(12, bw / 2, bh / 2);
+      const artboardPath = () => {
+        ctx.beginPath();
+        if (typeof ctx.roundRect === "function") {
+          ctx.roundRect(bx, by, bw, bh, artRadius);
+        } else {
+          ctx.rect(bx, by, bw, bh);
+        }
+      };
       ctx.save();
-      ctx.beginPath();
-      ctx.rect(bx, by, bw, bh);
+      artboardPath();
       ctx.clip();
       // aliased on purpose in edit mode
       ctx.imageSmoothingEnabled = false;
@@ -299,7 +327,8 @@ export function StageCanvas() {
 
       ctx.strokeStyle = "#2b5cff";
       ctx.lineWidth = 1.5;
-      ctx.strokeRect(bx, by, bw, bh);
+      artboardPath();
+      ctx.stroke();
 
       // --- selection overlay (select tool) ---
       handleSpots = [];

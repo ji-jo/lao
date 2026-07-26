@@ -4,6 +4,7 @@ import {
   DialogContent,
   DialogClose,
 } from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { PAPER } from "@/components/chrome/paper-tokens";
 import { cn } from "@/lib/utils";
 
@@ -193,9 +194,10 @@ export function HelpDialog({
             ))}
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+          <div className="min-h-0 flex-1">
+            <ScrollArea className="h-full">
             {tab === "shortcuts" ? (
-              <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-3 pr-1">
                 {pairs(SHORTCUTS).map(([a, b], i) => (
                   <div key={i} className="flex items-start justify-end gap-3 self-stretch">
                     <Row label={a.label} value={a.keys} />
@@ -204,7 +206,7 @@ export function HelpDialog({
                 ))}
               </div>
             ) : (
-              <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-3 pr-1">
                 {pairs(LEGENDS).map(([a, b], i) => (
                   <div key={i} className="flex items-start justify-end gap-3 self-stretch">
                     <div
@@ -237,6 +239,7 @@ export function HelpDialog({
                 ))}
               </div>
             )}
+            </ScrollArea>
           </div>
 
           <div className="flex items-end justify-end gap-1">

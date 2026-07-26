@@ -1,21 +1,23 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { PAPER } from "@/components/chrome/paper-tokens";
 
 /**
- * Scrollbars for the timeline player (Paper 2LM-0, "Max height and width with
- * scroll bar" state).
+ * Scroll affordances for the timeline player (Paper 2LM-0).
  *
- * Paper draws every layer as its own `#0D0D0D` card, so the frame grid has no
- * single scrolling element to hang a native bar off — each row scrolls its own
- * cells while the label column stays pinned. `ScrollBarX` is therefore a
- * *controlled* bar: the Timeline owns one shared offset and every row renders at
- * that offset. `ScrollThumbY` is the opposite — it decorates a real native
- * scroller (rows overflow vertically past 5 layers) and only mirrors it.
+ * Frame rows share one X offset (no single native scroller). `ScrollBarX` is a
+ * nano ScrollArea used as a *controlled* bar: a 1px-tall proxy content owns
+ * scrollLeft, and Timeline mirrors that onto every row.
  */
 
-const BAR_THICKNESS = 5;
-const MIN_THUMB = 32;
+const NANO_CONTENT = ".react-nano-scrollbar-content";
 
 export function ScrollBarX({
   scrollLeft,
@@ -32,86 +34,66 @@ export function ScrollBarX({
   controls?: string;
   className?: string;
 }) {
-  const trackRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{ pointerX: number; scrollLeft: number } | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const syncingRef = useRef(false);
 
   const maxScroll = Math.max(0, contentWidth - viewportWidth);
   const scrollable = maxScroll > 1 && viewportWidth > 0;
-  const thumbWidth = scrollable
-    ? Math.max(MIN_THUMB, Math.round((viewportWidth / contentWidth) * viewportWidth))
-    : 0;
-  const travel = Math.max(0, viewportWidth - thumbWidth);
-  const thumbLeft = maxScroll > 0 ? Math.round((scrollLeft / maxScroll) * travel) : 0;
+
+  const contentEl = useCallback(() => {
+    const root = rootRef.current;
+    if (!root) return null;
+    return root.querySelector(NANO_CONTENT) as HTMLElement | null;
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!scrollable) return;
+    const content = contentEl();
+    if (!content) return;
+    if (Math.abs(content.scrollLeft - scrollLeft) <= 0.5) return;
+    syncingRef.current = true;
+    content.scrollLeft = scrollLeft;
+    syncingRef.current = false;
+  }, [scrollLeft, scrollable, contentEl, contentWidth, viewportWidth]);
 
   useEffect(() => {
-    function onMove(e: PointerEvent) {
-      const drag = dragRef.current;
-      if (!drag || travel <= 0) return;
-      const dx = e.clientX - drag.pointerX;
-      onScroll(
-        Math.max(0, Math.min(maxScroll, drag.scrollLeft + (dx / travel) * maxScroll)),
-      );
-    }
-    function onUp() {
-      dragRef.current = null;
-    }
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
+    if (!scrollable) return;
+    const content = contentEl();
+    if (!content) return;
+    const handleScroll = () => {
+      if (syncingRef.current) return;
+      onScroll(content.scrollLeft);
     };
-  }, [travel, maxScroll, onScroll]);
+    content.addEventListener("scroll", handleScroll, { passive: true });
+    return () => content.removeEventListener("scroll", handleScroll);
+  }, [onScroll, scrollable, contentEl, contentWidth, viewportWidth]);
 
-  function onTrackPointerDown(e: React.PointerEvent) {
-    const track = trackRef.current;
-    if (!track || travel <= 0) return;
-    const clickX = e.clientX - track.getBoundingClientRect().left;
-    // clicking the bare track pages toward the click point
-    if (clickX < thumbLeft || clickX > thumbLeft + thumbWidth) {
-      const target = Math.max(0, Math.min(clickX - thumbWidth / 2, travel));
-      onScroll((target / travel) * maxScroll);
-    }
-  }
+  if (!scrollable) return null;
 
   return (
     <div
-      ref={trackRef}
-      onPointerDown={onTrackPointerDown}
-      className={cn(
-        "relative w-full shrink-0 rounded-full transition-opacity",
-        scrollable ? "opacity-60 hover:opacity-100" : "pointer-events-none opacity-0",
-        className,
-      )}
-      style={{ height: BAR_THICKNESS, backgroundColor: PAPER.borderHairline }}
+      ref={rootRef}
+      id={controls}
+      className={cn("w-full min-w-0", className)}
+      style={{ maxWidth: viewportWidth > 0 ? viewportWidth : undefined }}
     >
-      <div
-        role="scrollbar"
-        aria-orientation="horizontal"
-        aria-controls={controls}
-        aria-valuenow={thumbLeft}
-        tabIndex={-1}
-        onPointerDown={(e) => {
-          e.preventDefault();
-          dragRef.current = { pointerX: e.clientX, scrollLeft };
-        }}
-        className="absolute inset-y-0 left-0 cursor-grab rounded-full hover:opacity-80 active:cursor-grabbing"
-        style={{
-          width: thumbWidth,
-          transform: `translateX(${thumbLeft}px)`,
-          backgroundColor: PAPER.handle,
-        }}
-      />
+      <ScrollArea
+        orientation="horizontal"
+        fade={false}
+        className="lao-nano-thin h-1 w-full"
+      >
+        <div
+          aria-hidden
+          style={{ width: contentWidth, height: 1 }}
+          className="pointer-events-none"
+        />
+      </ScrollArea>
     </div>
   );
 }
 
 /**
- * 4px vertical thumb mirroring a native scroller — Paper 41E-0. Renders into the
- * nearest positioned ancestor; Paper parks it in the modal's right padding
- * gutter, 4px in from the modal edge.
+ * 4px vertical thumb mirroring a native scroller — Paper 41E-0.
  */
 export function ScrollThumbY({
   viewportRef,
@@ -120,17 +102,28 @@ export function ScrollThumbY({
   viewportRef: React.RefObject<HTMLDivElement | null>;
   className?: string;
 }) {
-  const [metrics, setMetrics] = useState({ top: 0, height: 0, scrollable: false });
+  const [metrics, setMetrics] = useState({
+    top: 0,
+    height: 0,
+    scrollable: false,
+  });
 
   const measure = useCallback(() => {
     const vp = viewportRef.current;
     if (!vp) return;
-    const { scrollTop, scrollHeight, clientHeight } = vp;
+    const content =
+      (vp.querySelector(NANO_CONTENT) as HTMLElement | null) ?? vp;
+    const { scrollTop, scrollHeight, clientHeight } = content;
     if (scrollHeight - clientHeight <= 1) {
-      setMetrics((m) => (m.scrollable ? { top: 0, height: 0, scrollable: false } : m));
+      setMetrics((m) =>
+        m.scrollable ? { top: 0, height: 0, scrollable: false } : m,
+      );
       return;
     }
-    const height = Math.max(28, Math.round((clientHeight / scrollHeight) * clientHeight));
+    const height = Math.max(
+      28,
+      Math.round((clientHeight / scrollHeight) * clientHeight),
+    );
     const top = Math.round(
       (scrollTop / (scrollHeight - clientHeight)) * (clientHeight - height),
     );
@@ -140,13 +133,15 @@ export function ScrollThumbY({
   useLayoutEffect(() => {
     const vp = viewportRef.current;
     if (!vp) return;
+    const content =
+      (vp.querySelector(NANO_CONTENT) as HTMLElement | null) ?? vp;
     measure();
-    vp.addEventListener("scroll", measure, { passive: true });
+    content.addEventListener("scroll", measure, { passive: true });
     const ro = new ResizeObserver(measure);
-    ro.observe(vp);
-    if (vp.firstElementChild) ro.observe(vp.firstElementChild);
+    ro.observe(content);
+    if (content.firstElementChild) ro.observe(content.firstElementChild);
     return () => {
-      vp.removeEventListener("scroll", measure);
+      content.removeEventListener("scroll", measure);
       ro.disconnect();
     };
   }, [measure, viewportRef]);
@@ -156,7 +151,11 @@ export function ScrollThumbY({
     <div
       aria-hidden
       className={cn("pointer-events-none absolute w-1 rounded-full", className)}
-      style={{ top: metrics.top, height: metrics.height, backgroundColor: PAPER.handle }}
+      style={{
+        top: metrics.top,
+        height: metrics.height,
+        backgroundColor: PAPER.handle,
+      }}
     />
   );
 }

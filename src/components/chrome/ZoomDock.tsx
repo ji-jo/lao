@@ -10,9 +10,9 @@ export function ZoomDock() {
   const redo = useProject((s) => s.redo);
 
   return (
-    <div className="pointer-events-auto flex items-start gap-2">
+    <div className="pointer-events-auto flex items-center gap-2">
       <div
-        className="flex items-center gap-2 overflow-clip rounded-[7px] px-1 py-[3px] antialiased"
+        className="flex h-7 items-center gap-2 overflow-clip rounded-[7px] px-1 antialiased"
         style={{
           backgroundColor: PAPER.surfaceAlt,
           border: `0.4px solid ${PAPER.borderHairline}`,
@@ -28,7 +28,7 @@ export function ZoomDock() {
           −
         </button>
         <span
-          className="text-sm leading-[18px] text-white"
+          className="inline-block w-[4.5ch] text-center text-sm leading-[18px] text-white tabular-nums"
           style={{ fontFamily: PAPER.fontSans }}
         >
           {Math.round(zoom * 100)}%
@@ -50,7 +50,7 @@ export function ZoomDock() {
         </span>
       </div>
       <div
-        className="flex items-start gap-2 overflow-clip rounded-[7px] px-1 py-[3px]"
+        className="flex h-7 items-center gap-2 overflow-clip rounded-[7px] px-1"
         style={{
           backgroundColor: PAPER.surfaceAlt,
           border: `0.4px solid ${PAPER.borderHairline}`,

@@ -9,10 +9,10 @@ import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { useTools } from "@/state/tools";
 import { useProject } from "@/state/project";
-import { usePlayback } from "@/state/playback";
 import { useViewport } from "@/state/viewport";
 import { SHADER_PRESETS } from "@/components/ShaderBackground";
-import type { Background, BackgroundFit, ShaderPresetId } from "@/model/types";
+import { makeShaderBackground, normalizeShaderPreset } from "@/lib/shader-presets";
+import type { Background, BackgroundFit } from "@/model/types";
 
 const GRADIENT_DEFAULT: Background = {
   kind: "gradient",
@@ -21,12 +21,7 @@ const GRADIENT_DEFAULT: Background = {
   to: "#0b0b0d",
   angle: 135,
 };
-const SHADER_DEFAULT: Background = {
-  kind: "shader",
-  preset: "mesh",
-  colors: ["#5227ff", "#26ffe4", "#ff9f45"],
-  speed: 0.6,
-};
+const SHADER_DEFAULT: Background = makeShaderBackground("plasma");
 
 function Chip({
   active,
@@ -72,17 +67,13 @@ export function StatusIsland() {
   const [view, setView] = useState<IslandView>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
-  const { tool, color, size, autoKey, jitterByDefault, grainByDefault } = useTools();
-  const { setColor, setSize, toggleAutoKey, toggleJitterByDefault, toggleGrainByDefault } =
-    useTools();
+  const { tool, color, size, jitterByDefault, grainByDefault } = useTools();
+  const { setColor, setSize, toggleJitterByDefault, toggleGrainByDefault } = useTools();
   const project = useProject((s) => s.project);
   const frameIndex = useProject((s) => s.frameIndex);
   const setProjectSettings = useProject((s) => s.setProjectSettings);
-  const workflow = usePlayback((s) => s.workflow);
   const zoom = useViewport((s) => s.zoom);
   const background = project.background ?? ({ kind: "none" } as Background);
-
-  const autoLabel = workflow === "animatron" ? "Auto-record" : "Auto-key";
 
   function setBg(bg: Background) {
     setProjectSettings({ background: bg });
@@ -167,12 +158,6 @@ export function StatusIsland() {
                   onToggle={toggleGrainByDefault}
                   className="w-full !justify-between"
                 />
-                <Switch
-                  label={autoLabel}
-                  checked={autoKey}
-                  onToggle={toggleAutoKey}
-                  className="w-full !justify-between"
-                />
               </div>
             </div>
           </div>
@@ -223,13 +208,17 @@ export function StatusIsland() {
                   <div className="flex gap-1.5">
                     <Chip
                       active={background.shape === "linear"}
-                      onClick={() => setBg({ ...background, shape: "linear" })}
+                      onClick={() =>
+                        setBg({ ...background, shape: "linear", css: undefined })
+                      }
                     >
                       Linear
                     </Chip>
                     <Chip
                       active={background.shape === "radial"}
-                      onClick={() => setBg({ ...background, shape: "radial" })}
+                      onClick={() =>
+                        setBg({ ...background, shape: "radial", css: undefined })
+                      }
                     >
                       Radial
                     </Chip>
@@ -238,14 +227,18 @@ export function StatusIsland() {
                     <span className="text-[12px] text-foreground">From</span>
                     <ColorPickerPopover
                       value={background.from}
-                      onValueChange={(v) => setBg({ ...background, from: v })}
+                      onValueChange={(v) =>
+                        setBg({ ...background, from: v, css: undefined })
+                      }
                     />
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-[12px] text-foreground">To</span>
                     <ColorPickerPopover
                       value={background.to}
-                      onValueChange={(v) => setBg({ ...background, to: v })}
+                      onValueChange={(v) =>
+                        setBg({ ...background, to: v, css: undefined })
+                      }
                     />
                   </div>
                   {background.shape === "linear" && (
@@ -253,7 +246,11 @@ export function StatusIsland() {
                       label="Angle"
                       value={background.angle}
                       onChange={(v) =>
-                        setBg({ ...background, angle: typeof v === "number" ? v : v[0] })
+                        setBg({
+                          ...background,
+                          angle: typeof v === "number" ? v : v[0],
+                          css: undefined,
+                        })
                       }
                       min={0}
                       max={360}
@@ -286,10 +283,8 @@ export function StatusIsland() {
                     {SHADER_PRESETS.map((p) => (
                       <Chip
                         key={p.id}
-                        active={background.preset === p.id}
-                        onClick={() =>
-                          setBg({ ...background, preset: p.id as ShaderPresetId })
-                        }
+                        active={normalizeShaderPreset(background.preset) === p.id}
+                        onClick={() => setBg(makeShaderBackground(p.id))}
                       >
                         {p.label}
                       </Chip>

@@ -11,6 +11,8 @@ import type { Project } from "@/model/types";
 import { paintProjectFrame } from "@/engine/paintFrame";
 import { paintBackground, loadBackgroundImage } from "@/engine/background";
 import { getShaderSnapshotCanvas } from "@/components/ShaderBackground";
+import { getImageFilterSnapshotCanvas } from "@/components/ImageFilterBackground";
+import { hasImageFilter } from "@/lib/image-filters";
 import {
   endShaderExport,
   setShaderExportFrame,
@@ -62,7 +64,13 @@ export async function exportProject(
     ctx.clearRect(0, 0, width, height);
     if (!transparent) {
       const shaderCanvas = shaderBg ? await resolveShaderCanvas(frame) : null;
-      const hasBg = paintBackground(ctx, project, { shaderCanvas });
+      const imageFilterCanvas = hasImageFilter(project.background)
+        ? getImageFilterSnapshotCanvas()
+        : null;
+      const hasBg = paintBackground(ctx, project, {
+        shaderCanvas,
+        imageFilterCanvas,
+      });
       if (!hasBg) {
         ctx.fillStyle = FALLBACK_BACKGROUND;
         ctx.fillRect(0, 0, width, height);

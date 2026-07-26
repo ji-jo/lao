@@ -140,6 +140,8 @@
     --surface-6: #FFFFFF;
     --surface-7: #FFFFFF;
     --surface-8: #FFFFFF;
+    /* Fluid scroll-area thumb tint — space-separated RGB channels */
+    --overlay: 0 0 0;
     --shadow-color: rgb(0 0 0 / 0.06);
     --shadow-1: 0 0 0 1px var(--shadow-color);
     --shadow-2: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color);
@@ -152,6 +154,7 @@
 }
 
 .dark {
+    --overlay: 255 255 255;
     --background: oklch(0.145 0 0);
     --foreground: oklch(0.985 0 0);
     --card: oklch(0.205 0 0);
@@ -212,33 +215,245 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
-    }
+  }
   body {
     @apply bg-background text-foreground;
-    }
+  }
   html {
     @apply font-sans;
-    }
+  }
 }
 
-/* react-custom-scroll — match dark floating chrome */
-.lao-custom-scroll .rcs-custom-scrollbar {
-  width: 10px;
-  right: 2px;
+/* @ncdai/scroll-fade-effect — scroll-driven edge masks */
+@keyframes show-top-mask {
+  to {
+    --top-mask-height: var(--mask-height);
+  }
+}
+@keyframes hide-bottom-mask {
+  to {
+    --bottom-mask-height: 0px;
+  }
+}
+@keyframes show-left-mask {
+  to {
+    --left-mask-width: var(--mask-width);
+  }
+}
+@keyframes hide-right-mask {
+  to {
+    --right-mask-width: 0px;
+  }
 }
 
-.lao-custom-scroll .rcs-inner-handle,
-.lao-custom-scroll .lao-scroll-handle {
-  background: color-mix(in oklch, var(--muted-foreground) 45%, transparent);
-  border-radius: 999px;
-  width: 6px;
-  margin-inline: auto;
-  transition: background 120ms ease;
+/* react-nano-scrollbar — fill sized parents + dark thumbs; hover-only bars */
+.lao-nano-scroll.react-nano-scrollbar-wrapper {
+  min-height: 0;
+  min-width: 0;
+}
+.lao-nano-scroll > .react-nano-scrollbar-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+}
+/* @ncdai/scroll-fade-effect on every nano scrollport */
+.lao-nano-scroll.lao-nano-fade-y > .react-nano-scrollbar-content {
+  @apply scroll-fade-effect-y;
+}
+.lao-nano-scroll.lao-nano-fade-x > .react-nano-scrollbar-content {
+  @apply scroll-fade-effect-x;
+}
+.lao-nano-scroll.lao-nano-fade-both > .react-nano-scrollbar-content {
+  @apply scroll-fade-effect-y scroll-fade-effect-x;
+}
+.lao-nano-scroll .react-nano-scrollbar-x,
+.lao-nano-scroll .react-nano-scrollbar-y {
+  background: rgb(255 255 255 / 0.35);
+}
+/* 4px-thick horizontal bar (timeline gutter) */
+.lao-nano-scroll.lao-nano-thin .react-nano-scrollbar-track-x {
+  height: 4px;
+}
+.lao-nano-scroll.lao-nano-thin .react-nano-scrollbar-track-x .react-nano-scrollbar-x {
+  bottom: 0;
+  height: 4px;
+}
+.lao-nano-scroll.lao-nano-thin
+  .react-nano-scrollbar-track-x.react-nano-scrollbar-active
+  .react-nano-scrollbar-x,
+.lao-nano-scroll.lao-nano-thin
+  .react-nano-scrollbar-track-x:hover
+  .react-nano-scrollbar-x {
+  height: 4px;
+}
+.dark .lao-nano-scroll .react-nano-scrollbar-x,
+.dark .lao-nano-scroll .react-nano-scrollbar-y {
+  background: rgb(255 255 255 / 0.4);
+}
+/* Stay fully gone until hover / active scroll (nano sets .moving). */
+.lao-nano-scroll.react-nano-scrollbar-autohide .react-nano-scrollbar-track-x,
+.lao-nano-scroll.react-nano-scrollbar-autohide .react-nano-scrollbar-track-y {
+  opacity: 0;
+  pointer-events: none;
+}
+.lao-nano-scroll.react-nano-scrollbar-autohide:hover .react-nano-scrollbar-track-x,
+.lao-nano-scroll.react-nano-scrollbar-autohide:hover .react-nano-scrollbar-track-y,
+.lao-nano-scroll.react-nano-scrollbar-autohide.react-nano-scrollbar-moving
+  .react-nano-scrollbar-track-x,
+.lao-nano-scroll.react-nano-scrollbar-autohide.react-nano-scrollbar-moving
+  .react-nano-scrollbar-track-y {
+  opacity: 0.5;
+  pointer-events: auto;
+}
+  @property --top-mask-height {
+    syntax: "<length>";
+    inherits: true;
+    initial-value: 0px;
+}
+  @property --bottom-mask-height {
+    syntax: "<length>";
+    inherits: true;
+    initial-value: 64px;
+}
+  @property --left-mask-width {
+    syntax: "<length>";
+    inherits: true;
+    initial-value: 0px;
+}
+  @property --right-mask-width {
+    syntax: "<length>";
+    inherits: true;
+    initial-value: 64px;
 }
 
-.lao-custom-scroll .rcs-custom-scrollbar:hover .rcs-inner-handle,
-.lao-custom-scroll .rcs-custom-scrollbar:hover .lao-scroll-handle,
-.lao-custom-scroll.rcs-scroll-handle-dragged .rcs-inner-handle,
-.lao-custom-scroll.rcs-scroll-handle-dragged .lao-scroll-handle {
-  background: color-mix(in oklch, var(--foreground) 55%, transparent);
+@utility scroll-fade-effect-y {
+    --mask-height: 64px;
+    --mask-offset-top: 0px;
+    --mask-offset-bottom: 0px;
+    --scroll-buffer: 2rem;
+    mask-image: linear-gradient(to top, transparent, black 90%), linear-gradient(to bottom, transparent 0%, black 100%), linear-gradient(black, black);
+    mask-size: 100% var(--top-mask-height), 100% var(--bottom-mask-height), 100% 100%;
+    mask-repeat: no-repeat, no-repeat, no-repeat;
+    mask-position: 0 var(--mask-offset-top), 0 calc(100% - var(--mask-offset-bottom)), 0 0;
+    mask-composite: exclude;
+    animation-name: show-top-mask, hide-bottom-mask;
+    animation-timeline: scroll(self), scroll(self);
+    animation-range: 0 var(--scroll-buffer), calc(100% - var(--scroll-buffer)) 100%;
+    animation-fill-mode: both;
+}
+
+@utility scroll-fade-effect-x {
+    --mask-width: 64px;
+    --mask-offset-left: 0px;
+    --mask-offset-right: 0px;
+    --scroll-buffer: 2rem;
+    mask-image: linear-gradient(to left, transparent, black 90%), linear-gradient(to right, transparent 0%, black 100%), linear-gradient(black, black);
+    mask-size: var(--left-mask-width) 100%, var(--right-mask-width) 100%, 100% 100%;
+    mask-repeat: no-repeat, no-repeat, no-repeat;
+    mask-position: var(--mask-offset-left) 0, calc(100% - var(--mask-offset-right)) 0, 0 0;
+    mask-composite: exclude;
+    animation-name: show-left-mask, hide-right-mask;
+    animation-timeline: scroll(self inline), scroll(self inline);
+    animation-range: 0 var(--scroll-buffer), calc(100% - var(--scroll-buffer)) 100%;
+    animation-fill-mode: both;
+}
+
+/* react-best-gradient-color-picker — match lao dark chrome */
+.lao-bg-color-picker {
+  --rbgcp-background-color: #121212;
+  --rbgcp-input-color: #1a1f24;
+  --rbgcp-input-border: 1px solid #292a2a;
+  color: rgb(255 255 255 / 0.85);
+  font-family: Geist, "Inter Variable", system-ui, sans-serif;
+}
+.lao-bg-color-picker .rbgcp-control-btn-wrapper {
+  background: #121212;
+  border: 1px solid #292a2a;
+  border-radius: 8px;
+}
+.lao-bg-color-picker .rbgcp-control-btn,
+.lao-bg-color-picker .rbgcp-control-icon-btn {
+  color: rgb(255 255 255 / 0.7);
+  background: transparent;
+  font-family: Geist, "Inter Variable", system-ui, sans-serif;
+}
+.lao-bg-color-picker .rbgcp-control-btn-selected {
+  background: #313131;
+  color: #fff;
+}
+.lao-bg-color-picker .rbgcp-color-model-dropdown,
+.lao-bg-color-picker [id*="rbgcp-color-model-dropdown"] {
+  background: #1a1f24;
+  border: 1px solid #292a2a;
+  color: #fff;
+  font-family: Geist, "Inter Variable", system-ui, sans-serif;
+  /* Sit flush under the 24px trigger — library default top:34px left a dead gap. */
+  top: 100% !important;
+  margin-top: 4px !important;
+}
+/* Values — Geist Mono; labels stay Geist (inherited) */
+.lao-bg-color-picker input,
+.lao-bg-color-picker .rbgcp-control-input,
+.lao-bg-color-picker .rbgcp-input,
+.lao-bg-color-picker .rbgcp-hex-input {
+  background: #121212 !important;
+  border: 1px solid #292a2a !important;
+  color: rgb(255 255 255 / 0.85) !important;
+  border-radius: 6px;
+  font-family: "Geist Mono", ui-monospace, monospace !important;
+  font-size: 11px !important;
+  pointer-events: auto !important;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+.lao-bg-color-picker .rbgcp-input-label,
+.lao-bg-color-picker [id*="input-label"],
+.lao-bg-color-picker [class*="InputLabel"] {
+  font-family: Geist, "Inter Variable", system-ui, sans-serif !important;
+}
+/* Gradient angle / stop: keep icons readable + 8px gap to input */
+.lao-bg-color-picker [id*="rbgcp-degree-input-wrapper"],
+.lao-bg-color-picker [id*="rbgcp-stop-input-wrapper"] {
+  width: auto !important;
+  min-width: max-content !important;
+  flex-shrink: 0 !important;
+  align-items: center !important;
+  box-sizing: border-box !important;
+}
+.lao-bg-color-picker [id*="rbgcp-degree-input-wrapper"] > svg,
+.lao-bg-color-picker [id*="rbgcp-stop-input-wrapper"] > svg {
+  width: 18px !important;
+  height: 18px !important;
+  min-width: 18px !important;
+  min-height: 18px !important;
+  flex-shrink: 0 !important;
+  margin-right: 8px !important;
+  display: block !important;
+}
+.lao-bg-color-picker [id*="rbgcp-stop-input-wrapper"] > svg {
+  width: 22px !important;
+  height: 22px !important;
+  min-width: 22px !important;
+  min-height: 22px !important;
+}
+
+/* AdvBar labels — Saturation / Lightness / Brightness */
+.lao-bg-color-picker [id*="rbgcp-advanced-bar-"][id*="-label"] {
+  left: 50% !important;
+  right: auto !important;
+  top: 50% !important;
+  bottom: auto !important;
+  transform: translate(-50%, -50%) !important;
+  width: max-content !important;
+  height: auto !important;
+  line-height: 1.2 !important;
+  text-align: center !important;
+  font-family: Geist, "Inter Variable", system-ui, sans-serif !important;
+  font-size: 11px !important;
+  font-weight: 400 !important;
+  color: rgb(255 255 255 / 0.6) !important;
+  text-shadow: none !important;
+  pointer-events: none !important;
 }

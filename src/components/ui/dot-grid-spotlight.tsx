@@ -17,6 +17,11 @@ export type DotGridSpotlightProps = {
   className?: string;
   /** Listen on this element instead of the canvas (for stacked overlays). */
   trackRef?: React.RefObject<HTMLElement | null>;
+  /**
+   * Controlled spotlight in normalized track coords (0–1).
+   * When set, dots stay lit around this point.
+   */
+  spotlight?: { x: number; y: number } | null;
 };
 
 export function DotGridSpotlight({
@@ -30,9 +35,13 @@ export function DotGridSpotlight({
   activeMinAlpha = 0.5,
   className,
   trackRef,
+  spotlight = null,
 }: DotGridSpotlightProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mouse = useRef({ x: -1000, y: -1000, isActive: false });
+  const spotlightRef = useRef(spotlight);
+  spotlightRef.current = spotlight;
+  const drawRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -51,31 +60,53 @@ export function DotGridSpotlight({
       const offsetX = (width % spacing) / 2;
       const offsetY = (height % spacing) / 2;
 
+      const spot = spotlightRef.current;
+      const spotX = spot ? spot.x * width : mouse.current.x;
+      const spotY = spot ? spot.y * height : mouse.current.y;
+      const isActive = spot ? true : mouse.current.isActive;
+
       for (let x = offsetX; x <= width; x += spacing) {
         for (let y = offsetY; y <= height; y += spacing) {
-          const dx = x - mouse.current.x;
-          const dy = y - mouse.current.y;
+          const dx = x - spotX;
+          const dy = y - spotY;
           const distance = Math.sqrt(dx * dx + dy * dy);
 
-          let currentRadius = baseRadius;
-          let currentColor = dotColor;
-          let currentAlpha = 1.0;
-
-          if (mouse.current.isActive && distance < interactionRadius) {
-            const factor = 1 - distance / interactionRadius;
-            currentRadius = baseRadius + (activeRadius - baseRadius) * factor;
-            currentColor = activeDotColor;
-            currentAlpha = activeMinAlpha + (activeMaxAlpha - activeMinAlpha) * factor;
-          }
-
-          ctx.globalAlpha = currentAlpha;
+          // Always paint the base dot first — fading active alpha to 0 over a
+          // dark pad reads as a concentric hollow ring otherwise.
+          ctx.globalAlpha = 1;
           ctx.beginPath();
-          ctx.arc(x, y, currentRadius, 0, Math.PI * 2);
-          ctx.fillStyle = currentColor;
+          ctx.arc(x, y, baseRadius, 0, Math.PI * 2);
+          ctx.fillStyle = dotColor;
           ctx.fill();
+
+          if (isActive && distance < interactionRadius) {
+            const t = 1 - distance / interactionRadius;
+            const factor = t * t * (3 - 2 * t);
+            const activeAlpha =
+              activeMinAlpha + (activeMaxAlpha - activeMinAlpha) * factor;
+            if (activeAlpha > 0.001) {
+              const r = baseRadius + (activeRadius - baseRadius) * factor;
+              ctx.globalAlpha = activeAlpha;
+              ctx.beginPath();
+              ctx.arc(x, y, r, 0, Math.PI * 2);
+              ctx.fillStyle = activeDotColor;
+              ctx.fill();
+            }
+          }
         }
       }
       ctx.globalAlpha = 1.0;
+    };
+
+    drawRef.current = draw;
+
+    const scheduleDraw = () => {
+      if (renderFrameId === null) {
+        renderFrameId = requestAnimationFrame(() => {
+          draw();
+          renderFrameId = null;
+        });
+      }
     };
 
     const resizeCanvas = () => {
@@ -101,29 +132,20 @@ export function DotGridSpotlight({
     };
 
     const setMouseFromEvent = (e: MouseEvent, active: boolean) => {
-      const rect = canvas.getBoundingClientRect();
+      const track = trackRef?.current ?? canvas;
+      const rect = track.getBoundingClientRect();
       mouse.current = {
         x: e.clientX - rect.left,
         y: e.clientY - rect.top,
         isActive: active,
       };
-      if (renderFrameId === null) {
-        renderFrameId = requestAnimationFrame(() => {
-          draw();
-          renderFrameId = null;
-        });
-      }
+      scheduleDraw();
     };
 
     const handleMouseMove = (e: MouseEvent) => setMouseFromEvent(e, true);
     const handleMouseLeave = () => {
       mouse.current.isActive = false;
-      if (renderFrameId === null) {
-        renderFrameId = requestAnimationFrame(() => {
-          draw();
-          renderFrameId = null;
-        });
-      }
+      scheduleDraw();
     };
 
     const trackEl = trackRef?.current ?? canvas;
@@ -152,6 +174,10 @@ export function DotGridSpotlight({
     activeMinAlpha,
     trackRef,
   ]);
+
+  useEffect(() => {
+    drawRef.current();
+  }, [spotlight?.x, spotlight?.y]);
 
   return (
     <canvas

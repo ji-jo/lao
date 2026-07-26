@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DotGridSpotlight } from "@/components/ui/dot-grid-spotlight";
+import { SliderComfortable } from "@/components/ui/slider";
+import { PAPER } from "@/components/chrome/paper-tokens";
 import { cn } from "@/lib/utils";
-import {
-  DEFAULT_CLIP_EASING,
-  type Bezier4,
-  type ClipEasing,
-} from "@/model/types";
+import { type Bezier4, type ClipEasing } from "@/model/types";
 import { useProject } from "@/state/project";
-import { resolveCel } from "@/model/types";
+import { usePlayback } from "@/state/playback";
 
 const PRESETS: { id: string; label: string; curve: Bezier4 }[] = [
   { id: "custom", label: "Custom", curve: [0.42, 0, 0.58, 1] },
@@ -44,6 +42,185 @@ function bezierPath(c: Bezier4): string {
 }
 
 type Handle = "c1" | "c2";
+
+/** Paper ease glyph on 8WR-0 (AN3-0). */
+function EaseGlyph() {
+  return (
+    <svg
+      viewBox="0 0 18 18"
+      width={18}
+      height={18}
+      xmlns="http://www.w3.org/2000/svg"
+      className="shrink-0 overflow-visible"
+      aria-hidden
+    >
+      <g transform="matrix(1 0 0 1 2 2)">
+        <path
+          d="M3.000 1.000C3.000 1.000 7.000 1.000 7.000 1.000C7.000 1.000 7.000 2.000 7.000 2.000C7.000 2.000 3.000 2.000 3.000 2.000C3.000 2.000 3.000 3.000 3.000 3.000C3.000 3.000 0.000 3.000 0.000 3.000C0.000 3.000 0.000 0.000 0.000 0.000C0.000 0.000 3.000 0.000 3.000 0.000C3.000 0.000 3.000 1.000 3.000 1.000Z"
+          fill="#D9D9D9"
+        />
+        <path
+          transform="matrix(1 0 0 1 7 11)"
+          d="M7.000 3.000C7.000 3.000 4.000 3.000 4.000 3.000C4.000 3.000 4.000 2.000 4.000 2.000C4.000 2.000 0.000 2.000 0.000 2.000C0.000 2.000 0.000 1.000 0.000 1.000C0.000 1.000 4.000 1.000 4.000 1.000C4.000 1.000 4.000 0.000 4.000 0.000C4.000 0.000 7.000 0.000 7.000 0.000C7.000 0.000 7.000 3.000 7.000 3.000Z"
+          fill="#D9D9D9"
+        />
+        <path
+          transform="matrix(1 0 0 1 0 0.5)"
+          d="M14.000 1.000C12.009 1.000 10.763 1.207 9.832 1.942C8.892 2.685 8.176 4.044 7.483 6.629C6.783 9.244 5.999 10.885 4.787 11.842C3.566 12.806 2.009 13.000 0.000 13.000C0.000 13.000 0.000 12.000 0.000 12.000C1.991 12.000 3.237 11.793 4.168 11.058C5.108 10.315 5.824 8.955 6.517 6.370C7.217 3.755 8.001 2.114 9.213 1.157C10.433 0.193 11.991 0.000 14.000 0.000C14.000 0.000 14.000 1.000 14.000 1.000Z"
+          fill="#FFFFFF"
+        />
+      </g>
+    </svg>
+  );
+}
+
+function formatBezierCoord(n: number): string {
+  if (!Number.isFinite(n)) return "0";
+  const rounded = Math.round(n * 100) / 100;
+  if (Math.abs(rounded - Math.round(rounded)) < 1e-9) return String(Math.round(rounded));
+  return rounded.toFixed(2);
+}
+
+/** Editable cubic-bezier component — looks like Paper text until focused. */
+function BezierCoordInput({
+  value,
+  onCommit,
+  min,
+  max,
+  "aria-label": ariaLabel,
+}: {
+  value: number;
+  onCommit: (n: number) => void;
+  min?: number;
+  max?: number;
+  "aria-label"?: string;
+}) {
+  const [draft, setDraft] = useState(() => formatBezierCoord(value));
+
+  useEffect(() => {
+    setDraft(formatBezierCoord(value));
+  }, [value]);
+
+  function commit() {
+    const n = Number(draft);
+    if (!Number.isFinite(n)) {
+      setDraft(formatBezierCoord(value));
+      return;
+    }
+    const clamped = Math.min(max ?? Infinity, Math.max(min ?? -Infinity, n));
+    setDraft(formatBezierCoord(clamped));
+    if (clamped !== value) onCommit(clamped);
+  }
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={draft}
+      aria-label={ariaLabel}
+      onChange={(e) => setDraft(e.target.value.replace(/[^0-9.\-]/g, ""))}
+      onBlur={commit}
+      onFocus={(e) => e.target.select()}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === "Enter") {
+          e.preventDefault();
+          (e.target as HTMLInputElement).blur();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          setDraft(formatBezierCoord(value));
+          (e.target as HTMLInputElement).blur();
+        }
+      }}
+      className="w-[5ch] shrink-0 bg-transparent text-right text-[12px] leading-[18px] text-white outline-none tabular-nums"
+      style={{ fontFamily: PAPER.fontMono }}
+    />
+  );
+}
+
+/** Paper 8WR-0 — Start / End cubic-bezier readout (editable, 12px). */
+function BezierCoordsBar({
+  curve,
+  onChange,
+}: {
+  curve: Bezier4;
+  onChange: (c: Bezier4) => void;
+}) {
+  function setAt(i: 0 | 1 | 2 | 3, n: number) {
+    const next = [...curve] as Bezier4;
+    next[i] = n;
+    onChange(next);
+  }
+
+  return (
+    <div
+      className="flex flex-1 items-center justify-between gap-3 overflow-clip rounded-lg px-2 py-[3px]"
+      style={{ backgroundColor: "#252525" }}
+    >
+      <EaseGlyph />
+      <div className="flex items-start gap-2">
+        <span
+          className="text-[12px] leading-[18px] text-white opacity-[0.23]"
+          style={{ fontFamily: PAPER.fontMono }}
+        >
+          Start
+        </span>
+        <div className="flex items-start">
+          <BezierCoordInput
+            value={curve[0]}
+            min={0}
+            max={1}
+            onCommit={(n) => setAt(0, n)}
+            aria-label="Start X"
+          />
+          <span
+            className="text-[12px] leading-[18px] text-white opacity-40"
+            style={{ fontFamily: PAPER.fontMono }}
+          >
+            ,
+          </span>
+          <BezierCoordInput
+            value={curve[1]}
+            min={-2}
+            max={2}
+            onCommit={(n) => setAt(1, n)}
+            aria-label="Start Y"
+          />
+        </div>
+      </div>
+      <div className="flex items-start gap-2">
+        <span
+          className="text-[12px] leading-[18px] text-white opacity-[0.23]"
+          style={{ fontFamily: PAPER.fontMono }}
+        >
+          End
+        </span>
+        <div className="flex items-start">
+          <BezierCoordInput
+            value={curve[2]}
+            min={0}
+            max={1}
+            onCommit={(n) => setAt(2, n)}
+            aria-label="End X"
+          />
+          <span
+            className="text-[12px] leading-[18px] text-white opacity-40"
+            style={{ fontFamily: PAPER.fontMono }}
+          >
+            ,
+          </span>
+          <BezierCoordInput
+            value={curve[3]}
+            min={-2}
+            max={2}
+            onCommit={(n) => setAt(3, n)}
+            aria-label="End Y"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function EasingCurveEditor({
   value = PRESETS[2].curve,
@@ -108,7 +285,7 @@ export function EasingCurveEditor({
     <div
       ref={trackRef}
       className={cn(
-        "relative h-[156px] w-full shrink-0 overflow-hidden rounded-lg bg-[#313131]",
+        "relative h-[184px] w-full shrink-0 overflow-hidden rounded-lg bg-[#313131]",
         className,
       )}
     >
@@ -154,56 +331,72 @@ export function EasingCurveEditor({
 }
 
 /**
- * Paper `8T9-0` / `8KU-0` — Animation presets + easing, wired to active Animatron clip.
+ * Paper `8T9-0` / `8KU-0` — Animation presets + easing.
+ * Edits broadcast to every clipped stroke on every layer (dock toggle opens this).
  */
 export function AnimationPanel({ className }: { className?: string }) {
-  const project = useProject((s) => s.project);
-  const layerIndex = useProject((s) => s.layerIndex);
-  const frameIndex = useProject((s) => s.frameIndex);
-  const updateStrokeClip = useProject((s) => s.updateStrokeClip);
+  const clipEasing = useProject((s) => s.clipEasing);
+  const applyClipEasing = useProject((s) => s.applyClipEasing);
+  const setAnimationPanelOpen = usePlayback((s) => s.setAnimationPanelOpen);
 
-  const layer = project.layers[layerIndex];
-  const cel =
-    project.workflow === "animatron"
-      ? layer?.frames.find((f) => f) ?? null
-      : layer
-        ? resolveCel(layer, frameIndex)
-        : null;
-  const stroke = cel?.strokes[cel.strokes.length - 1];
-  const easing: ClipEasing = stroke?.clip?.easing ?? DEFAULT_CLIP_EASING;
-
-  const [preset, setPreset] = useState(easing.presetId ?? "smooth");
-  const [curve, setCurve] = useState<Bezier4>(easing.bezier);
-  const [fadeIn, setFadeIn] = useState(easing.fadeInFrames);
-  const [fadeOut, setFadeOut] = useState(easing.fadeOutFrames);
+  const [preset, setPreset] = useState(clipEasing.presetId ?? "smooth");
+  const [curve, setCurve] = useState<Bezier4>(clipEasing.bezier);
+  const [fadeIn, setFadeIn] = useState(clipEasing.fadeInFrames);
+  const [fadeOut, setFadeOut] = useState(clipEasing.fadeOutFrames);
 
   useEffect(() => {
-    setPreset(easing.presetId ?? "custom");
-    setCurve(easing.bezier);
-    setFadeIn(easing.fadeInFrames);
-    setFadeOut(easing.fadeOutFrames);
-  }, [stroke?.id, easing.presetId, easing.bezier, easing.fadeInFrames, easing.fadeOutFrames]);
+    setPreset(clipEasing.presetId ?? "custom");
+    setCurve(clipEasing.bezier);
+    setFadeIn(clipEasing.fadeInFrames);
+    setFadeOut(clipEasing.fadeOutFrames);
+  }, [
+    clipEasing.presetId,
+    clipEasing.bezier,
+    clipEasing.fadeInFrames,
+    clipEasing.fadeOutFrames,
+  ]);
 
   function commit(next: Partial<ClipEasing> & { bezier?: Bezier4 }) {
-    if (!stroke?.clip) return;
     const easingNext: ClipEasing = {
       bezier: next.bezier ?? curve,
       fadeInFrames: next.fadeInFrames ?? fadeIn,
       fadeOutFrames: next.fadeOutFrames ?? fadeOut,
       presetId: next.presetId ?? preset,
     };
-    updateStrokeClip(stroke.id, { ...stroke.clip, easing: easingNext });
+    applyClipEasing(easingNext);
   }
 
   return (
     <div
       className={cn(
-        "flex w-[316px] flex-col gap-4 rounded-xl border border-border/60 bg-[#131212] p-4 shadow-2xl",
+        "flex w-[316px] flex-col gap-4 overflow-visible rounded-xl border border-border/60 bg-[#131212] px-4 pb-4 pt-5 shadow-2xl",
         className,
       )}
     >
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-        Animation
+      <div className="flex items-center justify-between gap-2 overflow-visible py-1">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Animation
+        </div>
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={() => setAnimationPanelOpen(false)}
+          className="grid size-6 shrink-0 place-items-center overflow-hidden rounded-full border-0"
+          style={{
+            backgroundImage: PAPER.modeActiveGradient,
+            // inset ring — a real border on size-6 flattens the circle top/bottom
+            boxShadow: "inset 0 0 0 0.5px #C9C9C933",
+          }}
+        >
+          <svg width={12} height={12} viewBox="0 0 8 8" fill="none" style={{ opacity: 0.8 }}>
+            <path
+              d="M1 1l6 6M7 1L1 7"
+              stroke="#FFFFFF"
+              strokeWidth="0.7"
+              strokeLinecap="round"
+            />
+          </svg>
+        </button>
       </div>
       <div className="flex flex-wrap gap-1.5">
         {PRESETS.map((p) => (
@@ -232,52 +425,52 @@ export function AnimationPanel({ className }: { className?: string }) {
           commit({ bezier: c, presetId: "custom" });
         }}
       />
-      <div className="flex items-center gap-3 rounded-lg border border-border/40 bg-black/20 px-3 py-2 font-mono text-[11px] text-muted-foreground">
-        <span className="text-foreground/80">⌇</span>
-        <span>
-          Start: {curve[0].toFixed(2)}, {curve[1].toFixed(2)}
-        </span>
-        <span>
-          End: {curve[2].toFixed(2)}, {curve[3].toFixed(2)}
-        </span>
-      </div>
+      <BezierCoordsBar
+        curve={curve}
+        onChange={(c) => {
+          setCurve(c);
+          setPreset("custom");
+          commit({ bezier: c, presetId: "custom" });
+        }}
+      />
       <div className="flex gap-2">
-        <label className="flex flex-1 items-center gap-2 rounded-lg border border-border/50 bg-primary/10 px-3 py-2 text-[12px]">
-          <span className="text-foreground">Fade In</span>
-          <input
-            type="number"
-            min={0}
-            max={48}
+        {/* flex-1 on wrapper — SliderComfortable puts className on its inner track */}
+        <div className="min-w-0 flex-1">
+          <SliderComfortable
+            label="Fade In"
+            variant="scrubber"
             value={fadeIn}
-            onChange={(e) => {
-              const v = Math.max(0, Number(e.target.value) || 0);
+            onChange={(v) => {
               setFadeIn(v);
               commit({ fadeInFrames: v });
             }}
-            className="ml-auto w-10 bg-transparent text-right font-mono text-foreground outline-none"
-          />
-        </label>
-        <label className="flex flex-1 items-center gap-2 rounded-lg border border-border/50 bg-primary/10 px-3 py-2 text-[12px]">
-          <span className="text-foreground">Fade Out</span>
-          <input
-            type="number"
             min={0}
             max={48}
+            step={1}
+            fillColor="#40608E"
+            className="!h-6 !w-full !rounded-lg !border-0 !bg-[#252525] !px-2 [&_span]:!font-mono [&_span]:!text-sm"
+          />
+        </div>
+        <div className="min-w-0 flex-1">
+          <SliderComfortable
+            label="Fade Out"
+            variant="scrubber"
             value={fadeOut}
-            onChange={(e) => {
-              const v = Math.max(0, Number(e.target.value) || 0);
+            onChange={(v) => {
               setFadeOut(v);
               commit({ fadeOutFrames: v });
             }}
-            className="ml-auto w-10 bg-transparent text-right font-mono text-foreground outline-none"
+            min={0}
+            max={48}
+            step={1}
+            fillColor="#40608E"
+            className="!h-6 !w-full !rounded-lg !border-0 !bg-[#252525] !px-2 [&_span]:!font-mono [&_span]:!text-sm"
           />
-        </label>
+        </div>
       </div>
-      {!stroke?.clip && (
-        <p className="text-[11px] text-muted-foreground">
-          Draw a path in Animatron to attach easing to its clip.
-        </p>
-      )}
+      <p className="text-[11px] text-muted-foreground">
+        Applies to every path on every layer. New draws inherit this curve.
+      </p>
     </div>
   );
 }

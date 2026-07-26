@@ -4,6 +4,7 @@ import {
   resolveCel,
   resolveCelIndex,
   DEFAULT_CLIP_EASING,
+  type ClipEasing,
   type Frame,
   type Layer,
   type Project,
@@ -28,6 +29,8 @@ interface ProjectState {
   frameIndex: number;
   undoStack: Project[];
   redoStack: Project[];
+  /** Animatron easing — applies to every clipped stroke; used for new paths too */
+  clipEasing: ClipEasing;
 
   setFrameIndex: (i: number) => void;
   setLayerIndex: (i: number) => void;
@@ -49,6 +52,8 @@ interface ProjectState {
     rotationRad: number,
   ) => void;
   updateStrokeClip: (strokeId: string, clip: StrokeClip) => void;
+  /** Broadcast easing to every stroke clip on every layer (and remember for new paths). */
+  applyClipEasing: (easing: ClipEasing) => void;
   addKeyframe: () => void;
   duplicateFrameForward: () => void;
   deleteKeyframe: () => void;
@@ -60,10 +65,24 @@ interface ProjectState {
     patch: Partial<
       Pick<
         Project,
-        "name" | "width" | "height" | "fps" | "frameCount" | "background" | "workflow"
+        | "name"
+        | "width"
+        | "height"
+        | "fps"
+        | "frameCount"
+        | "background"
+        | "workflow"
+        | "boil"
       >
     >,
   ) => void;
+  /**
+   * Live background tweak (e.g. image position drag) — updates project without
+   * pushing undo. Pair with a single setProjectSettings on pointer-up.
+   */
+  setBackgroundLive: (background: Project["background"]) => void;
+  /** Live boil scrub — no undo spam while dragging. */
+  setBoilLive: (boil: NonNullable<Project["boil"]>) => void;
   addLayer: () => void;
   deleteLayer: (layerIndex: number) => void;
   reorderLayer: (from: number, to: number) => void;
@@ -130,7 +149,7 @@ export const useProject = create<ProjectState>((set, get) => {
     const startMs = autoKey ? nextAnimatronClipStart(project) : 0;
     const clipped: Stroke = {
       ...stroke,
-      clip: { startMs, durationMs, easing: { ...DEFAULT_CLIP_EASING } },
+      clip: { startMs, durationMs, easing: { ...s.clipEasing } },
     };
 
     const active = project.layers[s.layerIndex];
@@ -184,6 +203,7 @@ export const useProject = create<ProjectState>((set, get) => {
     frameIndex: 0,
     undoStack: [],
     redoStack: [],
+    clipEasing: { ...DEFAULT_CLIP_EASING },
 
     setFrameIndex: (i) =>
       set((s) => ({ frameIndex: Math.max(0, Math.min(i, s.project.frameCount - 1)) })),
@@ -356,6 +376,30 @@ export const useProject = create<ProjectState>((set, get) => {
       commit(ensureAnimatronLength({ ...project, layers }));
     },
 
+    applyClipEasing: (easing) => {
+      const { project } = get();
+      const nextEasing = { ...easing, bezier: [...easing.bezier] as ClipEasing["bezier"] };
+      let touched = false;
+      const layers = project.layers.map((layer) => {
+        let layerChanged = false;
+        const frames = layer.frames.map((cel) => {
+          if (!cel) return cel;
+          let changed = false;
+          const strokes = cel.strokes.map((s) => {
+            if (!s.clip) return s;
+            touched = true;
+            changed = true;
+            return { ...s, clip: { ...s.clip, easing: { ...nextEasing } } };
+          });
+          if (changed) layerChanged = true;
+          return changed ? { ...cel, strokes } : cel;
+        });
+        return layerChanged ? { ...layer, frames } : layer;
+      });
+      set({ clipEasing: nextEasing });
+      if (touched) commit(ensureAnimatronLength({ ...project, layers }));
+    },
+
     addKeyframe: () => {
       const { project, layerIndex, frameIndex } = get();
       const layer = project.layers[layerIndex];
@@ -433,6 +477,16 @@ export const useProject = create<ProjectState>((set, get) => {
     setProjectSettings: (patch) => {
       const { project } = get();
       commit({ ...project, ...patch });
+    },
+
+    setBackgroundLive: (background) => {
+      const { project } = get();
+      set({ project: { ...project, background } });
+    },
+
+    setBoilLive: (boil) => {
+      const { project } = get();
+      set({ project: { ...project, boil } });
     },
 
     addLayer: () => {

@@ -63,7 +63,7 @@ export function paintProjectFrame(
         scratchCtx.clearRect(0, 0, width, height);
         renderStrokes(scratchCtx, [s], {
           quality: "full",
-          displaced: boilDisplacement([s], frame),
+          displaced: boilDisplacement([s], frame, project.boil),
         });
         ctx.save();
         ctx.globalAlpha = alpha;
@@ -74,7 +74,7 @@ export function paintProjectFrame(
       scratchCtx.clearRect(0, 0, width, height);
       renderStrokes(scratchCtx, strokes, {
         quality: "full",
-        displaced: boilDisplacement(strokes, frame),
+        displaced: boilDisplacement(strokes, frame, project.boil),
       });
       ctx.drawImage(scratch, 0, 0);
     }

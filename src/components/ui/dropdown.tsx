@@ -22,6 +22,7 @@ import { spring, exitFallbackMs } from "@/lib/springs";
 import { useProximityHover } from "@/hooks/use-proximity-hover";
 import { shapeMap } from "@/lib/shape-context";
 import { Elevated } from "@/lib/elevated";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   DropdownContext,
   useDropdown,
@@ -529,6 +530,13 @@ const DropdownContent = forwardRef<HTMLDivElement, DropdownContentProps>(
               <Elevated
                 offset={2}
                 shadowLevel={3}
+                className={cn(
+                  `w-72 max-w-full min-w-[var(--radix-dropdown-menu-trigger-width)] overflow-hidden ${shape.container} select-none outline-none`,
+                  className,
+                )}
+              >
+              <ScrollArea className="max-h-[min(480px,var(--radix-dropdown-menu-content-available-height))] w-full">
+              <div
                 ref={(node: HTMLDivElement | null) => {
                   (
                     containerRef as React.MutableRefObject<HTMLDivElement | null>
@@ -565,12 +573,7 @@ const DropdownContent = forwardRef<HTMLDivElement, DropdownContentProps>(
                   setFocusedIndex(null);
                   setActiveIndex(null);
                 }}
-                className={cn(
-                  // min-w tracks the trigger; the available-height guard maps
-                  // Base UI's --available-height to Radix's equivalent var.
-                  `relative flex flex-col gap-0.5 w-72 max-w-full min-w-[var(--radix-dropdown-menu-trigger-width)] max-h-[min(480px,var(--radix-dropdown-menu-content-available-height))] overflow-y-auto ${shape.container} p-1 select-none outline-none`,
-                  className
-                )}
+                className="relative flex flex-col gap-0.5 p-1"
               >
                 {/* Selected background */}
                 <AnimatePresence>
@@ -653,6 +656,8 @@ const DropdownContent = forwardRef<HTMLDivElement, DropdownContentProps>(
                 >
                   {children}
                 </DropdownMenuPrimitive.RadioGroup>
+              </div>
+              </ScrollArea>
               </Elevated>
             </DropdownContext.Provider>
           </motion.div>

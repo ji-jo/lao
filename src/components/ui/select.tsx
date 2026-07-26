@@ -19,6 +19,7 @@ import type { IconComponent } from "@/lib/icon-context";
 import { cn } from "@/lib/utils";
 import { spring, exitFallbackMs } from "@/lib/springs";
 import { useProximityHover } from "@/hooks/use-proximity-hover";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useShape } from "@/lib/shape-context";
 import { Elevated } from "@/lib/elevated";
 
@@ -53,11 +54,8 @@ import { Elevated } from "@/lib/elevated";
 //   tween finishes).
 //
 // - Radix Select is modal-ish: it scroll-locks the page and disables outside
-//   pointer events while open. The Viewport's injected
-//   stylesheet hides its own scrollbar, which would leave long lists with no
-//   scroll affordance at all (the scroll buttons aren't rendered either) —
-//   overridden with `![scrollbar-width:thin]` on the viewport, which also
-//   makes Chromium/Safari ignore the ::-webkit-scrollbar{display:none} rule.
+//   pointer events while open. Long lists scroll via nano ScrollArea inside
+//   the Viewport so the bar matches the rest of the app.
 // ---------------------------------------------------------------------------
 
 interface SelectContextValue {
@@ -203,7 +201,7 @@ const SelectTrigger = forwardRef<HTMLButtonElement, SelectTriggerProps>(
     const shape = useShape();
 
     return (
-      <div className="flex flex-col gap-1">
+      <div className="flex w-full flex-col gap-1">
         <SelectPrimitive.Trigger
           ref={ref}
           aria-invalid={!!error || undefined}
@@ -243,7 +241,7 @@ const SelectTrigger = forwardRef<HTMLButtonElement, SelectTriggerProps>(
               strokeWidth={2}
               strokeLinecap="round"
               strokeLinejoin="round"
-              className="shrink-0 text-muted-foreground transition-colors duration-80 group-hover:text-foreground"
+              className="shrink-0 text-muted-foreground transition-[color,transform] duration-80 group-hover:text-foreground group-data-[state=open]:rotate-180"
             >
               <path d="M6 9l6 6 6-6" />
             </svg>
@@ -367,13 +365,20 @@ const SelectContent = forwardRef<HTMLDivElement, SelectContentProps>(
             }}
           >
             <SelectContentContext.Provider value={contentCtx}>
-              {/* The Viewport is the scroll container and, via its inline
-                  position: relative, the offsetParent the proximity overlay
-                  rects anchor to. */}
+              {/* Elevated is the chrome; nano ScrollArea is the scrollport so
+                  shadows aren't clipped by overflow:hidden on the wrapper. */}
               <SelectPrimitive.Viewport asChild>
                 <Elevated
                   offset={2}
                   shadowLevel={3}
+                  className={cn(
+                    `min-w-[var(--radix-select-trigger-width)] overflow-hidden ${shape.container} select-none outline-none`,
+                    className,
+                  )}
+                  onWheel={(e) => e.stopPropagation()}
+                >
+              <ScrollArea className="max-h-[min(300px,var(--radix-select-content-available-height))] w-full">
+                <div
                   ref={(node: HTMLDivElement | null) => {
                     (
                       containerRef as React.MutableRefObject<HTMLDivElement | null>
@@ -410,15 +415,7 @@ const SelectContent = forwardRef<HTMLDivElement, SelectContentProps>(
                     setFocusedIndex(null);
                     setActiveIndex(null);
                   }}
-                  className={cn(
-                    // min-w tracks the trigger via Radix's popper-provided
-                    // vars.
-                    // ![scrollbar-width:thin] undoes Radix's injected
-                    // scrollbar-hiding stylesheet (see header comment) so
-                    // long lists keep a visible scrollbar.
-                    `relative flex flex-col gap-0.5 min-w-[var(--radix-select-trigger-width)] max-h-[min(300px,var(--radix-select-content-available-height))] overflow-y-auto ![scrollbar-width:thin] ${shape.container} p-1 select-none outline-none`,
-                    className
-                  )}
+                  className="relative flex flex-col gap-0.5 p-1"
                 >
                   {/* Selected background */}
                   <AnimatePresence>
@@ -493,6 +490,8 @@ const SelectContent = forwardRef<HTMLDivElement, SelectContentProps>(
                   </AnimatePresence>
 
                   {children}
+                </div>
+              </ScrollArea>
                 </Elevated>
               </SelectPrimitive.Viewport>
             </SelectContentContext.Provider>
@@ -568,7 +567,9 @@ const SelectItem = forwardRef<HTMLDivElement, SelectItemProps>(
         className={cn(
           // Fixed height (was py-2 around a 19.5px line box ≈ 35.5px) so
           // the text-box trim on the item text doesn't shrink the row.
-          `relative z-10 flex h-9 items-center gap-2 ${shape.item} px-2 text-[13px] cursor-pointer outline-none select-none`,
+          // shrink-0 keeps rows from collapsing inside the flex viewport
+          // when available height is tight — that collapse blocked scroll.
+          `relative z-10 flex h-9 shrink-0 items-center gap-2 ${shape.item} px-2 text-[13px] cursor-pointer outline-none select-none`,
           "transition-[color] duration-80",
           isActive || isChecked
             ? "text-foreground"

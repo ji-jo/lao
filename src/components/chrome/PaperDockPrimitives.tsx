@@ -92,7 +92,10 @@ export function PaperDockBar({
     <div
       className={cn(
         "inline-flex items-center overflow-clip rounded-full antialiased",
-        variant === "pill" ? "gap-3 px-4 py-1.5" : "h-9 gap-3 px-4 py-1",
+        variant === "pill"
+          ? "gap-3 px-4 py-1.5"
+          // 12px left / 8px right inset (+4px toward left vs prior pl-2).
+          : "gap-3 py-2 pl-3 pr-2",
         className,
       )}
       style={{ backgroundColor: PAPER.surface, fontFamily: PAPER.fontSans }}

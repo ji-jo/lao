@@ -42,8 +42,9 @@ export const PAPER = {
   insetX: 62,
   insetTop: 24,
   insetBottom: 48,
-  settingGap: 24,
-  timelineWidth: 704,
+  settingGap: 12,
+  /** +20% over Paper's 704 — D's explicit override for the timeline scale. */
+  timelineWidth: 845,
   barHeight: 36,
   fontSans: "'Geist', 'Inter Variable', system-ui, sans-serif",
   fontMono: "'Geist Mono', ui-monospace, monospace",

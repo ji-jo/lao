@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { ensureFontLoaded } from "@/lib/google-fonts";
 import type { BrushKind } from "@/model/types";
 
 /** Closed shapes for bucket + shapes pack */
@@ -30,7 +31,11 @@ export function isShapeTool(tool: ToolId): tool is ShapeToolId {
 interface ToolsState {
   tool: ToolId;
   color: string;
+  /** closed-shape fill (stroke uses `color`) */
+  fillColor: string;
   size: number;
+  /** text tool typeface */
+  fontFamily: string;
   /** drawing starts a keyframe automatically; OFF routes strokes to a static layer */
   autoKey: boolean;
   /** new strokes get the boil/jitter flag by default */
@@ -41,7 +46,9 @@ interface ToolsState {
   shapesOpen: boolean;
   setTool: (tool: ToolId) => void;
   setColor: (color: string) => void;
+  setFillColor: (color: string) => void;
   setSize: (size: number) => void;
+  setFontFamily: (fontFamily: string) => void;
   toggleAutoKey: () => void;
   toggleJitterByDefault: () => void;
   toggleGrainByDefault: () => void;
@@ -51,7 +58,9 @@ interface ToolsState {
 export const useTools = create<ToolsState>((set) => ({
   tool: "ink",
   color: "#e7e7ea",
+  fillColor: "#40608E",
   size: 6,
+  fontFamily: "Geist",
   autoKey: true,
   jitterByDefault: true,
   grainByDefault: false,
@@ -62,7 +71,12 @@ export const useTools = create<ToolsState>((set) => ({
       shapesOpen: tool === "shapes" || isShapeTool(tool) ? true : false,
     }),
   setColor: (color) => set({ color }),
+  setFillColor: (fillColor) => set({ fillColor }),
   setSize: (size) => set({ size }),
+  setFontFamily: (fontFamily) => {
+    ensureFontLoaded(fontFamily);
+    set({ fontFamily });
+  },
   toggleAutoKey: () => set((s) => ({ autoKey: !s.autoKey })),
   toggleJitterByDefault: () => set((s) => ({ jitterByDefault: !s.jitterByDefault })),
   toggleGrainByDefault: () => set((s) => ({ grainByDefault: !s.grainByDefault })),

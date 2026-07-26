@@ -11,6 +11,7 @@ import {
   type CSSProperties,
   type HTMLAttributes,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   motion,
   useMotionValue,
@@ -1092,6 +1093,12 @@ interface SliderComfortableProps
   label?: string;
   formatValue?: (v: number) => string;
   disabled?: boolean;
+  /** Covered-value fill. Default `var(--active)`. */
+  fillColor?: string;
+  /** Inactive step/pip color. Default muted grey. */
+  pipColor?: string;
+  /** Inactive step/pip opacity. Default 0.35. */
+  pipOpacity?: number;
 }
 
 const SliderComfortable = forwardRef<HTMLDivElement, SliderComfortableProps>(
@@ -1106,6 +1113,9 @@ const SliderComfortable = forwardRef<HTMLDivElement, SliderComfortableProps>(
       label,
       formatValue = String,
       disabled = false,
+      fillColor = "var(--active)",
+      pipColor = "var(--muted-foreground)",
+      pipOpacity = 0.35,
       className,
       ...props
     },
@@ -1352,6 +1362,24 @@ const SliderComfortable = forwardRef<HTMLDivElement, SliderComfortableProps>(
     );
 
     const isActive = isHovered || isFocused;
+    const [tipCoords, setTipCoords] = useState<{ left: number; top: number } | null>(
+      null,
+    );
+
+    // Portal the hover value — goo filters / overflow ancestors clip absolute tips.
+    useLayoutEffect(() => {
+      if (!hoverPreview || !showHoverTooltip || isPressed) {
+        setTipCoords(null);
+        return;
+      }
+      const el = containerRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setTipCoords({
+        left: r.left + hoverPreview.cursorX,
+        top: r.top - 30,
+      });
+    }, [hoverPreview, showHoverTooltip, isPressed, value]);
 
     return (
       <div
@@ -1377,41 +1405,45 @@ const SliderComfortable = forwardRef<HTMLDivElement, SliderComfortableProps>(
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerUp}
         />
-        {/* Hover value tooltip — outside overflow-hidden container */}
-        <AnimatePresence>
-          {hoverPreview && showHoverTooltip && !isPressed && (
-            <motion.div
-              key="hover-tooltip"
-              className="absolute -translate-x-1/2 pointer-events-none z-20"
-              initial={{ opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 4, transition: spring.fast.exit }}
-              transition={spring.fast}
-              style={{
-                left: hoverPreview.cursorX,
-                top: -30,
-              }}
-            >
-              <span
-                className={cn("text-[12px] text-background tabular-nums whitespace-nowrap bg-foreground px-2 py-1", shape.bg)}
-                style={{ fontVariationSettings: fontWeights.medium }}
-              >
-                {formatValue(hoverPreview.snappedValue)}
-              </span>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {typeof document !== "undefined"
+          ? createPortal(
+              <AnimatePresence>
+                {tipCoords && hoverPreview && showHoverTooltip && !isPressed ? (
+                  <motion.div
+                    key="hover-tooltip"
+                    className="pointer-events-none fixed z-[9999] -translate-x-1/2"
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 4, transition: spring.fast.exit }}
+                    transition={spring.fast}
+                    style={{ left: tipCoords.left, top: tipCoords.top }}
+                  >
+                    <span
+                      className={cn(
+                        "whitespace-nowrap bg-foreground px-2 py-1 text-[12px] tabular-nums text-background",
+                        shape.bg,
+                      )}
+                      style={{ fontVariationSettings: fontWeights.medium }}
+                    >
+                      {formatValue(hoverPreview.snappedValue)}
+                    </span>
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>,
+              document.body,
+            )
+          : null}
 
       <motion.div
         ref={mergedRef}
         className={cn(
-          "relative w-full h-8 select-none touch-none border border-border overflow-hidden outline-offset-2",
+          "relative h-8 w-full select-none touch-none overflow-hidden border border-border outline-offset-2",
           variant === "scrubber"
-            ? "flex items-center gap-3 px-4 cursor-ew-resize"
+            ? "flex cursor-ew-resize items-center gap-3 px-4"
             : "cursor-ew-resize",
           shape.bg,
-          disabled && "opacity-50 pointer-events-none",
-          className
+          disabled && "pointer-events-none opacity-50",
+          className,
         )}
         initial={false}
         animate={{
@@ -1480,8 +1512,8 @@ const SliderComfortable = forwardRef<HTMLDivElement, SliderComfortableProps>(
                     className="rounded-full"
                     initial={false}
                     animate={{
-                      backgroundColor: isActivePip ? "var(--foreground)" : "var(--muted-foreground)",
-                      opacity: isActivePip ? 1 : 0.3,
+                      backgroundColor: isActivePip ? "var(--foreground)" : pipColor,
+                      opacity: isActivePip ? 1 : pipOpacity,
                     }}
                     transition={spring.fast}
                     style={{ width: PIP_SIZE, height: PIP_SIZE }}
@@ -1515,7 +1547,7 @@ const SliderComfortable = forwardRef<HTMLDivElement, SliderComfortableProps>(
             className="absolute left-0 top-0 bottom-0 pointer-events-none z-[3]"
             style={{
               width: pipsFillWidthStyle,
-              backgroundColor: "var(--active)",
+              backgroundColor: fillColor,
             }}
           />
         )}
@@ -1573,7 +1605,7 @@ const SliderComfortable = forwardRef<HTMLDivElement, SliderComfortableProps>(
             className="absolute left-0 top-0 bottom-0 pointer-events-none"
             style={{
               width: fillWidthStyle,
-              backgroundColor: "var(--active)",
+              backgroundColor: fillColor,
             }}
           />
         )}

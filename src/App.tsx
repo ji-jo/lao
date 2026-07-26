@@ -9,7 +9,6 @@ import { createEmptyProject, type Project } from "@/model/types";
 import { StageCanvas } from "@/components/StageCanvas";
 import { PreviewStage } from "@/components/PreviewStage";
 import { ToolDock, ReferenceBox } from "@/components/chrome/ToolDock";
-import { SettingsDocks } from "@/components/chrome/SettingsDocks";
 import { ZoomDock } from "@/components/chrome/ZoomDock";
 import { FeedbackDock } from "@/components/chrome/FeedbackDock";
 import { PAPER } from "@/components/chrome/paper-tokens";
@@ -23,10 +22,15 @@ import { useViewport } from "@/state/viewport";
 import { copyStrokes, readClipboard } from "@/state/clipboard";
 import { resolveCel } from "@/model/types";
 import { ShaderSnapshotMount } from "@/components/ShaderBackground";
+import {
+  ImageFilterSnapshotMount,
+  getImageFilterSnapshotCanvas,
+} from "@/components/ImageFilterBackground";
 import { paintBackground } from "@/engine/background";
 import { paintProjectFrame } from "@/engine/paintFrame";
 import { copyArtboardToClipboard } from "@/export/clipboardShot";
 import { getShaderSnapshotCanvas } from "@/components/ShaderBackground";
+import { hasImageFilter } from "@/lib/image-filters";
 
 const SHORTCUTS: Record<string, ToolId> = {
   v: "select",
@@ -166,7 +170,13 @@ export default function App() {
           void copyArtboardToClipboard(ps.width, ps.height, (ctx) => {
             const shaderCanvas =
               ps.background?.kind === "shader" ? getShaderSnapshotCanvas() : null;
-            const hasBg = paintBackground(ctx, ps, { shaderCanvas });
+            const imageFilterCanvas = hasImageFilter(ps.background)
+              ? getImageFilterSnapshotCanvas()
+              : null;
+            const hasBg = paintBackground(ctx, ps, {
+              shaderCanvas,
+              imageFilterCanvas,
+            });
             if (!hasBg) {
               ctx.fillStyle = "#141416";
               ctx.fillRect(0, 0, ps.width, ps.height);
@@ -236,6 +246,23 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [setTool, undo, redo, setStage]);
 
+  /**
+   * Ctrl/trackpad-pinch wheel events over the canvas already drive
+   * `viewport.zoom` (StageCanvas's own listener). But Chrome sometimes marks
+   * a trackpad-pinch wheel event non-cancelable, so a canvas-scoped
+   * `preventDefault()` silently no-ops and the browser's native page-zoom
+   * fires alongside our zoom — looks like "zoom is broken" even though the
+   * app's zoom state is updating underneath it. Block native page-zoom
+   * app-wide as a belt-and-suspenders fix, same as Figma/Excalidraw do.
+   */
+  useEffect(() => {
+    function onWheel(e: WheelEvent) {
+      if (e.ctrlKey) e.preventDefault();
+    }
+    document.addEventListener("wheel", onWheel, { passive: false });
+    return () => document.removeEventListener("wheel", onWheel);
+  }, []);
+
   return (
     <div
       className="relative h-dvh w-dvw overflow-hidden text-foreground antialiased"
@@ -254,6 +281,9 @@ export default function App() {
 
       {background?.kind === "shader" && (
         <ShaderSnapshotMount background={background} aspect={aspect} />
+      )}
+      {hasImageFilter(background) && background?.kind === "image" && (
+        <ImageFilterSnapshotMount background={background} aspect={aspect} />
       )}
 
       <div
@@ -330,12 +360,10 @@ export default function App() {
         className="pointer-events-none absolute inset-x-0 z-20 flex flex-col items-center"
         style={{ bottom: PAPER.insetBottom }}
       >
-        {stage === "draw" && (
-          <div className="pointer-events-auto" style={{ marginBottom: PAPER.settingGap }}>
-            <SettingsDocks />
-          </div>
-        )}
-        <div className="pointer-events-auto" style={{ width: PAPER.timelineWidth, maxWidth: "calc(100vw - 124px)" }}>
+        <div
+          className="pointer-events-auto"
+          style={{ width: PAPER.timelineWidth, maxWidth: "calc(100vw - 124px)" }}
+        >
           <Timeline />
         </div>
       </div>

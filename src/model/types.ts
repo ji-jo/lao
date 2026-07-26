@@ -70,17 +70,93 @@ export interface Layer {
 }
 
 export type BackgroundFit = "fill" | "cover" | "contain" | "crop";
-export type ShaderPresetId = "mesh" | "grain" | "neuro" | "smoke" | "voronoi" | "waves";
+/** Paper image-filter chips on the Image background tab. */
+export type ImageFilterId = "paper" | "fluted" | "water" | "dither";
+
+/** Paper 27K-0 shader chips. */
+export type ShaderPresetId =
+  | "aurora"
+  | "plasma"
+  | "nebula"
+  | "mesh"
+  | "clouds";
+
+/** Older .lao files may still carry these ids — rendered for compatibility. */
+export type LegacyShaderPresetId =
+  | "grain"
+  | "neuro"
+  | "smoke"
+  | "voronoi"
+  | "waves";
 
 export type Background =
   | { kind: "none" }
   | { kind: "color"; color: string }
-  | { kind: "gradient"; shape: "linear" | "radial"; from: string; to: string; angle: number }
+  | {
+      kind: "gradient";
+      shape: "linear" | "radial";
+      from: string;
+      to: string;
+      angle: number;
+      /** Full CSS gradient from the picker (preserves stops). Preferred when set. */
+      css?: string;
+    }
   /** src is a data URL so the image travels inside the .lao file */
-  | { kind: "image"; src: string; fit: BackgroundFit }
-  | { kind: "shader"; preset: ShaderPresetId; colors: string[]; speed: number };
+  | {
+      kind: "image";
+      src: string;
+      fit: BackgroundFit;
+      /**
+       * Focal point in the artboard (0–1). Used as object-position for
+       * cover/contain/crop. Defaults to center when omitted.
+       */
+      position?: { x: number; y: number };
+      /** Extra scale on top of fit (1 = 100%). Defaults to 1 when omitted. */
+      zoom?: number;
+      /** Optional @paper-design/shaders-react image filter. */
+      filter?: ImageFilterId;
+      filterParams?: Record<string, number>;
+      namedColors?: Record<string, string>;
+      /** UI: Auto keeps project size; match sets canvas to image pixels. */
+      resolution?: "auto" | "match";
+    }
+  | {
+      kind: "shader";
+      preset: ShaderPresetId | LegacyShaderPresetId;
+      colors: string[];
+      speed: number;
+      /** Numeric uniforms for the active paper shader (distortion, swirl, …). */
+      params?: Record<string, number>;
+      /** Named solids beyond `colors` (back, bloom, …). */
+      namedColors?: Record<string, string>;
+    };
 
 export type ProjectWorkflow = "stopmotion" | "animatron";
+
+/**
+ * Project-wide line-boil knobs. Omitted fields fall back to DEFAULT_BOIL in
+ * the engine so older .lao files keep the classic shimmer.
+ */
+export interface BoilSettings {
+  /** Displacement strength multiplier (0–2). */
+  amplitude: number;
+  /** Spatial frequency of the wobble (0–1) — higher = tighter ripples. */
+  jitter: number;
+  /** Extra punch on displacement (0–1). */
+  intensity: number;
+  /** Variant cycle rate (0.25–3) — higher = faster shimmer. */
+  speed: number;
+  /** Distinct boil poses in the cycle (2–8). */
+  variety: number;
+}
+
+export const DEFAULT_BOIL: BoilSettings = {
+  amplitude: 1,
+  jitter: 0.5,
+  intensity: 0.5,
+  speed: 1,
+  variety: 3,
+};
 
 export interface Project {
   version: 1;
@@ -94,6 +170,8 @@ export interface Project {
   background?: Background;
   /** which editor workflow owns this document; default stopmotion when missing */
   workflow?: ProjectWorkflow;
+  /** Line-boil look (preview === export). */
+  boil?: BoilSettings;
 }
 
 /**

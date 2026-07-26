@@ -1,6 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { displaceStroke, mulberry32, variantForFrame, BOIL_HOLD, BOIL_VARIANTS } from "./boil";
-import type { Stroke } from "@/model/types";
+import {
+  boilAmplitudePx,
+  boilHoldFrames,
+  boilVariantCount,
+  displaceStroke,
+  mulberry32,
+  resolveBoil,
+  variantForFrame,
+  BOIL_HOLD,
+  BOIL_VARIANTS,
+} from "./boil";
+import { DEFAULT_BOIL, type Stroke } from "@/model/types";
 
 function makeStroke(seed: number): Stroke {
   return {
@@ -35,39 +45,64 @@ describe("boil", () => {
     const s = makeStroke(42);
     const a = displaceStroke(s, 0);
     const b = displaceStroke(s, 1);
-    expect(a.some((p, i) => p.x !== b[i].x || p.y !== b[i].y)).toBe(true);
+    expect(a.some((p, i) => p.x !== b[i]!.x || p.y !== b[i]!.y)).toBe(true);
   });
 
   test("different seeds → different displacement", () => {
     const a = displaceStroke(makeStroke(1), 0);
     const b = displaceStroke(makeStroke(2), 0);
-    expect(a.some((p, i) => p.x !== b[i].x || p.y !== b[i].y)).toBe(true);
+    expect(a.some((p, i) => p.x !== b[i]!.x || p.y !== b[i]!.y)).toBe(true);
   });
 
   test("displacement is bounded by amplitude", () => {
     const s = makeStroke(7);
-    const amp = 1.2 + s.size * 0.18 + 1e-9;
+    const amp = boilAmplitudePx(s) + 1e-9;
     for (let v = 0; v < BOIL_VARIANTS; v++) {
       const d = displaceStroke(s, v);
       d.forEach((p, i) => {
-        expect(Math.abs(p.x - s.points[i].x)).toBeLessThanOrEqual(amp);
-        expect(Math.abs(p.y - s.points[i].y)).toBeLessThanOrEqual(amp);
+        expect(Math.abs(p.x - s.points[i]!.x)).toBeLessThanOrEqual(amp);
+        expect(Math.abs(p.y - s.points[i]!.y)).toBeLessThanOrEqual(amp);
       });
     }
   });
 
-  test("variant holds for BOIL_HOLD frames and cycles", () => {
+  test("default settings preserve classic hold / cycle", () => {
+    expect(boilHoldFrames()).toBe(BOIL_HOLD);
+    expect(boilVariantCount()).toBe(BOIL_VARIANTS);
     expect(variantForFrame(0)).toBe(variantForFrame(BOIL_HOLD - 1));
     expect(variantForFrame(0)).not.toBe(variantForFrame(BOIL_HOLD));
     expect(variantForFrame(0)).toBe(variantForFrame(BOIL_HOLD * BOIL_VARIANTS));
+  });
+
+  test("speed shortens hold; variety widens the cycle", () => {
+    expect(boilHoldFrames({ ...DEFAULT_BOIL, speed: 2 })).toBe(1);
+    expect(boilVariantCount({ ...DEFAULT_BOIL, variety: 5 })).toBe(5);
+    expect(variantForFrame(0, { variety: 5 })).not.toBe(
+      variantForFrame(1, { speed: 2, variety: 5 }),
+    );
+  });
+
+  test("amplitude / intensity scale displacement magnitude", () => {
+    const s = makeStroke(11);
+    const soft = boilAmplitudePx(s, { amplitude: 0.5, intensity: 0.5 });
+    const hard = boilAmplitudePx(s, { amplitude: 2, intensity: 1 });
+    expect(soft).toBeLessThan(hard);
+    expect(boilAmplitudePx(s, DEFAULT_BOIL)).toBeCloseTo(1.2 + s.size * 0.18, 5);
+  });
+
+  test("resolveBoil fills missing fields from defaults", () => {
+    expect(resolveBoil({ amplitude: 1.5 })).toEqual({
+      ...DEFAULT_BOIL,
+      amplitude: 1.5,
+    });
   });
 
   test("pressure and timing survive displacement untouched", () => {
     const s = makeStroke(9);
     const d = displaceStroke(s, 2);
     d.forEach((p, i) => {
-      expect(p.pressure).toBe(s.points[i].pressure);
-      expect(p.t).toBe(s.points[i].t);
+      expect(p.pressure).toBe(s.points[i]!.pressure);
+      expect(p.t).toBe(s.points[i]!.t);
     });
   });
 });

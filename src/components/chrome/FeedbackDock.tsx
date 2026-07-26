@@ -10,7 +10,7 @@ export function FeedbackDock() {
     <div className="pointer-events-auto flex items-center gap-1">
       <button
         type="button"
-        className="flex items-center gap-1 overflow-clip rounded-[7px] px-1 py-[3px] antialiased"
+        className="flex h-7 items-center gap-1 overflow-clip rounded-[7px] px-1 antialiased"
         style={{
           backgroundColor: PAPER.surfaceAlt,
           border: `0.4px solid ${PAPER.borderHairline}`,
@@ -29,7 +29,7 @@ export function FeedbackDock() {
       <button
         type="button"
         onClick={() => setHelpOpen(true)}
-        className="grid size-6 place-items-center overflow-clip rounded-[7px]"
+        className="grid h-7 w-7 place-items-center overflow-clip rounded-[7px]"
         style={{
           backgroundColor: PAPER.surfaceAlt,
           border: `0.4px solid ${PAPER.borderHairline}`,

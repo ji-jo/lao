@@ -29,16 +29,19 @@ import { resolveCelIndex, type Layer } from "@/model/types";
  *   under the pointer, which must track 1:1 (`animateOffset === false`).
  */
 
-export const LAYER_ROW_H = 28;
-export const LAYER_ROW_GAP = 4;
+/** +20% over Paper's spec (28/4/20/4/104) — D's explicit timeline-scale override. */
+export const LAYER_ROW_H = 34;
+export const LAYER_ROW_GAP = 5;
 /** row-to-row pitch, used by the reorder drag to pick a target index */
 export const LAYER_ROW_PITCH = LAYER_ROW_H + LAYER_ROW_GAP;
-export const CELL_H = 20;
-export const CELL_GAP = 4;
-/** grip 7 + 6 + eye 12 + 6 + pill 73 */
-export const LABEL_COL_W = 104;
-/** card padding (4+4) + the 8px gap after the label lane */
-export const CELLS_INSET = LABEL_COL_W + 8 + 8;
+export const CELL_H = 24;
+export const CELL_GAP = 5;
+/** grip 8 + 7 + eye 14 + 7 + pill 88 */
+export const LABEL_COL_W = 125;
+/** card padding (5+5) + the 10px gap after the label lane */
+export const CELLS_INSET = LABEL_COL_W + 10 + 10;
+/** cells inset once the label lane is hidden (Paper 68F-0 "collapse layers") — just the card padding */
+export const CELLS_INSET_COLLAPSED = 10;
 
 /** row tint + pill cross-fade */
 const TINT_MS = 140;
@@ -59,6 +62,7 @@ export function TimelineLayerRow({
   dragging,
   dragOffset,
   animateOffset,
+  showLabels = true,
   onMenuOpenChange,
   onSelectLayer,
   onToggleVisible,
@@ -78,6 +82,8 @@ export function TimelineLayerRow({
   dragOffset: number;
   /** ease the offset (rows making room / the drop settling) vs. track the pointer */
   animateOffset: boolean;
+  /** false hides the grip/eye/name-pill lane — "collapse layers" (Paper 68F-0) */
+  showLabels?: boolean;
   onMenuOpenChange: (open: boolean) => void;
   onSelectLayer: () => void;
   onToggleVisible: () => void;
@@ -112,7 +118,7 @@ export function TimelineLayerRow({
   return (
     <div
       className={cn(
-        "flex shrink-0 cursor-pointer items-start gap-2 overflow-clip rounded-[12px] p-1",
+        "flex shrink-0 cursor-pointer items-start gap-[10px] overflow-clip rounded-[14px] p-[5px]",
         dragging && "relative z-10 cursor-grabbing",
       )}
       style={{
@@ -130,9 +136,10 @@ export function TimelineLayerRow({
       onClick={onSelectLayer}
       aria-current={active ? "true" : undefined}
     >
-      {/* label lane — fixed width so every row aligns */}
+      {/* label lane — fixed width so every row aligns; hidden when layers are collapsed (Paper 68F-0) */}
+      {showLabels && (
       <div
-        className="flex shrink-0 items-center gap-1.5"
+        className="flex shrink-0 items-center gap-[7px]"
         style={{ width: LABEL_COL_W, height: CELL_H }}
       >
         <button
@@ -142,12 +149,12 @@ export function TimelineLayerRow({
           aria-label={`Reorder ${layer.name}`}
           title="Drag to reorder"
           className={cn(
-            "relative grid h-3 w-[7px] shrink-0 cursor-grab touch-none place-items-center transition-[opacity,scale] duration-150 ease-out before:absolute before:-inset-1.5 before:content-[''] active:cursor-grabbing",
+            "relative grid h-[14px] w-[8px] shrink-0 cursor-grab touch-none place-items-center transition-[opacity,scale] duration-150 ease-out before:absolute before:-inset-[7px] before:content-[''] active:cursor-grabbing",
             lit ? "opacity-100" : "opacity-60 hover:opacity-100",
             !reduce && "active:scale-90",
           )}
         >
-          <LayerGripIcon size={12} />
+          <LayerGripIcon size={14} />
         </button>
         <button
           type="button"
@@ -158,41 +165,58 @@ export function TimelineLayerRow({
           aria-label={layer.visible ? `Hide ${layer.name}` : `Show ${layer.name}`}
           aria-pressed={!layer.visible}
           className={cn(
-            "relative grid h-3 w-3 shrink-0 cursor-pointer place-items-center transition-[opacity,scale] duration-150 ease-out before:absolute before:-inset-1.5 before:content-['']",
+            "relative grid h-[14px] w-[14px] shrink-0 cursor-pointer place-items-center transition-[opacity,scale] duration-150 ease-out before:absolute before:-inset-[7px] before:content-['']",
             layer.visible ? "opacity-70 hover:opacity-100" : "opacity-40 hover:opacity-70",
             !reduce && "active:scale-90",
           )}
         >
-          {layer.visible ? <PaperEyeGlyph size={12} /> : <EyeOff2 size={12} weight="Filled" />}
+          {layer.visible ? <PaperEyeGlyph size={14} /> : <EyeOff2 size={14} weight="Filled" />}
         </button>
 
-        {/* name pill — 73px; `⋮` becomes delete once the row is lit (Paper 61L-0) */}
+        {/* name pill — 88px; `⋮` becomes delete once the row is lit (Paper 61L-0) */}
         <div
-          className="flex shrink-0 items-center justify-between gap-[7px] overflow-clip rounded-[7px] px-1 py-[3px]"
+          className="flex shrink-0 items-center justify-between gap-[8px] overflow-clip rounded-[8px] px-[5px] py-1"
           style={{
-            width: 73,
+            width: 88,
             backgroundColor: lit ? PAPER.pillActiveBg : PAPER.layerPill,
             border: `0.4px solid ${lit ? PAPER.pillActiveBorder : PAPER.borderHairline}`,
             transition: `background-color ${TINT_MS}ms ${EASE_OUT_CSS}, border-color ${TINT_MS}ms ${EASE_OUT_CSS}`,
           }}
         >
           <span
-            className="min-w-0 flex-1 truncate text-left text-[10px] leading-3 text-white"
+            className="min-w-0 flex-1 truncate text-left text-[12px] leading-[14px] text-white"
             style={{ fontFamily: PAPER.fontMono }}
             title={layer.name}
           >
             {layer.name}
             {layer.isStatic && <span className="ml-1 opacity-50">∞</span>}
           </span>
-          <DropdownMenuPrimitive.Root open={menuOpen} onOpenChange={onMenuOpenChange}>
+          <DropdownMenuPrimitive.Root
+            open={menuOpen}
+            onOpenChange={(open) => {
+              // last layer: hover shows disabled delete — don't open the flyout
+              if (open && lit && !canDelete) return;
+              onMenuOpenChange(open);
+            }}
+          >
             <DropdownMenuPrimitive.Trigger asChild>
               <button
                 type="button"
                 onClick={(e) => e.stopPropagation()}
-                aria-label={lit ? `Delete ${layer.name}` : `${layer.name} menu`}
+                aria-label={
+                  lit
+                    ? canDelete
+                      ? `Delete ${layer.name}`
+                      : `Can't delete the only layer`
+                    : `${layer.name} menu`
+                }
+                aria-disabled={lit && !canDelete ? true : undefined}
                 className={cn(
-                  "relative grid h-3 w-3 shrink-0 cursor-pointer place-items-center opacity-80 transition-[opacity,scale] duration-150 ease-out before:absolute before:-inset-1 before:content-[''] hover:opacity-100",
-                  !reduce && "active:scale-90",
+                  "relative grid h-[14px] w-[14px] shrink-0 place-items-center transition-[opacity,scale] duration-150 ease-out before:absolute before:-inset-[5px] before:content-['']",
+                  lit && !canDelete
+                    ? "cursor-not-allowed opacity-35"
+                    : "cursor-pointer opacity-80 hover:opacity-100",
+                  !reduce && !(lit && !canDelete) && "active:scale-90",
                 )}
               >
                 {/* both glyphs share one grid cell so the swap cross-fades in place */}
@@ -206,7 +230,10 @@ export function TimelineLayerRow({
                       exit={{ opacity: 0, scale: 0.55 }}
                       transition={swapTransition}
                     >
-                      <Trash size={12} color={PAPER.deleteIcon} />
+                      <Trash
+                        size={14}
+                        color={canDelete ? PAPER.deleteIcon : PAPER.textMuted}
+                      />
                     </motion.span>
                   ) : (
                     <motion.span
@@ -217,7 +244,7 @@ export function TimelineLayerRow({
                       exit={{ opacity: 0, scale: 0.55 }}
                       transition={swapTransition}
                     >
-                      <DotsHorizontalIcon size={12} />
+                      <DotsHorizontalIcon size={14} />
                     </motion.span>
                   )}
                 </AnimatePresence>
@@ -238,17 +265,17 @@ export function TimelineLayerRow({
                     initial={reduce ? false : { opacity: 0, scale: 0.92, y: -4 }}
                     animate={{ opacity: 1, scale: 1, y: 0 }}
                     transition={reduce ? { duration: 0 } : SPRING_SWAP}
-                    className="flex cursor-pointer items-center justify-between gap-[7px] overflow-clip rounded-[7px] px-2 py-1.5 text-[10px] leading-3 outline-none disabled:cursor-not-allowed disabled:opacity-40"
+                    className="flex cursor-pointer items-center justify-between gap-[8px] overflow-clip rounded-[8px] px-[10px] py-[7px] text-[12px] leading-[14px] outline-none disabled:cursor-not-allowed disabled:opacity-40"
                     style={{
                       backgroundColor: PAPER.deleteBg,
                       border: `1px solid ${PAPER.deleteBorder}`,
-                      boxShadow: "0 2px 3px #00000033",
+                      boxShadow: "0 2px 4px #00000033",
                       color: PAPER.deleteText,
                       fontFamily: PAPER.fontSans,
                       letterSpacing: "0.04em",
                     }}
                   >
-                    <Trash size={12} color={PAPER.deleteIcon} />
+                    <Trash size={14} color={PAPER.deleteIcon} />
                     <span className="whitespace-nowrap">Delete {layer.name}</span>
                   </motion.button>
                 </DropdownMenuPrimitive.Item>
@@ -257,6 +284,7 @@ export function TimelineLayerRow({
           </DropdownMenuPrimitive.Root>
         </div>
       </div>
+      )}
 
       {/* frame cells — shared horizontal offset, native bar suppressed */}
       <div className="min-w-0 flex-1 overflow-hidden" style={{ height: CELL_H }}>
@@ -279,7 +307,7 @@ export function TimelineLayerRow({
                 title={`${layer.name} · frame ${fi + 1}`}
                 aria-current={isPlayhead ? "true" : undefined}
                 className={cn(
-                  "flex shrink-0 cursor-pointer justify-center rounded-[7px] px-0.5 py-1.5 hover:brightness-150",
+                  "flex shrink-0 cursor-pointer justify-center rounded-[8px] px-[2px] py-[7px] hover:brightness-150",
                   isHold ? "items-center" : "items-start",
                   // a cell is exactly CELL_H tall inside an overflow-hidden lane,
                   // so it may only ever scale *down* — a hover lift would clip.
@@ -298,7 +326,7 @@ export function TimelineLayerRow({
               >
                 {isKey ? (
                   <span
-                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-white"
+                    className="h-[7px] w-[7px] shrink-0 rounded-full bg-white"
                     style={{
                       scale: isPlayhead && !reduce ? "1.3" : "1",
                       transition: `scale ${CELL_MS}ms ${EASE_OUT_CSS}`,
@@ -306,7 +334,7 @@ export function TimelineLayerRow({
                   />
                 ) : isHold ? (
                   <span
-                    className="h-0.5 w-1.5 shrink-0 rounded-full bg-white"
+                    className="h-[2px] w-[7px] shrink-0 rounded-full bg-white"
                     style={{
                       opacity: isPlayhead ? 0.55 : 0.3,
                       transition: `opacity ${CELL_MS}ms ${EASE_OUT_CSS}`,

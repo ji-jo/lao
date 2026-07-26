@@ -128,7 +128,7 @@ Shift+drag = straight line · ←/→ or , / . step frames · Enter play/pause.
 
 ## Verifying changes (no visible browser needed)
 
-- Dev handle `window.__lao` = `{ project, playback, tools, selection }` zustand stores (DEV only).
+- Dev handle `window.__lao` = `{ project, playback, tools, selection, viewport }` zustand stores (DEV only).
 - Drive drawing by dispatching `PointerEvent`s at a canvas and reading store state / canvas
   pixels (`getImageData`). Synthetic events: `getCoalescedEvents()` returns `[]` and
   `setPointerCapture` throws — both are already handled in `StageCanvas`.

@@ -1,28 +1,26 @@
 import {
   MeshGradient,
-  GrainGradient,
   NeuroNoise,
   SmokeRing,
+  GodRays,
+  Warp,
+  GrainGradient,
   Voronoi,
   Waves,
 } from "@paper-design/shaders-react";
 import { useEffect, useState } from "react";
-import type { Background, ShaderPresetId } from "@/model/types";
 import {
   getShaderExportState,
   subscribeShaderExport,
 } from "@/export/shaderExport";
+import {
+  normalizeShaderPreset,
+  resolvedShader,
+  SHADER_PRESETS,
+  type ShaderBg,
+} from "@/lib/shader-presets";
 
-export const SHADER_PRESETS: { id: ShaderPresetId; label: string }[] = [
-  { id: "mesh", label: "Mesh" },
-  { id: "grain", label: "Grain" },
-  { id: "neuro", label: "Neuro" },
-  { id: "smoke", label: "Smoke" },
-  { id: "voronoi", label: "Voronoi" },
-  { id: "waves", label: "Waves" },
-];
-
-type ShaderBg = Extract<Background, { kind: "shader" }>;
+export { SHADER_PRESETS };
 
 /** animated shader layer — fills its parent; parent must be position:relative/absolute */
 export function ShaderBackground({
@@ -36,27 +34,131 @@ export function ShaderBackground({
   /** override speed; pass 0 during export */
   speed?: number;
 }) {
-  const style = { position: "absolute", inset: 0, width: "100%", height: "100%" } as const;
-  const colors = background.colors;
+  const style = {
+    position: "absolute",
+    inset: 0,
+    width: "100%",
+    height: "100%",
+  } as const;
+
   const motion = {
     speed: speed ?? background.speed,
     frame,
   };
+
+  // Legacy presets keep their original components so old .lao files look right.
   switch (background.preset) {
-    case "mesh":
-      return <MeshGradient style={style} colors={colors} {...motion} />;
     case "grain":
-      return <GrainGradient style={style} colors={colors} {...motion} />;
+      return (
+        <GrainGradient style={style} colors={background.colors} {...motion} />
+      );
+    case "voronoi":
+      return <Voronoi style={style} colors={background.colors} {...motion} />;
+    case "waves":
+      return (
+        <Waves
+          style={style}
+          colorFront={background.colors[0]}
+          colorBack={background.colors[1]}
+          {...motion}
+        />
+      );
     case "neuro":
       return (
-        <NeuroNoise style={style} colorFront={colors[0]} colorBack={colors[1]} {...motion} />
+        <NeuroNoise
+          style={style}
+          colorFront={background.colors[0]}
+          colorBack={background.colors[1]}
+          {...motion}
+        />
       );
     case "smoke":
-      return <SmokeRing style={style} colors={colors} {...motion} />;
-    case "voronoi":
-      return <Voronoi style={style} colors={colors} {...motion} />;
-    case "waves":
-      return <Waves style={style} colorFront={colors[0]} colorBack={colors[1]} {...motion} />;
+      return <SmokeRing style={style} colors={background.colors} {...motion} />;
+    default:
+      break;
+  }
+
+  const resolved = resolvedShader(background);
+  const { colors, params, namedColors } = resolved;
+  const preset = normalizeShaderPreset(background.preset);
+
+  switch (preset) {
+    case "aurora":
+      return (
+        <GodRays
+          style={style}
+          colors={colors}
+          colorBack={namedColors.back}
+          colorBloom={namedColors.bloom}
+          density={params.density}
+          spotty={params.spotty}
+          midSize={params.midSize}
+          midIntensity={params.midIntensity}
+          intensity={params.intensity}
+          bloom={params.bloom}
+          offsetX={params.offsetX}
+          offsetY={params.offsetY}
+          scale={params.scale}
+          {...motion}
+        />
+      );
+    case "plasma":
+      return (
+        <Warp
+          style={style}
+          colors={colors}
+          proportion={params.proportion}
+          softness={params.softness}
+          distortion={params.distortion}
+          swirl={params.swirl}
+          swirlIterations={params.swirlIterations}
+          shapeScale={params.shapeScale}
+          shape="checks"
+          scale={params.scale}
+          {...motion}
+        />
+      );
+    case "nebula":
+      return (
+        <NeuroNoise
+          style={style}
+          colorFront={colors[0]}
+          colorMid={colors[1]}
+          colorBack={colors[2] ?? "#000000"}
+          brightness={params.brightness}
+          contrast={params.contrast}
+          scale={params.scale}
+          {...motion}
+        />
+      );
+    case "mesh":
+      return (
+        <MeshGradient
+          style={style}
+          colors={colors}
+          distortion={params.distortion}
+          swirl={params.swirl}
+          grainMixer={params.grainMixer}
+          grainOverlay={params.grainOverlay}
+          scale={params.scale}
+          {...motion}
+        />
+      );
+    case "clouds":
+      return (
+        <SmokeRing
+          style={style}
+          colors={colors}
+          colorBack={namedColors.back}
+          noiseScale={params.noiseScale}
+          noiseIterations={params.noiseIterations}
+          radius={params.radius}
+          thickness={params.thickness}
+          innerShape={params.innerShape}
+          scale={params.scale}
+          {...motion}
+        />
+      );
   }
 }
 
@@ -75,7 +177,8 @@ export function ShaderSnapshotMount({
 }) {
   const [exportState, setExportState] = useState(getShaderExportState);
   useEffect(
-    () => subscribeShaderExport(() => setExportState({ ...getShaderExportState() })),
+    () =>
+      subscribeShaderExport(() => setExportState({ ...getShaderExportState() })),
     [],
   );
 
@@ -89,15 +192,20 @@ export function ShaderSnapshotMount({
       id={SHADER_SNAPSHOT_ID}
       aria-hidden
       style={{
+        // Keep in-viewport (opacity 0) — off-canvas mounts often pause WebGL.
         position: "fixed",
-        left: -10000,
+        left: 0,
         top: 0,
         width,
         height,
+        opacity: 0,
         pointerEvents: "none",
+        zIndex: -1,
+        overflow: "hidden",
       }}
     >
       <ShaderBackground
+        key={normalizeShaderPreset(background.preset)}
         background={background}
         frame={exportState.active ? exportState.frameMs : undefined}
         speed={exportState.active ? 0 : undefined}
