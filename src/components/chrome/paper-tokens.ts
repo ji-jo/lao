@@ -39,6 +39,13 @@ export const PAPER = {
   modeActiveGradient:
     "linear-gradient(in oklab 180deg, oklab(66.8% 0 0) 0%, oklab(19% 0 0) 100%)",
   modeActiveOutline: "#C9C9C980",
+  /** hover fill for the workflow-bar pills — Paper 103-0 */
+  pillHover: "#252525",
+  /** Animatron clip playhead — Paper 63D-0: time badge + the line under it */
+  clipPlayheadBadge: "#6E231B",
+  clipPlayheadLine: "#66261D",
+  /** ellipsis / close glyph in the workflow bar — Paper 106-0 */
+  ellipsisIcon: "#D9D9D9",
   insetX: 62,
   insetTop: 24,
   insetBottom: 48,
@@ -48,4 +55,6 @@ export const PAPER = {
   barHeight: 36,
   fontSans: "'Geist', 'Inter Variable', system-ui, sans-serif",
   fontMono: "'Geist Mono', ui-monospace, monospace",
+  /** display serif — Paper uses it for modal titles (1CQ-0 "Export") */
+  fontSerif: "'Redaction 35', serif",
 } as const;

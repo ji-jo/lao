@@ -15,8 +15,7 @@ import { CELL_GAP } from "@/components/timeline/TimelineLayerRow";
  * Left cluster: record dot + ms readout (Paper AKB-0's AMQ-0/AMR-0 and
  * AMV-0 — no "bring to layer 1"/AMY-0, D had it removed):
  * - the record dot toggles Auto-Key (Paper AMQ-0/AMR-0, same glyph as
- *   Animatron's 6LS-0) — the ONLY auto-key control; StatusIsland's old
- *   duplicate switch was removed
+ *   Animatron's 6LS-0) — the ONLY auto-key control
  * - the duration readout is editable — typing an ms value resizes the timeline
  * - the ruler scrubs the playhead
  * - the magnifier resets zoom to 100%

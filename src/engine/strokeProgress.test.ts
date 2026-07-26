@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import type { Stroke, StrokePoint } from "@/model/types";
+import { DEFAULT_CLIP_EASING, type Stroke, type StrokePoint } from "@/model/types";
 import {
+  clipFadeOpacity,
   strokeAtTime,
   strokeDurationMs,
   truncateStrokePoints,
@@ -72,5 +73,31 @@ describe("strokeAtTime", () => {
 describe("strokeDurationMs", () => {
   test("last point t", () => {
     expect(strokeDurationMs(stroke({ points: pts(0, 40, 90) }))).toBe(90);
+  });
+});
+
+describe("clipFadeOpacity", () => {
+  test("DEFAULT easing holds after clip end — finished paths must never vanish from export", () => {
+    // regression: fadeOutFrames defaulted to 4, so clipFadeOpacity clamped
+    // every finished Animatron path to 0 forever ("previous layers missing")
+    const s = stroke({
+      points: pts(0, 100),
+      clip: { startMs: 0, durationMs: 500, easing: { ...DEFAULT_CLIP_EASING } },
+    });
+    expect(DEFAULT_CLIP_EASING.fadeOutFrames).toBe(0);
+    expect(clipFadeOpacity(s, 501, 12)).toBe(1);
+    expect(clipFadeOpacity(s, 10_000, 12)).toBe(1);
+  });
+
+  test("explicit fade-out is an opt-in exit: 0 after clip end", () => {
+    const s = stroke({
+      points: pts(0, 100),
+      clip: {
+        startMs: 0,
+        durationMs: 500,
+        easing: { ...DEFAULT_CLIP_EASING, fadeOutFrames: 4 },
+      },
+    });
+    expect(clipFadeOpacity(s, 10_000, 12)).toBe(0);
   });
 });

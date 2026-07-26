@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import {
   createEmptyProject,
+  isLegacyVanishingEasing,
   resolveCel,
   resolveCelIndex,
   DEFAULT_CLIP_EASING,
@@ -22,6 +23,35 @@ import {
 
 const MAX_UNDO = 100;
 const MIN_CLIP_MS = 80;
+
+/**
+ * Files saved before the fade-out fix carry the old stamped default easing
+ * (smooth / 4 in / 4 out) on every Animatron clip — which `clipFadeOpacity`
+ * reads as "vanish forever after the clip ends", so finished paths dropped out
+ * of playback and export. Rewrite exactly that stamped combination to hold
+ * (fadeOut 0); anything else is a deliberate setting and passes through.
+ */
+function migrateLegacyVanishingClips(project: Project): Project {
+  let touched = false;
+  const layers = project.layers.map((layer) => {
+    const frames = layer.frames.map((cel) => {
+      if (!cel) return cel;
+      let changed = false;
+      const strokes = cel.strokes.map((s) => {
+        if (!s.clip?.easing || !isLegacyVanishingEasing(s.clip.easing)) return s;
+        touched = true;
+        changed = true;
+        return {
+          ...s,
+          clip: { ...s.clip, easing: { ...s.clip.easing, fadeOutFrames: 0 } },
+        };
+      });
+      return changed ? { ...cel, strokes } : cel;
+    });
+    return frames === layer.frames ? layer : { ...layer, frames };
+  });
+  return touched ? { ...project, layers } : project;
+}
 
 interface ProjectState {
   project: Project;
@@ -533,7 +563,7 @@ export const useProject = create<ProjectState>((set, get) => {
 
     loadProject: (project) => {
       set({
-        project,
+        project: migrateLegacyVanishingClips(project),
         layerIndex: 0,
         frameIndex: 0,
         undoStack: [],

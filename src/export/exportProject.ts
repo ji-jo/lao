@@ -25,6 +25,16 @@ export type ExportFormat = "mp4" | "webm" | "gif" | "apng";
 export interface ExportOptions {
   /** omit background — strokes only (WebM alpha / GIF / APNG transparency) */
   transparent?: boolean;
+  /**
+   * Output size in px; defaults to the project canvas size. The scene is
+   * always painted in project space and uniformly scaled to this box, so the
+   * caller must keep the project's aspect ratio (the export dialog derives
+   * these from Quality × canvas aspect). Never resize `project.width/height`
+   * to change export resolution — strokes are stored in canvas coordinates,
+   * so that crops the drawing instead of scaling it.
+   */
+  width?: number;
+  height?: number;
 }
 
 const FALLBACK_BACKGROUND = "#141416";
@@ -42,10 +52,15 @@ export async function exportProject(
 ): Promise<Blob> {
   const { width, height, fps, frameCount } = project;
   const transparent = opts.transparent ?? false;
+  const outW = Math.max(2, Math.round(opts.width ?? width));
+  const outH = Math.max(2, Math.round(opts.height ?? height));
   const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
+  canvas.width = outW;
+  canvas.height = outH;
   const ctx = canvas.getContext("2d", { willReadFrequently: format === "gif" || format === "apng" })!;
+  // paint in project space, scaled once to the output box — clearRect/fillRect
+  // below use project coords and still cover the full canvas through this
+  ctx.scale(outW / width, outH / height);
   const shaderBg = !transparent && project.background?.kind === "shader";
 
   if (project.background?.kind === "image") {
@@ -89,13 +104,14 @@ export async function exportProject(
       const delay = Math.round(1000 / fps);
       for (let f = 0; f < frameCount; f++) {
         await paint(f);
-        const { data } = ctx.getImageData(0, 0, width, height);
+        // getImageData ignores the transform — read the real output pixels
+        const { data } = ctx.getImageData(0, 0, outW, outH);
         const palette = quantize(data, transparent ? 255 : 256, {
           format: transparent ? "rgba4444" : "rgb565",
           oneBitAlpha: transparent ? 128 : false,
         });
         const index = applyPalette(data, palette);
-        gif.writeFrame(index, width, height, {
+        gif.writeFrame(index, outW, outH, {
           palette,
           delay,
           transparent: transparent || undefined,

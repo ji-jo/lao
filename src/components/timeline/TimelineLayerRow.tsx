@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
@@ -50,13 +50,17 @@ export const LAYER_DROP_MS = 190;
 /** frame-cell state change (playhead, hover wash) */
 const CELL_MS = 130;
 
-export function TimelineLayerRow({
+/**
+ * The row card + label lane, with the track content supplied as `children`.
+ *
+ * Stop-motion fills it with frame cells (`TimelineLayerRow` below); Animatron
+ * fills it with clip bars (`ClipTimeline`). Both workflows therefore share one
+ * row design — grip, eye, name pill, hover tint and `⋮`→trash all behave
+ * identically, which is the whole point of the split.
+ */
+export function TimelineRowShell({
   layer,
   active,
-  frameCount,
-  frameIndex,
-  cellWidth,
-  scrollLeft,
   canDelete,
   menuOpen,
   dragging,
@@ -66,16 +70,12 @@ export function TimelineLayerRow({
   onMenuOpenChange,
   onSelectLayer,
   onToggleVisible,
-  onSelectCell,
   onGripPointerDown,
   onDelete,
+  children,
 }: {
   layer: Layer;
   active: boolean;
-  frameCount: number;
-  frameIndex: number;
-  cellWidth: number;
-  scrollLeft: number;
   canDelete: boolean;
   menuOpen: boolean;
   dragging: boolean;
@@ -87,9 +87,10 @@ export function TimelineLayerRow({
   onMenuOpenChange: (open: boolean) => void;
   onSelectLayer: () => void;
   onToggleVisible: () => void;
-  onSelectCell: (frame: number) => void;
   onGripPointerDown: (e: React.PointerEvent) => void;
   onDelete: () => void;
+  /** track lane content — frame cells or clip bars */
+  children: ReactNode;
 }) {
   const [hovered, setHovered] = useState(false);
   const reduce = useReducedMotion() ?? false;
@@ -286,6 +287,31 @@ export function TimelineLayerRow({
       </div>
       )}
 
+      {children}
+    </div>
+  );
+}
+
+/** Stop-motion exposure row — the shared shell filled with frame cells. */
+export function TimelineLayerRow({
+  frameCount,
+  frameIndex,
+  cellWidth,
+  scrollLeft,
+  onSelectCell,
+  ...shell
+}: Omit<Parameters<typeof TimelineRowShell>[0], "children"> & {
+  frameCount: number;
+  frameIndex: number;
+  cellWidth: number;
+  scrollLeft: number;
+  onSelectCell: (frame: number) => void;
+}) {
+  const { layer } = shell;
+  const reduce = useReducedMotion() ?? false;
+
+  return (
+    <TimelineRowShell {...shell}>
       {/* frame cells — shared horizontal offset, native bar suppressed */}
       <div className="min-w-0 flex-1 overflow-hidden" style={{ height: CELL_H }}>
         <div
@@ -346,6 +372,6 @@ export function TimelineLayerRow({
           })}
         </div>
       </div>
-    </div>
+    </TimelineRowShell>
   );
 }

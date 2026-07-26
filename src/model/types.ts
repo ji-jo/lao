@@ -33,9 +33,30 @@ export interface ClipEasing {
 export const DEFAULT_CLIP_EASING: ClipEasing = {
   bezier: [0.44, 0, 0.56, 1],
   fadeInFrames: 4,
-  fadeOutFrames: 4,
+  /**
+   * MUST default to 0. `clipFadeOpacity` treats any fade-out as "the stroke
+   * leaves the scene at clip end" — opacity stays 0 forever after. With a
+   * non-zero default, every finished Animatron path vanished from playback and
+   * export while the draw canvas still showed it (the "previous layers missing
+   * in export" bug). Paths hold after their clip (see `strokeAtTime`); fading
+   * out is an explicit per-project choice in the Animation panel.
+   */
+  fadeOutFrames: 0,
   presetId: "smooth",
 };
+
+/**
+ * The pre-fix stamped default (fadeOut 4) that made every finished path vanish.
+ * `loadProject` rewrites exactly this combination back to hold — it was never
+ * a deliberate user choice, just what `addStroke` stamped on every clip.
+ */
+export function isLegacyVanishingEasing(easing: ClipEasing): boolean {
+  return (
+    easing.presetId === "smooth" &&
+    easing.fadeInFrames === 4 &&
+    easing.fadeOutFrames === 4
+  );
+}
 
 export interface Stroke {
   id: string;

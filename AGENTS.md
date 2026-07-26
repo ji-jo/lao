@@ -6,6 +6,10 @@ create actual files, verify before claiming done. Files save as **`.lao`** (vers
 
 Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) before touching the engine or stores.
 Read [docs/ROADMAP.md](docs/ROADMAP.md) for parked features (incl. the **Animatron** mode spec).
+Read [docs/MVP1_REQUIREMENTS.md](docs/MVP1_REQUIREMENTS.md) before touching **any UI layout** —
+it is authoritative for MVP 1 chrome and **overrides the UI notes in this file** where they
+disagree (Paper wins). Check it before "restoring" a surface that was deliberately removed.
+[docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md) is the rolling delta for the current work.
 
 ## Environment — read first, this bites
 
@@ -107,9 +111,15 @@ Re-verify a token against Paper before trusting it; prefer `get_tokens` where it
 - **Top-left** — `@beui/overflow-actions`: Stop-motion / Animatron toggle + File overflow
   (Save / Open / Export). Ellipsis / close toggle uses D's SVGs (`ellipsis-icon`,
   `ellipsis-close-icon`).
-- **Top-center (Draw stage)** — `@beui/dynamic-island` "status island": compact pill shows
-  `tool · frame/total · fps`; tap expands into Brush (color/size/boil/auto-key) and Canvas
-  (background + size) settings. This IS the settings panel — there is no separate InspectPanel.
+- **Bottom (Draw stage) — settings** — the Paper **conjoined settings docks**
+  (`src/components/chrome/SettingsDocks.tsx`): a dock bar whose chips open supporting panels
+  that melt into it via the gooey neck (`motion/gooey-conjoined.tsx`). Brush (color / size /
+  Boil On-Off + Amplitude…Variety scrubbers), Canvas Background, aspect. Panels **anchor to
+  the chip that opened them**. This IS the settings surface.
+  - There is **no status island / dynamic island.** `StatusIsland.tsx` was deleted per
+    `docs/MVP1_REQUIREMENTS.md` ("Do not leave two settings surfaces"). The beui
+    `motion/dynamic-island.tsx` component is still installed but has **no consumer** —
+    don't wire a second settings surface back up.
 - **Bottom (Draw stage)** — `@beui/dock` tool rail stacked above the timeline: Select/Ink/
   Pencil/Marker/Eraser + duplicate-frame / empty-cel / onion + undo/redo. Ink uses reicon
   `PenNib`.
