@@ -12,6 +12,11 @@ interface PlaybackState {
   workflow: Workflow;
   playing: boolean;
   onionSkin: boolean;
+  onionColor: string;
+  onionOpacity: number;
+  onionRange: number;
+  onionAutoDuplicate: boolean;
+  onionPanelOpen: boolean;
   /** Loop playback back to frame 0 at the end (Paper timeline loop toggle) */
   loop: boolean;
   /** Animatron timeline-conjoined easing panel */
@@ -22,6 +27,8 @@ interface PlaybackState {
   setPlaying: (playing: boolean) => void;
   togglePlaying: () => void;
   toggleOnionSkin: () => void;
+  setOnionSkinProps: (props: Partial<Pick<PlaybackState, "onionColor" | "onionOpacity" | "onionRange" | "onionAutoDuplicate">>) => void;
+  toggleOnionPanel: () => void;
   toggleLoop: () => void;
   setAnimationPanelOpen: (open: boolean) => void;
   toggleAnimationPanel: () => void;
@@ -33,6 +40,11 @@ export const usePlayback = create<PlaybackState>((set) => ({
   workflow: "stopmotion",
   playing: false,
   onionSkin: true,
+  onionColor: "#e0504f",
+  onionOpacity: 0.45,
+  onionRange: 1,
+  onionAutoDuplicate: true,
+  onionPanelOpen: false,
   loop: true,
   animationPanelOpen: false,
   setMode: (mode) => set({ mode, stage: mode, playing: false }),
@@ -41,6 +53,8 @@ export const usePlayback = create<PlaybackState>((set) => ({
   setPlaying: (playing) => set({ playing }),
   togglePlaying: () => set((s) => ({ playing: !s.playing })),
   toggleOnionSkin: () => set((s) => ({ onionSkin: !s.onionSkin })),
+  setOnionSkinProps: (props) => set(props),
+  toggleOnionPanel: () => set((s) => ({ onionPanelOpen: !s.onionPanelOpen })),
   toggleLoop: () => set((s) => ({ loop: !s.loop })),
   setAnimationPanelOpen: (animationPanelOpen) => set({ animationPanelOpen }),
   toggleAnimationPanel: () =>

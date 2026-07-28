@@ -34,8 +34,9 @@ import { hasImageFilter } from "@/lib/image-filters";
 
 const SHORTCUTS: Record<string, ToolId> = {
   v: "select",
+  a: "path",
   b: "ink",
-  p: "pencil",
+  p: "pen",
   f: "fill",
   e: "eraser",
   t: "text",
@@ -151,7 +152,6 @@ export default function App() {
         if (e.key.toLowerCase() === "a") {
           e.preventDefault();
           useSelection.getState().selectAll();
-          useTools.getState().setTool("select");
           return;
         }
         if (e.key.toLowerCase() === "c" && !e.shiftKey) {
@@ -202,7 +202,12 @@ export default function App() {
 
       if (e.key === "Delete" || e.key === "Backspace") {
         const ids = useSelection.getState().ids;
-        if (ids.length) {
+        const nodeIds = useSelection.getState().nodeIds;
+        if (nodeIds.length > 0) {
+          e.preventDefault();
+          useProject.getState().deleteNodes(nodeIds);
+          useSelection.getState().clearNodes();
+        } else if (ids.length > 0) {
           e.preventDefault();
           useProject.getState().deleteStrokes(ids);
           useSelection.getState().clear();
@@ -230,11 +235,6 @@ export default function App() {
       }
 
       const k = e.key.toLowerCase();
-      if (k === "a") {
-        useSelection.getState().selectAll();
-        useTools.getState().setTool("select");
-        return;
-      }
       if (k === "d") {
         useSelection.getState().clear();
         return;

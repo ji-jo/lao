@@ -21,7 +21,9 @@ dithering, halftone on strokes. Needs an offscreen art canvas → shader texture
 
 ## 4. Drawing/editing quality of life
 
-- Brush textures/grain — **shipped** (seeded paper grain via `grain` stroke flag + Status Island toggle).
+- Brush textures/grain — **shipped** (seeded paper grain via `grain` stroke flag + the brush
+  settings-dock toggle; StatusIsland — the old top-center pill this note originally referred
+  to — was removed, see `docs/SESSION_HANDOFF.md`).
 - Move/rotate/scale selected strokes — **shipped** (bbox corner scale, rotation handle, group move).
 - Marquee/lasso selection.
 - Pan/zoom of the canvas — **shipped** (wheel pan, Ctrl/Cmd+wheel or +/- zoom, Space/middle-drag pan, Ctrl/Cmd+0 reset).

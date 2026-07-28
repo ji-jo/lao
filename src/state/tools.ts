@@ -7,6 +7,7 @@ export type ShapeToolId = "rect" | "diamond" | "circle" | "arrow" | "line";
 
 export type ToolId =
   | "select"
+  | "path"
   | BrushKind
   | "fill"
   | "text"
@@ -15,7 +16,7 @@ export type ToolId =
   | ShapeToolId;
 
 export function isBrushTool(tool: ToolId): tool is BrushKind {
-  return tool === "ink" || tool === "pencil" || tool === "marker" || tool === "eraser";
+  return tool === "ink" || tool === "pen" || tool === "marker" || tool === "eraser";
 }
 
 export function isShapeTool(tool: ToolId): tool is ShapeToolId {

@@ -29,14 +29,24 @@ const MAIN: {
     icon: (s) => <MousePointer2Icon size={s} />,
   },
   {
+    id: "path",
+    label: "Path",
+    shortcut: "a",
+    icon: (s) => (
+      <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+        <path d="M11 21 8 13 2 10l19-7-10 18z" />
+      </svg>
+    ),
+  },
+  {
     id: "ink",
     label: "Ink",
     shortcut: "b",
     icon: (s) => <PenNib size={s} />,
   },
   {
-    id: "pencil",
-    label: "Pencil",
+    id: "pen",
+    label: "Pen",
     shortcut: "p",
     icon: (s) => <LetterPIcon size={s} />,
   },

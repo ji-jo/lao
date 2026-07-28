@@ -6,6 +6,7 @@ import { playerRef } from "@/state/playerRef";
 import { ClipTimeline } from "@/components/timeline/ClipTimeline";
 import { Tooltip } from "@/components/motion/tooltip";
 import { AnimationPanel } from "@/components/panels/AnimationPanel";
+import { OnionPanel } from "@/components/panels/OnionPanel";
 import { SettingsDocks } from "@/components/chrome/SettingsDocks";
 import { PAPER } from "@/components/chrome/paper-tokens";
 import {
@@ -80,7 +81,8 @@ export function Timeline() {
   const deleteLayer = useProject((s) => s.deleteLayer);
   const reorderLayer = useProject((s) => s.reorderLayer);
   const toggleLayerVisible = useProject((s) => s.toggleLayerVisible);
-  const toggleOnionSkin = usePlayback((s) => s.toggleOnionSkin);
+  const onionPanelOpen = usePlayback((s) => s.onionPanelOpen);
+  const toggleOnionPanel = usePlayback((s) => s.toggleOnionPanel);
   const animationPanelOpen = usePlayback((s) => s.animationPanelOpen);
   const toggleAnimationPanel = usePlayback((s) => s.toggleAnimationPanel);
   const autoKey = useTools((s) => s.autoKey);
@@ -293,12 +295,13 @@ export function Timeline() {
     <div ref={shellRef} className="relative flex w-full flex-col items-center">
       {/* Above the whole column (settings + dock). Inline bottom — class bottom-full
           was a no-op here and left the panel in static flow, shooting downward. */}
-      {animationPanelOpen && (
+      {(animationPanelOpen || onionPanelOpen) && (
         <div
-          className="pointer-events-auto absolute left-1/2 z-30 -translate-x-1/2"
+          className="pointer-events-auto absolute left-1/2 z-30 flex -translate-x-1/2 gap-4"
           style={{ bottom: "calc(100% + 14px)" }}
         >
-          <AnimationPanel />
+          {animationPanelOpen && <AnimationPanel />}
+          {onionPanelOpen && <OnionPanel />}
         </div>
       )}
       {stage === "draw" && (
@@ -411,7 +414,7 @@ export function Timeline() {
           >
             {(_bg, color) => <EaseCurveGlyph color={color} />}
           </SquareBtn>
-          <SquareBtn label="Onion skin" onClick={toggleOnionSkin} active={onionSkin}>
+          <SquareBtn label="Onion skin settings" onClick={toggleOnionPanel} active={onionSkin}>
             {(bg, color) => <OnionRingsGlyph stroke={bg} color={color} />}
           </SquareBtn>
         </div>

@@ -1,6 +1,13 @@
 /** Core document model — retained vector everywhere (powers jitter, editing, export). */
 
-export type BrushKind = "pencil" | "ink" | "marker" | "eraser";
+export type BrushKind = "pen" | "ink" | "marker" | "eraser";
+
+export interface BezierNode {
+  x: number;
+  y: number;
+  handleIn?: { x: number; y: number };
+  handleOut?: { x: number; y: number };
+}
 
 export interface StrokePoint {
   x: number;
@@ -28,6 +35,8 @@ export interface ClipEasing {
   fadeInFrames: number;
   fadeOutFrames: number;
   presetId?: string;
+  /** Explicitly set by the user, skipping legacy migration overrides */
+  _userSet?: boolean;
 }
 
 export const DEFAULT_CLIP_EASING: ClipEasing = {
@@ -51,6 +60,7 @@ export const DEFAULT_CLIP_EASING: ClipEasing = {
  * a deliberate user choice, just what `addStroke` stamped on every clip.
  */
 export function isLegacyVanishingEasing(easing: ClipEasing): boolean {
+  if (easing._userSet) return false;
   return (
     easing.presetId === "smooth" &&
     easing.fadeInFrames === 4 &&
@@ -73,6 +83,10 @@ export interface Stroke {
   grain?: boolean;
   /** Animatron clip timing (ignored in stop-motion paint) */
   clip?: StrokeClip;
+  /** Vector path anchor points (for pen tool) */
+  bezierNodes?: BezierNode[];
+  /** Whether the vector path forms a closed loop */
+  closed?: boolean;
 }
 
 export interface Frame {

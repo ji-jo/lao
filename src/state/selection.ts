@@ -5,9 +5,14 @@ import { useProject } from "@/state/project";
 interface SelectionState {
   /** selected stroke ids within the current cel */
   ids: string[];
+  /** selected node points */
+  nodeIds: { strokeId: string; index: number }[];
   set: (ids: string[]) => void;
   toggle: (id: string) => void;
+  setNodes: (nodes: { strokeId: string; index: number }[]) => void;
+  toggleNode: (strokeId: string, index: number) => void;
   clear: () => void;
+  clearNodes: () => void;
   selectAll: () => void;
   /** drop ids that no longer exist in the active cel */
   prune: () => void;
@@ -22,17 +27,33 @@ function currentCelStrokeIds(): string[] {
 
 export const useSelection = create<SelectionState>((set, get) => ({
   ids: [],
-  set: (ids) => set({ ids }),
+  nodeIds: [],
+  set: (ids) => set({ ids, nodeIds: [] }),
   toggle: (id) =>
     set((s) => ({
       ids: s.ids.includes(id) ? s.ids.filter((x) => x !== id) : [...s.ids, id],
+      nodeIds: [],
     })),
-  clear: () => set({ ids: [] }),
-  selectAll: () => set({ ids: currentCelStrokeIds() }),
+  setNodes: (nodeIds) => set({ nodeIds }),
+  toggleNode: (strokeId, index) =>
+    set((s) => {
+      const exists = s.nodeIds.some((n) => n.strokeId === strokeId && n.index === index);
+      return {
+        nodeIds: exists
+          ? s.nodeIds.filter((n) => !(n.strokeId === strokeId && n.index === index))
+          : [...s.nodeIds, { strokeId, index }],
+      };
+    }),
+  clear: () => set({ ids: [], nodeIds: [] }),
+  clearNodes: () => set({ nodeIds: [] }),
+  selectAll: () => set({ ids: currentCelStrokeIds(), nodeIds: [] }),
   prune: () => {
     const valid = new Set(currentCelStrokeIds());
-    const next = get().ids.filter((id) => valid.has(id));
-    if (next.length !== get().ids.length) set({ ids: next });
+    const nextIds = get().ids.filter((id) => valid.has(id));
+    const nextNodes = get().nodeIds.filter((n) => valid.has(n.strokeId));
+    if (nextIds.length !== get().ids.length || nextNodes.length !== get().nodeIds.length) {
+      set({ ids: nextIds, nodeIds: nextNodes });
+    }
   },
 }));
 

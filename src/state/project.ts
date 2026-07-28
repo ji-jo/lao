@@ -15,6 +15,7 @@ import {
 import { useTools } from "@/state/tools";
 import { usePlayback } from "@/state/playback";
 import { translatePoints, transformPoints } from "@/engine/pathEdit";
+import { flattenBezierNodes } from "@/lib/bezier";
 import {
   allProjectStrokes,
   projectClipEndMs,
@@ -70,7 +71,8 @@ interface ProjectState {
   /** paste strokes into the current frame at their original coordinates; returns the new ids */
   pasteStrokes: (strokes: Stroke[]) => string[];
   deleteStrokes: (ids: string[]) => void;
-  replaceStrokePoints: (strokeId: string, points: Stroke["points"]) => void;
+  deleteNodes: (nodeIds: { strokeId: string; index: number }[]) => void;
+  replaceStrokePoints: (strokeId: string, points: Stroke["points"], bezierNodes?: Stroke["bezierNodes"]) => void;
   /** translate many strokes in one undo step */
   translateStrokes: (ids: string[], dx: number, dy: number) => void;
   /** scale + rotate many strokes around a pivot in one undo step */
@@ -143,7 +145,6 @@ function cloneCel(cel: Frame): Frame {
     id: crypto.randomUUID(),
     strokes: cel.strokes.map((st) => ({
       ...st,
-      id: crypto.randomUUID(),
       points: st.points.map((p) => ({ ...p })),
       clip: st.clip ? { ...st.clip } : undefined,
     })),
@@ -285,7 +286,9 @@ export const useProject = create<ProjectState>((set, get) => {
         } else if (autoKey || resolveCelIndex(layer, frameIndex) === null) {
           // seed from held cel so prior art stays (flipbook expectation)
           const heldIdx = resolveCelIndex(layer, frameIndex);
-          if (heldIdx !== null && autoKey) {
+          const pb = usePlayback.getState();
+          const shouldClone = autoKey && (!pb.onionSkin || pb.onionAutoDuplicate);
+          if (heldIdx !== null && shouldClone) {
             cel = cloneCel(layer.frames[heldIdx]!);
           } else {
             cel = emptyCel();
@@ -325,24 +328,91 @@ export const useProject = create<ProjectState>((set, get) => {
       const { project, layerIndex, frameIndex } = get();
       const layer = project.layers[layerIndex];
       if (!layer) return;
+      const pb = usePlayback.getState();
+      const tools = useTools.getState();
       const celIndex = resolveCelIndex(layer, layer.isStatic ? 0 : frameIndex);
       if (celIndex === null) return;
+      
+      const isHeld = celIndex !== frameIndex && !layer.isStatic;
+      const shouldClone = tools.autoKey && (!pb.onionSkin || pb.onionAutoDuplicate);
+      if (isHeld && !shouldClone) return; // Cannot edit held cel if auto-key is off/prevented
+
       const cel = layer.frames[celIndex]!;
       const strokes = cel.strokes.filter((s) => !ids.includes(s.id));
       if (strokes.length === cel.strokes.length) return;
-      commit(replaceLayer(project, layerIndex, setCel(layer, celIndex, { ...cel, strokes })));
+      
+      if (isHeld) {
+        commit(replaceLayer(project, layerIndex, setCel(layer, frameIndex, { ...cloneCel(cel), strokes })));
+      } else {
+        commit(replaceLayer(project, layerIndex, setCel(layer, celIndex, { ...cel, strokes })));
+      }
     },
 
-    replaceStrokePoints: (strokeId, points) => {
+    deleteNodes: (nodeIds) => {
       const { project, layerIndex, frameIndex } = get();
       const layer = project.layers[layerIndex];
       if (!layer) return;
+      const pb = usePlayback.getState();
+      const tools = useTools.getState();
       const celIndex = resolveCelIndex(layer, layer.isStatic ? 0 : frameIndex);
       if (celIndex === null) return;
+      
+      const isHeld = celIndex !== frameIndex && !layer.isStatic;
+      const shouldClone = tools.autoKey && (!pb.onionSkin || pb.onionAutoDuplicate);
+      if (isHeld && !shouldClone) return;
+
+      const cel = layer.frames[celIndex]!;
+      
+      const toDelete = new Map<string, Set<number>>();
+      for (const { strokeId, index } of nodeIds) {
+        if (!toDelete.has(strokeId)) toDelete.set(strokeId, new Set());
+        toDelete.get(strokeId)!.add(index);
+      }
+      
+      let changed = false;
+      const strokes = cel.strokes.map(s => {
+        const delSet = toDelete.get(s.id);
+        if (!delSet) return s;
+        changed = true;
+        if (s.bezierNodes) {
+          const newNodes = s.bezierNodes.filter((_, i) => !delSet.has(i));
+          const newPoints = flattenBezierNodes(newNodes, s.closed);
+          return { ...s, bezierNodes: newNodes, points: newPoints };
+        }
+        return { ...s, points: s.points.filter((_, i) => !delSet.has(i)) };
+      }).filter(s => (s.bezierNodes ? s.bezierNodes.length > 0 : s.points.length > 0));
+      
+      if (!changed) return;
+      
+      if (isHeld) {
+        commit(replaceLayer(project, layerIndex, setCel(layer, frameIndex, { ...cloneCel(cel), strokes })));
+      } else {
+        commit(replaceLayer(project, layerIndex, setCel(layer, celIndex, { ...cel, strokes })));
+      }
+    },
+
+    replaceStrokePoints: (strokeId, points, bezierNodes) => {
+      const { project, layerIndex, frameIndex } = get();
+      const layer = project.layers[layerIndex];
+      if (!layer) return;
+      const pb = usePlayback.getState();
+      const tools = useTools.getState();
+      const celIndex = resolveCelIndex(layer, layer.isStatic ? 0 : frameIndex);
+      if (celIndex === null) return;
+      
+      const isHeld = celIndex !== frameIndex && !layer.isStatic;
+      const shouldClone = tools.autoKey && (!pb.onionSkin || pb.onionAutoDuplicate);
+      if (isHeld && !shouldClone) return;
+
       const cel = layer.frames[celIndex]!;
       if (!cel.strokes.some((s) => s.id === strokeId)) return;
-      const strokes = cel.strokes.map((s) => (s.id === strokeId ? { ...s, points } : s));
-      commit(replaceLayer(project, layerIndex, setCel(layer, celIndex, { ...cel, strokes })));
+      const strokes = cel.strokes.map((s) => (s.id === strokeId ? { ...s, points, ...(bezierNodes ? { bezierNodes } : {}) } : s));
+      
+      if (isHeld) {
+        commit(replaceLayer(project, layerIndex, setCel(layer, frameIndex, { ...cloneCel(cel), strokes })));
+      } else {
+        commit(replaceLayer(project, layerIndex, setCel(layer, celIndex, { ...cel, strokes })));
+      }
     },
 
     translateStrokes: (ids, dx, dy) => {
@@ -350,8 +420,15 @@ export const useProject = create<ProjectState>((set, get) => {
       const { project, layerIndex, frameIndex } = get();
       const layer = project.layers[layerIndex];
       if (!layer) return;
+      const pb = usePlayback.getState();
+      const tools = useTools.getState();
       const celIndex = resolveCelIndex(layer, layer.isStatic ? 0 : frameIndex);
       if (celIndex === null) return;
+
+      const isHeld = celIndex !== frameIndex && !layer.isStatic;
+      const shouldClone = tools.autoKey && (!pb.onionSkin || pb.onionAutoDuplicate);
+      if (isHeld && !shouldClone) return;
+
       const cel = layer.frames[celIndex]!;
       const idSet = new Set(ids);
       let changed = false;
@@ -361,7 +438,12 @@ export const useProject = create<ProjectState>((set, get) => {
         return { ...s, points: translatePoints(s.points, dx, dy) };
       });
       if (!changed) return;
-      commit(replaceLayer(project, layerIndex, setCel(layer, celIndex, { ...cel, strokes })));
+
+      if (isHeld) {
+        commit(replaceLayer(project, layerIndex, setCel(layer, frameIndex, { ...cloneCel(cel), strokes })));
+      } else {
+        commit(replaceLayer(project, layerIndex, setCel(layer, celIndex, { ...cel, strokes })));
+      }
     },
 
     transformStrokes: (ids, pivotX, pivotY, scale, rotationRad) => {
@@ -369,8 +451,15 @@ export const useProject = create<ProjectState>((set, get) => {
       const { project, layerIndex, frameIndex } = get();
       const layer = project.layers[layerIndex];
       if (!layer) return;
+      const pb = usePlayback.getState();
+      const tools = useTools.getState();
       const celIndex = resolveCelIndex(layer, layer.isStatic ? 0 : frameIndex);
       if (celIndex === null) return;
+
+      const isHeld = celIndex !== frameIndex && !layer.isStatic;
+      const shouldClone = tools.autoKey && (!pb.onionSkin || pb.onionAutoDuplicate);
+      if (isHeld && !shouldClone) return;
+
       const cel = layer.frames[celIndex]!;
       const idSet = new Set(ids);
       let changed = false;
@@ -384,7 +473,12 @@ export const useProject = create<ProjectState>((set, get) => {
         };
       });
       if (!changed) return;
-      commit(replaceLayer(project, layerIndex, setCel(layer, celIndex, { ...cel, strokes })));
+
+      if (isHeld) {
+        commit(replaceLayer(project, layerIndex, setCel(layer, frameIndex, { ...cloneCel(cel), strokes })));
+      } else {
+        commit(replaceLayer(project, layerIndex, setCel(layer, celIndex, { ...cel, strokes })));
+      }
     },
 
     updateStrokeClip: (strokeId, clip) => {
@@ -434,7 +528,17 @@ export const useProject = create<ProjectState>((set, get) => {
       const { project, layerIndex, frameIndex } = get();
       const layer = project.layers[layerIndex];
       if (!layer || layer.isStatic) return;
-      commit(replaceLayer(project, layerIndex, setCel(layer, frameIndex, emptyCel())));
+
+      let newCel = emptyCel();
+      const pb = usePlayback.getState();
+      if (pb.onionSkin && pb.onionAutoDuplicate && frameIndex > 0) {
+        const prevCelIdx = resolveCelIndex(layer, frameIndex - 1);
+        if (prevCelIdx !== null) {
+          newCel = cloneCel(layer.frames[prevCelIdx]!);
+        }
+      }
+
+      commit(replaceLayer(project, layerIndex, setCel(layer, frameIndex, newCel)));
     },
 
     /** duplicate the current cel onto the next frame and move there — the core draw→flip→draw loop */

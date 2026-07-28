@@ -502,6 +502,7 @@ function BrushExpandedPanel({
   onSize,
   onJitter,
   onBoil,
+  onBoilCommit,
 }: {
   color: string;
   size: number;
@@ -512,6 +513,7 @@ function BrushExpandedPanel({
   onSize: (n: number) => void;
   onJitter: (v: boolean) => void;
   onBoil: (patch: Partial<BoilSettings>) => void;
+  onBoilCommit?: (patch: Partial<BoilSettings>) => void;
 }) {
   const [hex, setHex] = useState(() => hexDigits(color));
 
@@ -611,6 +613,7 @@ function BrushExpandedPanel({
               label={p.label}
               value={boil[p.key]}
               onChange={(v) => onBoil({ [p.key]: v })}
+              onValueCommit={(v) => onBoilCommit?.({ [p.key]: v })}
               min={p.min}
               max={p.max}
               step={p.step}
@@ -1265,6 +1268,7 @@ function BgLabeledScrubber({
   label,
   value,
   onChange,
+  onValueCommit,
   min,
   max,
   step,
@@ -1276,6 +1280,7 @@ function BgLabeledScrubber({
   label: string;
   value: number;
   onChange: (v: number) => void;
+  onValueCommit?: (v: number) => void;
   min: number;
   max: number;
   step: number;
@@ -1303,6 +1308,7 @@ function BgLabeledScrubber({
             aria-label={label}
             value={value}
             onChange={onChange}
+            onValueCommit={onValueCommit}
             min={min}
             max={max}
             step={step}
@@ -1862,13 +1868,13 @@ export function SettingsDocks() {
   const hideDock = tool === "hand";
   const showBrush =
     tool === "ink" ||
-    tool === "pencil" ||
+    tool === "pen" ||
     tool === "marker" ||
     tool === "fill" ||
     tool === "eraser";
   const showColor =
     tool === "ink" ||
-    tool === "pencil" ||
+    tool === "pen" ||
     tool === "marker" ||
     tool === "fill" ||
     tool === "text" ||
@@ -1877,8 +1883,9 @@ export function SettingsDocks() {
   const showFillColor = shapesMode;
   const showCanvas =
     tool === "select" ||
+    tool === "path" ||
     tool === "ink" ||
-    tool === "pencil" ||
+    tool === "pen" ||
     tool === "marker" ||
     tool === "fill" ||
     tool === "eraser" ||
@@ -1954,6 +1961,7 @@ export function SettingsDocks() {
             if (next !== jitterByDefault) toggleJitterByDefault();
           }}
           onBoil={(patch) => setBoilLive(resolveBoil({ ...boil, ...patch }))}
+          onBoilCommit={(patch) => setProjectSettings({ boil: resolveBoil({ ...boil, ...patch }) })}
         />
       );
     }

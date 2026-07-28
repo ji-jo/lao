@@ -362,6 +362,7 @@ export function AnimationPanel({ className }: { className?: string }) {
       fadeInFrames: next.fadeInFrames ?? fadeIn,
       fadeOutFrames: next.fadeOutFrames ?? fadeOut,
       presetId: next.presetId ?? preset,
+      _userSet: true,
     };
     applyClipEasing(easingNext);
   }

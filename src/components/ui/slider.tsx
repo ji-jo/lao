@@ -37,6 +37,7 @@ interface SliderProps
   extends Omit<HTMLAttributes<HTMLDivElement>, "onChange" | "defaultValue"> {
   value: SliderValue;
   onChange: (value: SliderValue) => void;
+  onValueCommit?: (value: SliderValue) => void;
   min?: number;
   max?: number;
   step?: number;
@@ -336,6 +337,7 @@ const Slider = forwardRef<HTMLDivElement, SliderProps>(
       hideFill = false,
       thumbColor,
       thumbBorderColor,
+      onValueCommit,
       className,
       ...props
     },
@@ -685,7 +687,17 @@ const Slider = forwardRef<HTMLDivElement, SliderProps>(
       const snapped = pixelToValue(currentPx, min, max, step, tw, stepValues);
       const snappedPx = valueToPixel(snapped, min, max, tw);
       animate(motionX, snappedPx, spring.moderate);
-    }, [min, max, step, stepValues, motionX0, motionX1]);
+      
+      if (onValueCommit) {
+        if (isRange) {
+          const newValues: [number, number] = [...(values as [number, number])];
+          newValues[activeDragThumb.current] = snapped;
+          onValueCommit(newValues);
+        } else {
+          onValueCommit(snapped);
+        }
+      }
+    }, [min, max, step, stepValues, motionX0, motionX1, isRange, values, onValueCommit]);
 
     // --- Radix keyboard handler ---
     // In steps mode the primitive runs on indices (0..len-1, step 1) so arrow
@@ -703,6 +715,21 @@ const Slider = forwardRef<HTMLDivElement, SliderProps>(
         }
       },
       [isRange, onChange, stepValues]
+    );
+
+    const handleRadixCommit = useCallback(
+      (newValues: number[]) => {
+        if (dragging.current || !onValueCommit) return;
+        const mapped = stepValues
+          ? newValues.map((i) => stepValues[Math.round(i)])
+          : newValues;
+        if (isRange) {
+          onValueCommit(mapped as [number, number]);
+        } else {
+          onValueCommit(mapped[0]);
+        }
+      },
+      [isRange, stepValues, onValueCommit]
     );
 
     // --- Click-to-edit handlers ---
@@ -898,6 +925,7 @@ const Slider = forwardRef<HTMLDivElement, SliderProps>(
                 : values
             }
             onValueChange={handleRadixChange}
+            onValueCommit={handleRadixCommit}
             min={stepValues ? 0 : min}
             max={stepValues ? stepValues.length - 1 : max}
             step={stepValues ? 1 : step}
@@ -1086,6 +1114,7 @@ interface SliderComfortableProps
   extends Omit<HTMLAttributes<HTMLDivElement>, "onChange" | "defaultValue" | "onDrag" | "onDragStart" | "onDragEnd" | "onDragOver" | "onAnimationStart"> {
   value: number;
   onChange: (value: number) => void;
+  onValueCommit?: (value: number) => void;
   min?: number;
   max?: number;
   step?: number;
@@ -1111,6 +1140,7 @@ const SliderComfortable = forwardRef<HTMLDivElement, SliderComfortableProps>(
       step = 1,
       variant = "pips",
       label,
+      onValueCommit,
       formatValue = String,
       disabled = false,
       fillColor = "var(--active)",
@@ -1314,10 +1344,12 @@ const SliderComfortable = forwardRef<HTMLDivElement, SliderComfortableProps>(
     );
 
     const handlePointerUp = useCallback(() => {
+      if (!dragging.current) return;
       dragging.current = false;
       setIsPressed(false);
       setHoverPreview(null);
-    }, []);
+      onValueCommit?.(value);
+    }, [onValueCommit, value]);
 
     // Resize handle drag handlers (direct cursor position)
     const handleResizePointerDown = useCallback(
@@ -1349,16 +1381,25 @@ const SliderComfortable = forwardRef<HTMLDivElement, SliderComfortableProps>(
     );
 
     const handleResizePointerUp = useCallback(() => {
+      if (!handleDragging.current) return;
       handleDragging.current = false;
       setIsPressed(false);
       setHoverPreview(null);
-    }, []);
+      onValueCommit?.(value);
+    }, [onValueCommit, value]);
 
     const handleRadixChange = useCallback(
       (newValues: number[]) => {
         onChange(newValues[0]);
       },
       [onChange]
+    );
+
+    const handleRadixCommit = useCallback(
+      (newValues: number[]) => {
+        onValueCommit?.(newValues[0]);
+      },
+      [onValueCommit]
     );
 
     const isActive = isHovered || isFocused;
@@ -1460,6 +1501,7 @@ const SliderComfortable = forwardRef<HTMLDivElement, SliderComfortableProps>(
         <SliderPrimitive.Root
           value={[value]}
           onValueChange={handleRadixChange}
+          onValueCommit={handleRadixCommit}
           min={min}
           max={max}
           step={step}

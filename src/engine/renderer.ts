@@ -8,6 +8,8 @@ export interface RenderOptions {
   quality: RenderQuality;
   /** optional per-frame displaced points (from the boil engine) keyed by stroke id */
   displaced?: Map<string, StrokePoint[]>;
+  /** optional per-frame displaced bezier nodes keyed by stroke id */
+  displacedBezier?: Map<string, import("@/model/types").BezierNode[]>;
   /** force every stroke to this color (onion-skin ghosts) */
   colorOverride?: string;
 }
@@ -22,7 +24,7 @@ function freehandOptions(stroke: Stroke, quality: RenderQuality) {
   switch (stroke.brush) {
     case "ink":
       return { ...base, thinning: 0.65, smoothing: 0.5, streamline: quality === "draft" ? 0.3 : 0.5 };
-    case "pencil":
+    case "pen":
       return { ...base, size: Math.max(stroke.size * 0.5, 1), thinning: 0.3, smoothing: 0.4, streamline: 0.3 };
     case "marker":
       return { ...base, size: stroke.size * 2, thinning: 0.1, smoothing: 0.6, streamline: 0.5 };
@@ -72,16 +74,44 @@ export function renderStroke(
   livePoints?: StrokePoint[],
 ) {
   const points = livePoints ?? opts.displaced?.get(stroke.id) ?? stroke.points;
-  if (points.length === 0) return;
+  const nodes = opts.displacedBezier?.get(stroke.id) ?? stroke.bezierNodes;
+  const hasBezier = nodes && nodes.length > 0;
+  if (points.length === 0 && !hasBezier) return;
 
   ctx.save();
+  if (hasBezier) {
+    ctx.strokeStyle = opts.colorOverride ?? stroke.color;
+    ctx.lineWidth = stroke.size;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    
+    const path = new Path2D();
+    path.moveTo(nodes![0].x, nodes![0].y);
+    for (let i = 0; i < nodes!.length - 1; i++) {
+      const p1 = nodes![i].handleOut ?? { x: nodes![i].x, y: nodes![i].y };
+      const p2 = nodes![i + 1].handleIn ?? { x: nodes![i + 1].x, y: nodes![i + 1].y };
+      const p3 = { x: nodes![i + 1].x, y: nodes![i + 1].y };
+      path.bezierCurveTo(p1.x, p1.y, p2.x, p2.y, p3.x, p3.y);
+    }
+    if (stroke.closed && nodes!.length > 1) {
+      const p1 = nodes![nodes!.length - 1].handleOut ?? { x: nodes![nodes!.length - 1].x, y: nodes![nodes!.length - 1].y };
+      const p2 = nodes![0].handleIn ?? { x: nodes![0].x, y: nodes![0].y };
+      const p3 = { x: nodes![0].x, y: nodes![0].y };
+      path.bezierCurveTo(p1.x, p1.y, p2.x, p2.y, p3.x, p3.y);
+      path.closePath();
+    }
+    ctx.stroke(path);
+    ctx.restore();
+    return;
+  }
+
   if (stroke.brush === "eraser") {
     ctx.globalCompositeOperation = "destination-out";
     ctx.fillStyle = "#000";
   } else {
     ctx.fillStyle = opts.colorOverride ?? stroke.color;
     if (stroke.brush === "marker") ctx.globalAlpha = 0.55;
-    if (stroke.brush === "pencil") ctx.globalAlpha = 0.9;
+    if (stroke.brush === "pen") ctx.globalAlpha = 0.9;
   }
 
   if (points.length === 1) {
