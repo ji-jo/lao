@@ -3,6 +3,7 @@ import { ExpandableActionBar } from "@/components/motion/expandable-action-bar";
 import { WorkflowBar } from "@/components/chrome/WorkflowBar";
 import CameraIcon from "@/components/ui/camera-icon";
 import { ExportDialog } from "@/components/panels/ExportDialog";
+import { SaveFirstDialog } from "@/components/panels/SaveFirstDialog";
 import { saveLaoFile, openLaoFile, parseLao } from "@/file/laoFile";
 import { startAutosave, readAutosave, clearAutosave } from "@/file/autosave";
 import { createEmptyProject, type Project } from "@/model/types";
@@ -37,6 +38,7 @@ const SHORTCUTS: Record<string, ToolId> = {
   a: "path",
   b: "ink",
   p: "pen",
+  m: "marker",
   f: "fill",
   e: "eraser",
   t: "text",
@@ -60,9 +62,10 @@ export default function App() {
   const [exportOpen, setExportOpen] = useState(false);
   const [recovered, setRecovered] = useState<Project | null>(null);
   const [referenceOpen, setReferenceOpen] = useState(false);
+  const [newFilePromptOpen, setNewFilePromptOpen] = useState(false);
 
   async function handleSave() {
-    await saveLaoFile(useProject.getState().project);
+    return saveLaoFile(useProject.getState().project);
   }
   async function handleOpen() {
     const project = await openLaoFile();
@@ -73,12 +76,14 @@ export default function App() {
       l.frames.some((f) => f && f.strokes.length > 0),
     );
     if (hasArt) {
-      const ok = window.confirm("Start a new file? Save current session first?");
-      if (ok) void handleSave().finally(() => useProject.getState().loadProject(createEmptyProject()));
-      else return;
-    } else {
-      useProject.getState().loadProject(createEmptyProject());
+      setNewFilePromptOpen(true);
+      return;
     }
+    useProject.getState().loadProject(createEmptyProject());
+  }
+
+  function startNewFile() {
+    useProject.getState().loadProject(createEmptyProject());
   }
 
   useEffect(() => {
@@ -345,15 +350,10 @@ export default function App() {
       />
 
       {stage === "draw" && (
-        <div
-          className="absolute z-20"
-          style={{ right: PAPER.insetX, top: PAPER.insetTop }}
-        >
-          <ToolDock
-            onReference={() => setReferenceOpen(true)}
-            onAddImage={() => imageInputRef.current?.click()}
-          />
-        </div>
+        <ToolDock
+          onReference={() => setReferenceOpen(true)}
+          onAddImage={() => imageInputRef.current?.click()}
+        />
       )}
 
       <div
@@ -413,6 +413,20 @@ export default function App() {
       )}
 
       <ExportDialog open={exportOpen} onOpenChange={setExportOpen} />
+      <SaveFirstDialog
+        open={newFilePromptOpen}
+        onOpenChange={setNewFilePromptOpen}
+        alert="Alert: Creating new file without saving will delete the progress of your current sessions."
+        skipLabel="No, Start New"
+        confirmLabel="Yes, New File"
+        onSkip={startNewFile}
+        onConfirm={async () => {
+          const ok = await handleSave();
+          if (!ok) return false;
+          startNewFile();
+          return true;
+        }}
+      />
     </div>
   );
 }

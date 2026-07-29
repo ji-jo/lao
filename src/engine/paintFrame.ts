@@ -1,5 +1,5 @@
 import { resolveCel, type Project, type Stroke } from "@/model/types";
-import { renderStrokes } from "@/engine/renderer";
+import { renderStrokes, renderTexts } from "@/engine/renderer";
 import { boilDisplacement } from "@/engine/boil";
 import { clipFadeOpacity, strokeAtTime } from "@/engine/strokeProgress";
 
@@ -52,9 +52,10 @@ export function paintProjectFrame(
       project.workflow === "animatron"
         ? layer.frames.find((f) => f) ?? null
         : resolveCel(layer, frame);
-    if (!cel || cel.strokes.length === 0) continue;
+    if (!cel || (cel.strokes.length === 0 && (!cel.texts || cel.texts.length === 0))) continue;
     const strokes = strokesForFrame(project, frame, cel.strokes);
-    if (!strokes.length) continue;
+    const hasContent = strokes.length > 0 || (cel.texts && cel.texts.length > 0);
+    if (!hasContent) continue;
 
     if (project.workflow === "animatron") {
       for (const s of strokes) {
@@ -70,12 +71,18 @@ export function paintProjectFrame(
         ctx.drawImage(scratch, 0, 0);
         ctx.restore();
       }
+      if (cel.texts && cel.texts.length > 0) {
+        scratchCtx.clearRect(0, 0, width, height);
+        renderTexts(scratchCtx, cel.texts, { quality: "full" });
+        ctx.drawImage(scratch, 0, 0);
+      }
     } else {
       scratchCtx.clearRect(0, 0, width, height);
       renderStrokes(scratchCtx, strokes, {
         quality: "full",
         displaced: boilDisplacement(strokes, frame, project.boil),
       });
+      if (cel.texts) renderTexts(scratchCtx, cel.texts, { quality: "full" });
       ctx.drawImage(scratch, 0, 0);
     }
   }

@@ -29,11 +29,14 @@ import {
 } from "@/lib/google-fonts";
 import { useTools, isShapeTool } from "@/state/tools";
 import { useProject } from "@/state/project";
+import { useSelection } from "@/state/selection";
 import {
+  resolveCel,
   type Background,
   type BoilSettings,
   type ImageFilterId,
   type ShaderPresetId,
+  type Stroke,
 } from "@/model/types";
 import { resolveBoil } from "@/engine/boil";
 import { cn } from "@/lib/utils";
@@ -503,6 +506,7 @@ function BrushExpandedPanel({
   onJitter,
   onBoil,
   onBoilCommit,
+  toolId,
 }: {
   color: string;
   size: number;
@@ -514,6 +518,7 @@ function BrushExpandedPanel({
   onJitter: (v: boolean) => void;
   onBoil: (patch: Partial<BoilSettings>) => void;
   onBoilCommit?: (patch: Partial<BoilSettings>) => void;
+  toolId?: string;
 }) {
   const [hex, setHex] = useState(() => hexDigits(color));
 
@@ -576,7 +581,7 @@ function BrushExpandedPanel({
           value={size}
           onChange={onSize}
           min={1}
-          max={40}
+          max={toolId === "text" ? 200 : 40}
           step={1}
           fillColor="#40608E"
           className="!h-6 !min-w-0 !flex-1 !rounded-lg !border-0 !bg-[#252525] [&_span]:!font-mono [&_span]:!text-sm"
@@ -633,16 +638,20 @@ const FONT_LIST_LIMIT = 80;
 function TextExpandedPanel({
   color,
   size,
+  letterSpacing,
   fontFamily,
   onColor,
   onSize,
+  onLetterSpacing,
   onFontFamily,
 }: {
   color: string;
   size: number;
+  letterSpacing: number;
   fontFamily: string;
   onColor: (c: string) => void;
   onSize: (n: number) => void;
+  onLetterSpacing: (n: number) => void;
   onFontFamily: (f: string) => void;
 }) {
   const [hex, setHex] = useState(() => hexDigits(color));
@@ -749,6 +758,18 @@ function TextExpandedPanel({
           step={1}
           fillColor="#40608E"
           className="!h-6 !w-[141px] !rounded-lg !border-0 !bg-[#252525] [&_span]:!font-mono [&_span]:!text-sm"
+        />
+
+        <SliderComfortable
+          label="Spacing"
+          variant="scrubber"
+          value={letterSpacing}
+          onChange={onLetterSpacing}
+          min={-10}
+          max={50}
+          step={1}
+          fillColor="#40608E"
+          className="!h-6 !w-[141px] !rounded-lg !border-0 !bg-[#252525] [&_span]:!font-mono [&_span]:!text-sm mt-2"
         />
       </div>
 
@@ -1805,7 +1826,7 @@ type PanelKind = "brush" | "canvas" | "text" | "background";
 /**
  * Paper setting dock (9WZ-0) ↔ expanded settings, joined with gooey melt.
  * Chrome per active tool:
- *   select → aspect + canvas
+ *   select → aspect + canvas (+ stroke/fill when shapes/lines selected)
  *   ink / pencil / fill → color + brush + aspect + canvas
  *   eraser → brush + aspect + canvas
  *   text → font + color + aspect + canvas (panel 9ZQ-0)
@@ -1851,20 +1872,44 @@ export function SettingsDocks() {
   const color = useTools((s) => s.color);
   const fillColor = useTools((s) => s.fillColor);
   const size = useTools((s) => s.size);
+  const textSize = useTools((s) => s.textSize);
   const fontFamily = useTools((s) => s.fontFamily);
+  const letterSpacing = useTools((s) => s.letterSpacing);
   const jitterByDefault = useTools((s) => s.jitterByDefault);
   const setColor = useTools((s) => s.setColor);
   const setFillColor = useTools((s) => s.setFillColor);
   const setSize = useTools((s) => s.setSize);
+  const setTextSize = useTools((s) => s.setTextSize);
+  const setLetterSpacing = useTools((s) => s.setLetterSpacing);
   const setFontFamily = useTools((s) => s.setFontFamily);
   const toggleJitterByDefault = useTools((s) => s.toggleJitterByDefault);
   const project = useProject((s) => s.project);
+  const layerIndex = useProject((s) => s.layerIndex);
+  const frameIndex = useProject((s) => s.frameIndex);
   const setProjectSettings = useProject((s) => s.setProjectSettings);
   const setBoilLive = useProject((s) => s.setBoilLive);
+  const updateStrokes = useProject((s) => s.updateStrokes);
+  const selIds = useSelection((s) => s.ids);
   const boil = resolveBoil(project.boil);
   const aspect = aspectLabel(project.width, project.height);
 
+  const selectedStrokes = useMemo((): Stroke[] => {
+    if (!selIds.length) return [];
+    const layer = project.layers[layerIndex];
+    if (!layer) return [];
+    const cel =
+      project.workflow === "animatron"
+        ? layer.frames.find((f) => f) ?? null
+        : resolveCel(layer, frameIndex);
+    if (!cel) return [];
+    const idSet = new Set(selIds);
+    return cel.strokes.filter((s) => idSet.has(s.id));
+  }, [selIds, project, layerIndex, frameIndex]);
+
   const shapesMode = tool === "shapes" || isShapeTool(tool);
+  const selectionColorMode =
+    (tool === "select" || shapesMode) && selectedStrokes.length > 0;
+  const showShapeColors = shapesMode || selectionColorMode;
   const hideDock = tool === "hand";
   const showBrush =
     tool === "ink" ||
@@ -1878,9 +1923,10 @@ export function SettingsDocks() {
     tool === "marker" ||
     tool === "fill" ||
     tool === "text" ||
-    shapesMode;
+    showShapeColors;
   const showFont = tool === "text";
-  const showFillColor = shapesMode;
+  const showFillColor =
+    shapesMode || selectedStrokes.some((s) => s.closed);
   const showCanvas =
     tool === "select" ||
     tool === "path" ||
@@ -1890,6 +1936,22 @@ export function SettingsDocks() {
     tool === "fill" ||
     tool === "eraser" ||
     tool === "text";
+
+  function applyStrokeColor(next: string) {
+    setColor(next);
+    if (selectedStrokes.length) {
+      updateStrokes(
+        selectedStrokes.map((s) => s.id),
+        { color: next },
+      );
+    }
+  }
+
+  function applyFillColor(next: string) {
+    setFillColor(next);
+    const closedIds = selectedStrokes.filter((s) => s.closed).map((s) => s.id);
+    if (closedIds.length) updateStrokes(closedIds, { fillColor: next });
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -1939,10 +2001,12 @@ export function SettingsDocks() {
       return (
         <TextExpandedPanel
           color={color}
-          size={size}
+          size={textSize}
+          letterSpacing={letterSpacing}
           fontFamily={fontFamily}
           onColor={setColor}
-          onSize={setSize}
+          onSize={setTextSize}
+          onLetterSpacing={setLetterSpacing}
           onFontFamily={setFontFamily}
         />
       );
@@ -2051,21 +2115,25 @@ export function SettingsDocks() {
         sidePanelClassName="overflow-visible"
       >
         <PaperDockBar variant="setting">
-          {shapesMode ? (
+          {showShapeColors ? (
             <>
               <ColorPickerPopover
                 value={color}
-                onValueChange={setColor}
+                onValueChange={applyStrokeColor}
                 triggerShowValue={false}
                 triggerClassName="!size-[18px] !min-h-[18px] !min-w-[18px] !justify-center !gap-0 !rounded-md !border-0 !bg-transparent !p-0 !outline-none"
               />
-              <span className="size-1 shrink-0 rounded-full bg-[#DDDDDD26]" aria-hidden />
-              <ColorPickerPopover
-                value={fillColor}
-                onValueChange={setFillColor}
-                triggerShowValue={false}
-                triggerClassName="!size-[18px] !min-h-[18px] !min-w-[18px] !justify-center !gap-0 !rounded-md !border-0 !bg-transparent !p-0 !outline-none"
-              />
+              {showFillColor ? (
+                <>
+                  <span className="size-1 shrink-0 rounded-full bg-[#DDDDDD26]" aria-hidden />
+                  <ColorPickerPopover
+                    value={fillColor}
+                    onValueChange={applyFillColor}
+                    triggerShowValue={false}
+                    triggerClassName="!size-[18px] !min-h-[18px] !min-w-[18px] !justify-center !gap-0 !rounded-md !border-0 !bg-transparent !p-0 !outline-none"
+                  />
+                </>
+              ) : null}
             </>
           ) : (
             <>

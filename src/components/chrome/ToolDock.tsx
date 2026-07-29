@@ -1,137 +1,73 @@
-import { useEffect, useRef, useState } from "react";
-import { PenNib } from "reicon-react";
-import MousePointer2Icon from "@/components/ui/mouse-pointer-2-icon";
-import LetterPIcon from "@/components/ui/letter-p-icon";
-import LetterEIcon from "@/components/ui/letter-e-icon";
-import PaintIcon from "@/components/ui/paint-icon";
-import CameraIcon from "@/components/ui/camera-icon";
-import UploadIcon from "@/components/ui/upload-icon";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import LayerGripIcon from "@/components/ui/layer-grip-icon";
 import {
   PaperDockBar,
   PaperDockItem,
   PaperDockSep,
-  ConjoinedDock,
 } from "@/components/chrome/PaperDockPrimitives";
+import { PAPER } from "@/components/chrome/paper-tokens";
+import { GooeyConjoined } from "@/components/motion/gooey-conjoined";
 import { useTools, isShapeTool, type ToolId, type ShapeToolId } from "@/state/tools";
 import { useReference } from "@/state/reference";
 import { cn } from "@/lib/utils";
+import {
+  PointerToolIcon,
+  PathToolIcon,
+  BrushToolIcon,
+  PenToolIcon,
+  MarkerToolIcon,
+  BucketToolIcon,
+  TextToolIcon,
+  EraseToolIcon,
+  HandToolIcon,
+  ShapesToolIcon,
+  CameraToolIcon,
+  ReferenceToolIcon,
+  RectangleShapeIcon,
+  DiamondShapeIcon,
+  CircleShapeIcon,
+  ArrowShapeIcon,
+  LineShapeIcon,
+} from "@/assets/icons/tools/tool-icons";
 
-const MAIN: {
+type DockTool = {
   id: ToolId;
   label: string;
   shortcut: string;
-  icon: (size: number) => React.ReactNode;
+  icon: ReactNode;
+};
+
+/** Primary draw tools — Path (a) sits beside Pointer (v). */
+const MAIN: DockTool[] = [
+  { id: "select", label: "Pointer", shortcut: "v", icon: <PointerToolIcon /> },
+  { id: "path", label: "Path", shortcut: "a", icon: <PathToolIcon /> },
+  { id: "ink", label: "Brush", shortcut: "b", icon: <BrushToolIcon /> },
+  { id: "pen", label: "Pen", shortcut: "p", icon: <PenToolIcon /> },
+  { id: "marker", label: "Marker", shortcut: "m", icon: <MarkerToolIcon /> },
+  { id: "fill", label: "Bucket", shortcut: "f", icon: <BucketToolIcon /> },
+  { id: "text", label: "Text", shortcut: "t", icon: <TextToolIcon /> },
+  { id: "eraser", label: "Erase", shortcut: "e", icon: <EraseToolIcon /> },
+  { id: "hand", label: "Hand", shortcut: "h", icon: <HandToolIcon /> },
+];
+
+/** Paper 9IV-0 shapes pack. */
+const SHAPES: {
+  id: ShapeToolId;
+  label: string;
+  tip: string;
+  icon: ReactNode;
 }[] = [
-  {
-    id: "select",
-    label: "Select",
-    shortcut: "v",
-    icon: (s) => <MousePointer2Icon size={s} />,
-  },
-  {
-    id: "path",
-    label: "Path",
-    shortcut: "a",
-    icon: (s) => (
-      <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-        <path d="M11 21 8 13 2 10l19-7-10 18z" />
-      </svg>
-    ),
-  },
-  {
-    id: "ink",
-    label: "Ink",
-    shortcut: "b",
-    icon: (s) => <PenNib size={s} />,
-  },
-  {
-    id: "pen",
-    label: "Pen",
-    shortcut: "p",
-    icon: (s) => <LetterPIcon size={s} />,
-  },
-  {
-    id: "fill",
-    label: "Fill",
-    shortcut: "f",
-    icon: (s) => <PaintIcon size={s} />,
-  },
-  {
-    id: "eraser",
-    label: "Eraser",
-    shortcut: "e",
-    icon: (s) => <LetterEIcon size={s} />,
-  },
-  {
-    id: "text",
-    label: "Text",
-    shortcut: "t",
-    icon: (s) => (
-      <span className="font-serif text-[15px] font-semibold leading-none" style={{ fontSize: s * 0.85 }}>
-        T
-      </span>
-    ),
-  },
-  {
-    id: "hand",
-    label: "Hand",
-    shortcut: "h",
-    icon: (s) => (
-      <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-        <path d="M8 13V6a1.5 1.5 0 0 1 3 0v5M11 12V4.5a1.5 1.5 0 0 1 3 0V12M14 12V6.5a1.5 1.5 0 0 1 3 0V16a5 5 0 0 1-5 5h-1a5 5 0 0 1-5-5v-3.5a1.5 1.5 0 0 1 3 0V13" />
-      </svg>
-    ),
-  },
+  { id: "rect", label: "Rectangle", tip: "r", icon: <RectangleShapeIcon /> },
+  { id: "diamond", label: "Diamond", tip: "⇧r", icon: <DiamondShapeIcon /> },
+  { id: "circle", label: "Circle", tip: "o", icon: <CircleShapeIcon /> },
+  { id: "arrow", label: "Arrow", tip: "⇧l", icon: <ArrowShapeIcon /> },
+  { id: "line", label: "Line", tip: "l", icon: <LineShapeIcon /> },
 ];
-
-const SHAPES: { id: ShapeToolId; label: string; shortcut: string; tip: string }[] = [
-  { id: "rect", label: "Rectangle", shortcut: "r", tip: "r" },
-  { id: "diamond", label: "Diamond", shortcut: "⇧r", tip: "⇧r" },
-  { id: "circle", label: "Circle", shortcut: "o", tip: "o" },
-  { id: "arrow", label: "Arrow Line", shortcut: "⇧l", tip: "⇧ + l" },
-  { id: "line", label: "Line", shortcut: "l", tip: "l" },
-];
-
-function ShapeGlyph({ id, size }: { id: ShapeToolId; size: number }) {
-  const s = size;
-  if (id === "rect") {
-    return (
-      <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
-        <rect x="5" y="6" width="14" height="12" rx="1.5" />
-      </svg>
-    );
-  }
-  if (id === "diamond") {
-    return (
-      <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
-        <path d="M12 3.5 20.5 12 12 20.5 3.5 12z" />
-      </svg>
-    );
-  }
-  if (id === "circle") {
-    return (
-      <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
-        <circle cx="12" cy="12" r="7" />
-      </svg>
-    );
-  }
-  if (id === "arrow") {
-    return (
-      <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
-        <path d="M4 12h14M14 7l5 5-5 5" />
-      </svg>
-    );
-  }
-  return (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
-      <path d="M5 19 19 5" />
-    </svg>
-  );
-}
 
 /**
- * Paper tool dock (1FB-0) — hover 18→24, shortcut badges, tooltips,
- * conjoined shapes flyout (9IB-0). Camera/image triggers live in App via callbacks.
+ * Paper tool dock (1FB-0) + shapes gooey pack (9IV-0).
+ * Shapes toggles like More tools — gooey flyout melts out below the chip.
+ * Left-edge ⋮⋮ grip drags the dock. Defaults to Paper top-right inset.
  */
 export function ToolDock({
   onReference,
@@ -141,99 +77,212 @@ export function ToolDock({
   onAddImage?: () => void;
 } = {}) {
   const tool = useTools((s) => s.tool);
+  const lastShapeTool = useTools((s) => s.lastShapeTool);
   const setTool = useTools((s) => s.setTool);
   const shapesOpen = useTools((s) => s.shapesOpen);
   const setShapesOpen = useTools((s) => s.setShapesOpen);
   const shapesBtnRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
-  const [iconTick, setIconTick] = useState(18);
+  /** null = default Paper top-right; after a drag we pin left/top in viewport px */
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originLeft: number;
+    originTop: number;
+  } | null>(null);
 
-  // close shapes flyout on outside click
+  // close shapes pack on outside click
   useEffect(() => {
     if (!shapesOpen) return;
     function onDown(e: MouseEvent) {
       const t = e.target as Node;
       if (rootRef.current?.contains(t)) return;
-      if (shapesBtnRef.current?.contains(t)) return;
       setShapesOpen(false);
     }
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
   }, [shapesOpen, setShapesOpen]);
 
+  useEffect(() => {
+    if (!dragging) return;
+    function onMove(e: PointerEvent) {
+      const d = dragRef.current;
+      const el = rootRef.current;
+      if (!d || !el || e.pointerId !== d.pointerId) return;
+      const w = el.offsetWidth;
+      const h = el.offsetHeight;
+      const pad = 8;
+      const nextLeft = Math.max(
+        pad,
+        Math.min(window.innerWidth - w - pad, d.originLeft + (e.clientX - d.startX)),
+      );
+      const nextTop = Math.max(
+        pad,
+        Math.min(window.innerHeight - h - pad, d.originTop + (e.clientY - d.startY)),
+      );
+      setPos({ left: nextLeft, top: nextTop });
+    }
+    function onUp(e: PointerEvent) {
+      const d = dragRef.current;
+      if (!d || e.pointerId !== d.pointerId) return;
+      dragRef.current = null;
+      setDragging(false);
+    }
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [dragging]);
+
+  function onGripPointerDown(e: React.PointerEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const el = rootRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    dragRef.current = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      originLeft: rect.left,
+      originTop: rect.top,
+    };
+    setPos({ left: rect.left, top: rect.top });
+    setDragging(true);
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      // synthetic events throw — harmless
+    }
+  }
+
   const shapesActive = tool === "shapes" || isShapeTool(tool);
 
-  return (
-    <div ref={rootRef} className="pointer-events-auto relative">
-      <ConjoinedDock open={shapesOpen} side="bottom" anchorRef={shapesBtnRef}>
-        {SHAPES.map((s) => (
+  const shapesPanel = (
+    <div
+      className="pointer-events-auto relative z-50 flex items-center gap-3 overflow-clip rounded-full px-3 py-2 antialiased"
+      style={{ backgroundColor: PAPER.surface, fontFamily: PAPER.fontSans }}
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      {SHAPES.map((s) => {
+        const active =
+          tool === s.id || (tool === "shapes" && s.id === lastShapeTool);
+        return (
           <PaperDockItem
             key={s.id}
             label={s.label}
             shortcut={s.tip}
-            active={tool === s.id}
+            active={active}
             onClick={() => setTool(s.id)}
           >
-            <ShapeGlyph id={s.id} size={iconTick} />
+            {s.icon}
           </PaperDockItem>
-        ))}
-      </ConjoinedDock>
+        );
+      })}
+    </div>
+  );
 
-      <PaperDockBar variant="pill">
-        {MAIN.map((t) => (
+  return (
+    <div
+      ref={rootRef}
+      className={cn(
+        "pointer-events-auto absolute z-20",
+        dragging && "cursor-grabbing",
+      )}
+      style={
+        pos
+          ? { left: pos.left, top: pos.top }
+          : { right: PAPER.insetX, top: PAPER.insetTop }
+      }
+    >
+      <GooeyConjoined
+        open={shapesOpen}
+        panelKey="shapes"
+        panel={shapesPanel}
+        anchorRef={shapesBtnRef}
+        side="bottom"
+        gap={8}
+        surface={PAPER.surface}
+        panelClassName="overflow-visible"
+      >
+        <PaperDockBar variant="pill">
+          <button
+            type="button"
+            onPointerDown={onGripPointerDown}
+            aria-label="Move tool dock"
+            title="Drag to move"
+            className={cn(
+              "relative grid h-[14px] w-[8px] shrink-0 cursor-grab touch-none place-items-center transition-[opacity,scale] duration-150 ease-out before:absolute before:-inset-[7px] before:content-[''] active:cursor-grabbing",
+              dragging ? "opacity-100 scale-90" : "opacity-60 hover:opacity-100 active:scale-90",
+            )}
+          >
+            <LayerGripIcon size={14} />
+          </button>
+
+          {MAIN.map((t) => (
+            <PaperDockItem
+              key={t.id}
+              label={t.label}
+              shortcut={t.shortcut}
+              active={tool === t.id}
+              onClick={() => {
+                setShapesOpen(false);
+                setTool(t.id);
+              }}
+            >
+              {t.icon}
+            </PaperDockItem>
+          ))}
+
+          <div ref={shapesBtnRef}>
+            <PaperDockItem
+              label="Shapes"
+              shortcut="s"
+              active={shapesActive || shapesOpen}
+              onClick={() => {
+                if (shapesOpen) {
+                  setShapesOpen(false);
+                } else {
+                  setShapesOpen(true);
+                  if (!isShapeTool(tool)) setTool("shapes");
+                }
+              }}
+            >
+              <ShapesToolIcon />
+            </PaperDockItem>
+          </div>
+
+          <PaperDockSep width={8} />
+
           <PaperDockItem
-            key={t.id}
-            label={t.label}
-            shortcut={t.shortcut}
-            active={tool === t.id}
+            label="Camera"
+            shortcut="2"
             onClick={() => {
               setShapesOpen(false);
-              setTool(t.id);
+              onAddImage?.();
             }}
           >
-            {t.icon(18)}
+            <CameraToolIcon />
           </PaperDockItem>
-        ))}
-
-        <PaperDockSep width={8} />
-
-        <div ref={shapesBtnRef}>
           <PaperDockItem
-            label="Shapes"
-            shortcut="s"
-            active={shapesActive}
+            label="Reference"
+            shortcut="1"
             onClick={() => {
-              if (shapesOpen) {
-                setShapesOpen(false);
-              } else {
-                setShapesOpen(true);
-                if (!isShapeTool(tool)) setTool("shapes");
-              }
+              setShapesOpen(false);
+              onReference?.();
             }}
           >
-            <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-              <path d="M5 16.5 11 5.5 17 16.5z" fill="currentColor" stroke="none" />
-              <circle cx="16" cy="15" r="5" />
-            </svg>
+            <ReferenceToolIcon />
           </PaperDockItem>
-        </div>
-
-        <PaperDockSep width={8} />
-
-        <PaperDockItem
-          label="Reference"
-          shortcut="1"
-          onClick={() => onReference?.()}
-        >
-          <CameraIcon size={18} />
-        </PaperDockItem>
-        <PaperDockItem label="Image" shortcut="2" onClick={() => onAddImage?.()}>
-          <UploadIcon size={18} />
-        </PaperDockItem>
-      </PaperDockBar>
-
-      {/* keep hover size in sync for shape glyphs via CSS class on parent — simplified */}
-      <span className="sr-only" aria-hidden onFocus={() => setIconTick(18)} />
+        </PaperDockBar>
+      </GooeyConjoined>
     </div>
   );
 }

@@ -27,17 +27,21 @@ import { cn } from "@/lib/utils";
  * plain CSS, JS-driven hover is something a synthetic `onPointerEnter` call
  * in a test can actually exercise and verify.
  *
+ * Focus does NOT light the hover layer — D: pulse/hover treatment is
+ * pointer-hover only. `autoFocus` on a dialog primary CTA must not leave the
+ * button pulsing while the dialog sits idle.
+ *
  * `children` may be a render-prop `(hovered) => ReactNode` so the caller can
  * flip its own label/icon color on hover (e.g. to white) — plain ReactNode
  * still works when the content's color never needs to react to hover.
  *
- * The hover gradient pulses (`pulsate`, on by default) instead of sitting
- * static once faded in — see the `gradient-hover-pulse` keyframes in
- * index.css for how (it pans the gradient, since a background-image string
- * itself can't be tweened). Assumes a roughly vertical `hoverBackground`
- * gradient, matching every gradient currently used in this app (all `180deg`
- * or close to it) — set `pulsate={false}` for a flat color or a gradient
- * whose axis the pan would look wrong against.
+ * The hover gradient pulses (`pulsate`, on by default) only while hovered —
+ * see the `gradient-hover-pulse` keyframes in index.css for how (it pans the
+ * gradient, since a background-image string itself can't be tweened). Assumes
+ * a roughly vertical `hoverBackground` gradient, matching every gradient
+ * currently used in this app (all `180deg` or close to it) — set
+ * `pulsate={false}` for a flat color or a gradient whose axis the pan would
+ * look wrong against.
  */
 export interface GradientHoverButtonProps
   extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "className" | "style" | "children"> {
@@ -56,8 +60,8 @@ export interface GradientHoverButtonProps
   /** e.g. "border-box" — some Paper chips (the modal close button) rely on
    *  the border showing a hint of the background through it */
   backgroundOrigin?: string;
-  /** breathe the hover gradient continuously instead of holding it static
-   *  once faded in. Default true. */
+  /** breathe the hover gradient while hovered, instead of holding it static.
+   *  Default true. Animation is applied only while hovered. */
   pulsate?: boolean;
   /** seconds per full pulse cycle */
   pulsateSeconds?: number;
@@ -80,8 +84,6 @@ export function GradientHoverButton({
   disabled,
   onPointerEnter,
   onPointerLeave,
-  onFocus,
-  onBlur,
   ...props
 }: GradientHoverButtonProps) {
   const [lit, setLit] = useState(false);
@@ -114,14 +116,6 @@ export function GradientHoverButton({
         setLit(false);
         onPointerLeave?.(e);
       }}
-      onFocus={(e) => {
-        setLit(true);
-        onFocus?.(e);
-      }}
-      onBlur={(e) => {
-        setLit(false);
-        onBlur?.(e);
-      }}
       {...props}
     >
       {/*
@@ -144,7 +138,8 @@ export function GradientHoverButton({
             opacity: active ? 1 : 0,
             transitionDuration: `${durationMs}ms`,
             zIndex: -1,
-            ...(pulsate && {
+            // pulse only while hovered — idle buttons must not keep animating
+            ...(pulsate && active && {
               backgroundSize: "100% 220%",
               animation: `gradient-hover-pulse ${pulsateSeconds}s ease-in-out infinite`,
             }),

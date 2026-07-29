@@ -132,3 +132,37 @@ export function distanceToPoints(points: StrokePoint[], x: number, y: number): n
   }
   return best;
 }
+
+/** Ray-cast point-in-polygon (for closed shape fill hits). */
+export function pointInPolygon(
+  points: Array<{ x: number; y: number }>,
+  x: number,
+  y: number,
+): boolean {
+  if (points.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const xi = points[i].x;
+    const yi = points[i].y;
+    const xj = points[j].x;
+    const yj = points[j].y;
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi + 0) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/** Edge proximity and closed-fill interior hit for select / hover. */
+export function hitsStroke(
+  points: StrokePoint[],
+  x: number,
+  y: number,
+  threshold: number,
+  closed?: boolean,
+): boolean {
+  if (!points.length) return false;
+  if (distanceToPoints(points, x, y) <= threshold) return true;
+  if (closed && pointInPolygon(points, x, y)) return true;
+  return false;
+}

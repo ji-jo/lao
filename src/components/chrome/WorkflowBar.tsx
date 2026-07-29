@@ -4,6 +4,7 @@ import { usePlayback, type Workflow } from "@/state/playback";
 import { useProject } from "@/state/project";
 import { saveLaoFile } from "@/file/laoFile";
 import { PAPER } from "@/components/chrome/paper-tokens";
+import { SaveFirstDialog } from "@/components/panels/SaveFirstDialog";
 import { EASE_OUT } from "@/lib/ease";
 import EllipsisIcon from "@/components/ui/ellipsis-icon";
 import EllipsisCloseIcon from "@/components/ui/ellipsis-close-icon";
@@ -42,6 +43,7 @@ export function WorkflowBar({
   const workflow = usePlayback((s) => s.workflow);
   const setWorkflow = usePlayback((s) => s.setWorkflow);
   const [fileOpen, setFileOpen] = useState(false);
+  const [pendingWorkflow, setPendingWorkflow] = useState<Workflow | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const reduce = useReducedMotion() ?? false;
 
@@ -63,17 +65,12 @@ export function WorkflowBar({
     };
   }, [fileOpen]);
 
-  async function switchWorkflow(next: Workflow) {
+  function requestSwitch(next: Workflow) {
     if (next === workflow) return;
-    const ok = window.confirm(
-      `Switch to ${next === "animatron" ? "Animatron" : "Stop-motion"}?\n\nSave this session first? (OK = Save & switch, Cancel = stay)`,
-    );
-    if (!ok) return;
-    try {
-      await saveLaoFile(useProject.getState().project);
-    } catch {
-      /* user may cancel save picker */
-    }
+    setPendingWorkflow(next);
+  }
+
+  function applySwitch(next: Workflow) {
     setWorkflow(next);
     useProject.getState().setProjectSettings({ workflow: next });
   }
@@ -84,6 +81,7 @@ export function WorkflowBar({
   }
 
   return (
+    <>
     <div
       ref={barRef}
       className="pointer-events-auto relative flex h-9 items-center gap-3 overflow-clip rounded-full py-1 pl-3 pr-1.5 antialiased"
@@ -135,16 +133,38 @@ export function WorkflowBar({
           <ModePill
             label="Animatron"
             active={workflow === "animatron"}
-            onClick={() => void switchWorkflow("animatron")}
+            onClick={() => requestSwitch("animatron")}
           />
           <ModePill
             label="Stop-motion"
             active={workflow === "stopmotion"}
-            onClick={() => void switchWorkflow("stopmotion")}
+            onClick={() => requestSwitch("stopmotion")}
           />
         </div>
       </div>
     </div>
+
+    <SaveFirstDialog
+      open={pendingWorkflow !== null}
+      onOpenChange={(open) => {
+        if (!open) setPendingWorkflow(null);
+      }}
+      alert="Alert: Switching modes without saving will delete the progress of your current session."
+      skipLabel="No, Switch"
+      confirmLabel="Yes, Save First"
+      onSkip={() => {
+        if (pendingWorkflow) applySwitch(pendingWorkflow);
+        setPendingWorkflow(null);
+      }}
+      onConfirm={async () => {
+        const ok = await saveLaoFile(useProject.getState().project);
+        if (!ok) return false;
+        if (pendingWorkflow) applySwitch(pendingWorkflow);
+        setPendingWorkflow(null);
+        return true;
+      }}
+    />
+    </>
   );
 }
 

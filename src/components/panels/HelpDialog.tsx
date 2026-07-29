@@ -5,25 +5,31 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { ModalCloseChip } from "@/components/ui/modal-close-chip";
 import { PAPER } from "@/components/chrome/paper-tokens";
 import { cn } from "@/lib/utils";
 
 const SHORTCUTS: { label: string; keys: string }[] = [
-  { label: "Select", keys: "v" },
-  { label: "Ink", keys: "b" },
-  { label: "Pencil", keys: "p" },
-  { label: "Fill / bucket", keys: "f" },
-  { label: "Eraser", keys: "e" },
+  { label: "Pointer", keys: "v" },
+  { label: "Brush", keys: "b" },
+  { label: "Pen", keys: "p" },
+  { label: "Marker", keys: "m" },
+  { label: "Bucket", keys: "f" },
+  { label: "Erase", keys: "e" },
   { label: "Text", keys: "t" },
   { label: "Hand", keys: "h" },
+  { label: "Path", keys: "a" },
   { label: "Shapes flyout", keys: "s" },
   { label: "Rectangle", keys: "r" },
   { label: "Diamond", keys: "⇧ + r" },
   { label: "Circle", keys: "o" },
   { label: "Line", keys: "l" },
-  { label: "Arrow line", keys: "⇧ + l" },
-  { label: "Reference / camera", keys: "1" },
-  { label: "Insert image", keys: "2" },
+  { label: "Arrow", keys: "⇧ + l" },
+  { label: "Shape: lock aspect / 45°", keys: "⇧ + drag" },
+  { label: "Shape: draw from center", keys: "alt + drag" },
+  { label: "Cancel shape draft", keys: "esc" },
+  { label: "Reference", keys: "1" },
+  { label: "Camera / insert image", keys: "2" },
   { label: "Select all", keys: "ctrl + a" },
   { label: "Select all layers", keys: "ctrl + ⇧ + a" },
   { label: "Deselect", keys: "d" },
@@ -39,7 +45,6 @@ const SHORTCUTS: { label: string; keys: string }[] = [
   { label: "Straight line", keys: "⇧ + drag" },
   { label: "Step frame", keys: "← / →" },
   { label: "Play / pause", keys: "enter" },
-  { label: "Toggle preview", keys: "f" },
   { label: "Exit preview", keys: "esc" },
   { label: "Pan canvas", keys: "middle mouse" },
   { label: "Zoom", keys: "scroll / pinch" },
@@ -123,24 +128,7 @@ export function HelpDialog({
               </div>
             </div>
             <DialogClose asChild>
-              <button
-                type="button"
-                aria-label="Close"
-                className="grid size-6 shrink-0 place-items-center rounded-full"
-                style={{
-                  backgroundImage: PAPER.modeActiveGradient,
-                  border: "0.5px solid #C9C9C933",
-                }}
-              >
-                <svg width={12} height={12} viewBox="0 0 8 8" fill="none" style={{ opacity: 0.8 }}>
-                  <path
-                    d="M1 1l6 6M7 1L1 7"
-                    stroke="#FFFFFF"
-                    strokeWidth="0.7"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </button>
+              <ModalCloseChip />
             </DialogClose>
           </div>
 

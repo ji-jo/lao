@@ -365,7 +365,7 @@ export function ExportDialog({
           <GradientHoverButton
             disabled={busy}
             onClick={() => void run()}
-            background="linear-gradient(in oklab 180deg, oklab(0% 0 0) 0%, oklab(48.5% -0.018 -0.082) 100%)"
+            background={PAPER.primaryBtnGradient}
             hoverBackground={PAPER.primaryBtnHoverGradient}
             backgroundOrigin="border-box"
             borderColor={PAPER.frameActiveBorder}

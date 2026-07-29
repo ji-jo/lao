@@ -402,7 +402,7 @@ export function GooeyConjoined({
           animate={open ? "open" : "closed"}
           variants={panelMotion}
           style={panelPlacement}
-          className="absolute z-0 overflow-visible will-change-transform"
+          className="absolute z-50 overflow-visible will-change-transform"
           aria-hidden={!open}
         >
           <div className="relative overflow-visible">

@@ -253,9 +253,8 @@
  * doesn't tween the gradient's colors; it pans a taller-than-the-box
  * gradient up and down (`background-size` + `background-position-y`, both
  * genuinely interpolable), which reads as the gradient itself pulsing.
- * Runs continuously — GradientHoverButton only makes it *visible* by
- * crossfading the layer's opacity on hover, so there's no jarring restart
- * from a fixed position each time the pointer re-enters.
+ * Applied only while the pointer is over the button (D: pulse on hover
+ * only — not on focus / autoFocus).
  */
 @keyframes gradient-hover-pulse {
   0%,
@@ -271,6 +270,7 @@
 .lao-nano-scroll.react-nano-scrollbar-wrapper {
   min-height: 0;
   min-width: 0;
+  max-width: 100%;
 }
 .lao-nano-scroll > .react-nano-scrollbar-content {
   flex: 1 1 auto;
@@ -278,6 +278,8 @@
   min-width: 0;
   width: 100%;
   height: 100%;
+  /* both axes — nano hides the native bars and draws its own thumbs */
+  overflow: auto;
 }
 /* @ncdai/scroll-fade-effect on every nano scrollport */
 .lao-nano-scroll.lao-nano-fade-y > .react-nano-scrollbar-content {
@@ -313,11 +315,36 @@
 .dark .lao-nano-scroll .react-nano-scrollbar-y {
   background: rgb(255 255 255 / 0.4);
 }
-/* Stay fully gone until hover / active scroll (nano sets .moving). */
+/*
+ * Motion-driven thumb fade (see scroll-area.tsx useThumbFade).
+ * Opacity comes from --lao-sb-opacity; pointer-events from data-sb-visible.
+ */
+.lao-nano-fade-host {
+  --lao-sb-opacity: 0;
+}
+.lao-nano-fade-host .lao-nano-motion-thumbs .react-nano-scrollbar-track-x,
+.lao-nano-fade-host .lao-nano-motion-thumbs .react-nano-scrollbar-track-y {
+  opacity: var(--lao-sb-opacity);
+  transition: none;
+  pointer-events: none;
+}
+.lao-nano-fade-host[data-sb-visible="1"]
+  .lao-nano-motion-thumbs
+  .react-nano-scrollbar-track-x,
+.lao-nano-fade-host[data-sb-visible="1"]
+  .lao-nano-motion-thumbs
+  .react-nano-scrollbar-track-y {
+  pointer-events: auto;
+}
+
+/* Legacy CSS autohide (if anything still sets nano autohide without Motion). */
 .lao-nano-scroll.react-nano-scrollbar-autohide .react-nano-scrollbar-track-x,
 .lao-nano-scroll.react-nano-scrollbar-autohide .react-nano-scrollbar-track-y {
   opacity: 0;
   pointer-events: none;
+  transition:
+    opacity 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.18s,
+    pointer-events 0s linear 0.63s;
 }
 .lao-nano-scroll.react-nano-scrollbar-autohide:hover .react-nano-scrollbar-track-x,
 .lao-nano-scroll.react-nano-scrollbar-autohide:hover .react-nano-scrollbar-track-y,
@@ -325,8 +352,11 @@
   .react-nano-scrollbar-track-x,
 .lao-nano-scroll.react-nano-scrollbar-autohide.react-nano-scrollbar-moving
   .react-nano-scrollbar-track-y {
-  opacity: 0.5;
+  opacity: 0.55;
   pointer-events: auto;
+  transition:
+    opacity 0.22s cubic-bezier(0.22, 1, 0.36, 1) 0s,
+    pointer-events 0s linear 0s;
 }
   @property --top-mask-height {
     syntax: "<length>";

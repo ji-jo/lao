@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { motion, useReducedMotion } from "motion/react";
 import { useProject } from "@/state/project";
 import { usePlayback } from "@/state/playback";
 import { useTools } from "@/state/tools";
 import { playerRef } from "@/state/playerRef";
-import { ClipTimeline } from "@/components/timeline/ClipTimeline";
+import { ClipTimeline, BASE_PX_PER_MS } from "@/components/timeline/ClipTimeline";
 import { Tooltip } from "@/components/motion/tooltip";
 import { AnimationPanel } from "@/components/panels/AnimationPanel";
 import { OnionPanel } from "@/components/panels/OnionPanel";
@@ -31,15 +32,16 @@ import {
 import {
   TimelineLayerRow,
   CELLS_INSET,
+  CELLS_INSET_ANIMATRON,
   CELLS_INSET_COLLAPSED,
   CELL_GAP,
   LAYER_ROW_GAP,
   LAYER_ROW_H,
   LAYER_ROW_PITCH,
 } from "@/components/timeline/TimelineLayerRow";
-import { ScrollBarX } from "@/components/timeline/TimelineScrollBars";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { TimelineTimingBar } from "@/components/timeline/TimelineTimingBar";
+import { cn } from "@/lib/utils";
 
 /** Frame-cell zoom (pinch / ctrl+wheel): width scales, row height stays fixed.
  *  19 = Paper's 16 + 20% — D's explicit timeline-scale override. */
@@ -52,6 +54,104 @@ const MAX_CELL_ZOOM = 2.75;
  * 5 full layer rows plus a sliver of the 6th so the overflow reads as scrollable.
  */
 const ROWS_MAX_H = 5 * LAYER_ROW_H + 4 * LAYER_ROW_GAP + 22;
+
+/**
+ * Playhead stamp — Paper 6ML-0.
+ * Pill floats in the gap above the timing bar; the red line runs through the
+ * timing bar and every visible layer row. Drag the stamp to scrub; hover
+ * gives a gentle wobble + grab cursor.
+ */
+function TimelinePlayheadStamp({
+  left,
+  label,
+  onScrub,
+  frameFromClientX,
+}: {
+  left: number;
+  label: string;
+  onScrub: (frame: number) => void;
+  frameFromClientX: (clientX: number) => number;
+}) {
+  const reduce = useReducedMotion() ?? false;
+  const [hovered, setHovered] = useState(false);
+  const dragging = useRef(false);
+  const [grabbing, setGrabbing] = useState(false);
+
+  useEffect(() => {
+    function onMove(e: PointerEvent) {
+      if (!dragging.current) return;
+      onScrub(frameFromClientX(e.clientX));
+    }
+    function onUp() {
+      if (!dragging.current) return;
+      dragging.current = false;
+      setGrabbing(false);
+    }
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [onScrub, frameFromClientX]);
+
+  return (
+    <div
+      className="pointer-events-none absolute z-20 flex w-9 flex-col items-center"
+      style={{ left, top: -15, bottom: 0, transform: "translateX(-50%)" }}
+      role="slider"
+      aria-label="Playhead"
+      aria-valuetext={label}
+    >
+      {/* Pill is the only hit target — the red line must not block wheel/trackpad. */}
+      <motion.div
+        className={cn(
+          "pointer-events-auto flex shrink-0 flex-col items-start gap-px overflow-clip rounded-full px-0.5 py-0.75",
+          grabbing ? "cursor-grabbing" : "cursor-grab",
+        )}
+        style={{ backgroundColor: PAPER.clipPlayheadBadge }}
+        tabIndex={0}
+        onPointerEnter={() => setHovered(true)}
+        onPointerLeave={() => {
+          if (!dragging.current) setHovered(false);
+        }}
+        onPointerDown={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          dragging.current = true;
+          setGrabbing(true);
+          setHovered(false);
+          onScrub(frameFromClientX(e.clientX));
+        }}
+        animate={
+          hovered && !grabbing && !reduce
+            ? { rotate: [-2.2, 2.2, -2.2] }
+            : { rotate: 0 }
+        }
+        transition={
+          hovered && !grabbing && !reduce
+            ? { duration: 0.55, repeat: Infinity, ease: "easeInOut" }
+            : { type: "spring", stiffness: 420, damping: 28 }
+        }
+      >
+        <div
+          className="flex h-2.25 w-9 shrink-0 flex-wrap content-center justify-center text-center text-[10px]/1.25 text-white"
+          style={{ fontFamily: PAPER.fontMono }}
+        >
+          {label}
+        </div>
+      </motion.div>
+      <div className="relative min-h-0 w-full flex-1">
+        <div
+          className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2"
+          style={{ backgroundColor: PAPER.clipPlayheadLine }}
+        />
+      </div>
+    </div>
+  );
+}
 
 export function Timeline() {
   const project = useProject((s) => s.project);
@@ -94,24 +194,74 @@ export function Timeline() {
   const [openMenuIndex, setOpenMenuIndex] = useState<number | null>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const rowsVpRef = useRef<HTMLDivElement>(null);
+  const stampTrackRef = useRef<HTMLDivElement>(null);
   const dragCollapseRef = useRef<{ startY: number; collapsed: boolean } | null>(null);
   const [cellZoom, setCellZoom] = useState(1);
   const cellWidth = Math.round(BASE_CELL_WIDTH * cellZoom);
-  const cellsInset = layersCollapsed ? CELLS_INSET_COLLAPSED : CELLS_INSET;
+  const cellsInset = layersCollapsed
+    ? CELLS_INSET_COLLAPSED
+    : isAnimatron
+      ? CELLS_INSET_ANIMATRON
+      : CELLS_INSET;
 
-  /** one shared X offset for every layer row (see TimelineScrollBars) */
+  /** Animatron: zoom scales px/ms; TimingBar still speaks in "cell" pitch so
+   *  one frame of time maps to one virtual cell width. */
+  const pxPerMs = BASE_PX_PER_MS * cellZoom;
+  const animCellWidth = Math.max(
+    1,
+    Math.round((1000 / Math.max(1, project.fps)) * pxPerMs - CELL_GAP),
+  );
+  const timingCellWidth = isAnimatron ? animCellWidth : cellWidth;
+  const animTotalMs = Math.max(
+    4000,
+    (project.frameCount / Math.max(project.fps, 1)) * 1000,
+  );
+
+  /** one shared X offset — mirrored from the rows' nano ScrollArea */
   const [scrollX, setScrollX] = useState(0);
   const [rowsWidth, setRowsWidth] = useState(0);
   const cellsWidth = Math.max(0, rowsWidth - cellsInset);
-  const contentWidth = project.frameCount * (cellWidth + CELL_GAP) - CELL_GAP;
+  const contentWidth = isAnimatron
+    ? animTotalMs * pxPerMs
+    : project.frameCount * (cellWidth + CELL_GAP) - CELL_GAP;
   const maxScrollX = Math.max(0, contentWidth - cellsWidth);
 
-  const onPinchZoom = useCallback((deltaY: number) => {
-    setCellZoom((z) => {
-      const next = z * (1 - deltaY * 0.01);
-      return Math.min(MAX_CELL_ZOOM, Math.max(MIN_CELL_ZOOM, next));
-    });
-  }, []);
+  const clampZoom = useCallback(
+    (z: number) => Math.min(MAX_CELL_ZOOM, Math.max(MIN_CELL_ZOOM, z)),
+    [],
+  );
+
+  const onPinchZoom = useCallback(
+    (deltaY: number) => {
+      setCellZoom((z) => clampZoom(z * (1 - deltaY * 0.01)));
+    },
+    [clampZoom],
+  );
+
+  const stampFrameFromClientX = useCallback(
+    (clientX: number) => {
+      const el = stampTrackRef.current;
+      if (!el) return frameIndex;
+      const x = clientX - el.getBoundingClientRect().left - cellsInset + scrollX;
+      const last = Math.max(0, project.frameCount - 1);
+      if (isAnimatron) {
+        const ms = x / Math.max(pxPerMs, 0.0001);
+        return Math.max(0, Math.min(last, Math.round((ms / 1000) * project.fps)));
+      }
+      const pitch = cellWidth + CELL_GAP;
+      return Math.max(0, Math.min(last, Math.floor(x / pitch)));
+    },
+    [
+      frameIndex,
+      cellsInset,
+      scrollX,
+      project.frameCount,
+      project.fps,
+      isAnimatron,
+      pxPerMs,
+      cellWidth,
+    ],
+  );
 
   useLayoutEffect(() => {
     const vp = rowsVpRef.current;
@@ -180,10 +330,11 @@ export function Timeline() {
   }, [layerDrag, layerCount, reorderLayer]);
 
   /**
-   * Wheel over the rows: ctrl/pinch zooms the cells, deltaX (or shift+wheel)
-   * pans frames, and a plain wheel falls through to nano's content viewport
-   * whenever there are more layers than fit. Native listener because React
-   * registers `wheel` passively, so `preventDefault` there is a no-op.
+   * Wheel / trackpad over the rows:
+   * - ctrl/meta+wheel → cell zoom
+   * - otherwise drive scroll ourselves. Native overflow alone only pans the
+   *   axis matching the gesture; the timeline is usually X-only overflow, so
+   *   a vertical finger flick (deltaY) would do nothing without remapping.
    */
   useEffect(() => {
     const wrap = rowsVpRef.current;
@@ -193,20 +344,55 @@ export function Timeline() {
         ".react-nano-scrollbar-content",
       ) as HTMLElement | null) ?? wrap;
     function onWheel(e: WheelEvent) {
-      if (e.ctrlKey) {
+      if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
         onPinchZoom(e.deltaY);
         return;
       }
-      const canScrollY = vp.scrollHeight - vp.clientHeight > 1;
-      const dx = e.deltaX || (e.shiftKey || !canScrollY ? e.deltaY : 0);
-      if (!dx) return;
+      const canY = vp.scrollHeight - vp.clientHeight > 1;
+      const canX = vp.scrollWidth - vp.clientWidth > 1;
+      if (!canX && !canY) return;
+
+      let dx = e.deltaX;
+      let dy = e.deltaY;
+      // Shift always pans X. With no Y overflow, map vertical wheel → X so
+      // mouse wheels and Windows trackpads can scrub the track.
+      if (e.shiftKey && canX) {
+        dx = dx || dy;
+        dy = 0;
+      } else if (canX && !canY) {
+        dx = dx || dy;
+        dy = 0;
+      }
+
+      if (!dx && !dy) return;
       e.preventDefault();
-      setScrollX((x) => Math.max(0, Math.min(maxScrollX, x + dx)));
+      if (dx && canX) vp.scrollLeft += dx;
+      if (dy && canY) vp.scrollTop += dy;
     }
-    vp.addEventListener("wheel", onWheel, { passive: false });
-    return () => vp.removeEventListener("wheel", onWheel);
-  }, [onPinchZoom, maxScrollX, project.layers.length, layersCollapsed]);
+    function onScroll() {
+      setScrollX(vp.scrollLeft);
+    }
+    // Capture on the wrap so the playhead stamp / sticky labels don't swallow
+    // trackpad events before the scrollport sees them.
+    wrap.addEventListener("wheel", onWheel, { passive: false, capture: true });
+    vp.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      wrap.removeEventListener("wheel", onWheel, true);
+      vp.removeEventListener("scroll", onScroll);
+    };
+  }, [onPinchZoom, project.layers.length, layersCollapsed, isAnimatron]);
+
+  /** Keep nano's scrollLeft in sync when something else updates scrollX. */
+  useLayoutEffect(() => {
+    const wrap = rowsVpRef.current;
+    if (!wrap) return;
+    const vp = wrap.querySelector(
+      ".react-nano-scrollbar-content",
+    ) as HTMLElement | null;
+    if (!vp) return;
+    if (Math.abs(vp.scrollLeft - scrollX) > 0.5) vp.scrollLeft = scrollX;
+  }, [scrollX, contentWidth, cellZoom]);
 
   function applyExtend(n: number) {
     const frames = Math.max(1, Math.min(120, Math.round(Number(n))));
@@ -487,27 +673,37 @@ export function Timeline() {
         </div>
       </div>
 
-      {collapsed ? null : isAnimatron ? (
-        <div className="mt-[19px]">
-          <ClipTimeline />
-        </div>
-      ) : (
-        /* exposure sheet — Paper 3X4-0: one #0D0D0D card per layer, 4px apart */
-        <div className="relative mt-[19px]">
-          {/* timing ruler above the stack — Paper 5YT-0 (5YS-0 puts it 4px up) */}
+      {collapsed ? null : (
+        /* stop-motion / Animatron — TimingBar + rows; nano ScrollArea owns both axes */
+        <div ref={stampTrackRef} className="relative mt-[19px]">
+          {/* Paper 6ML-0 stamp — pill sits in the 19px gap above the ruler;
+              line runs through the timing bar + layer rows. Drag to scrub. */}
+          <TimelinePlayheadStamp
+            left={
+              cellsInset +
+              (isAnimatron
+                ? (frameIndex / Math.max(project.fps, 1)) * 1000 * pxPerMs
+                : frameIndex * (cellWidth + CELL_GAP) + cellWidth / 2) -
+              scrollX
+            }
+            label={`${(frameIndex / Math.max(project.fps, 1)).toFixed(1)}s`}
+            onScrub={setFrameIndex}
+            frameFromClientX={stampFrameFromClientX}
+          />
+          {/* timing ruler — Paper AKB-0 (stop-motion) / 6JD-0 (Animatron) */}
           <div className="mb-[5px]">
             <TimelineTimingBar
               frameCount={project.frameCount}
               fps={project.fps}
               frameIndex={frameIndex}
-              cellWidth={cellWidth}
+              cellWidth={timingCellWidth}
               cellsInset={cellsInset}
               scrollLeft={scrollX}
               zoom={cellZoom}
               zoomMin={MIN_CELL_ZOOM}
               zoomMax={MAX_CELL_ZOOM}
               onScrub={setFrameIndex}
-              onZoom={(z) => setCellZoom(Math.min(MAX_CELL_ZOOM, Math.max(MIN_CELL_ZOOM, z)))}
+              onZoom={(z) => setCellZoom(clampZoom(z))}
               autoRecord={autoKey}
               onToggleAutoRecord={toggleAutoKey}
               layersCollapsed={layersCollapsed}
@@ -518,15 +714,30 @@ export function Timeline() {
             />
           </div>
           {!layersCollapsed && (
-            <>
-              <div
-                ref={rowsVpRef}
-                style={{ maxHeight: ROWS_MAX_H }}
-                className="relative w-full"
+            <div
+              ref={rowsVpRef}
+              className="relative w-full"
+              style={{
+                height: Math.min(
+                  ROWS_MAX_H,
+                  project.layers.length * LAYER_ROW_H +
+                    Math.max(0, project.layers.length - 1) * LAYER_ROW_GAP,
+                ),
+              }}
+            >
+              <ScrollArea
+                orientation="both"
+                fade={false}
+                className="h-full w-full"
               >
-                <ScrollArea className="h-full max-h-[inherit]">
+                {isAnimatron ? (
+                  <ClipTimeline
+                    pxPerMs={pxPerMs}
+                    showLabels={!layersCollapsed}
+                  />
+                ) : (
                   <div
-                    className="flex flex-col"
+                    className="flex w-max min-w-full flex-col"
                     style={{ gap: LAYER_ROW_GAP }}
                   >
                     {project.layers.map((layer, li) => (
@@ -537,7 +748,6 @@ export function Timeline() {
                         frameCount={project.frameCount}
                         frameIndex={frameIndex}
                         cellWidth={cellWidth}
-                        scrollLeft={scrollX}
                         canDelete={project.layers.length > 1}
                         menuOpen={openMenuIndex === li}
                         onMenuOpenChange={(open) => setOpenMenuIndex(open ? li : null)}
@@ -560,24 +770,9 @@ export function Timeline() {
                       />
                     ))}
                   </div>
-                </ScrollArea>
-              </div>
-
-              {/* frames overflow the row width — one bar drives every row.
-                  Only mounted while it's needed, so the player keeps Paper's 102px
-                  height whenever the frames fit. */}
-              {maxScrollX > 0 && (
-                <div style={{ paddingLeft: cellsInset }} className="mt-[5px]">
-                  <ScrollBarX
-                    scrollLeft={scrollX}
-                    viewportWidth={cellsWidth}
-                    contentWidth={contentWidth}
-                    onScroll={setScrollX}
-                    controls="timeline-frames"
-                  />
-                </div>
-              )}
-            </>
+                )}
+              </ScrollArea>
+            </div>
           )}
         </div>
       )}

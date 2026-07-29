@@ -87,11 +87,31 @@ export interface Stroke {
   bezierNodes?: BezierNode[];
   /** Whether the vector path forms a closed loop */
   closed?: boolean;
+  /** Optional solid fill for closed shapes (stroke uses `color`) */
+  fillColor?: string;
+}
+
+export interface TextElement {
+  id: string;
+  text: string;
+  x: number;
+  y: number;
+  fontFamily: string;
+  size: number;
+  color: string;
+  letterSpacing?: number;
+  /** Fixed box width in project px — text soft-wraps to fit when set */
+  boxWidth?: number;
+  /** Rotation in radians (around the box center) */
+  rotation?: number;
+  /** Animatron clip timing (ignored in stop-motion paint) */
+  clip?: StrokeClip;
 }
 
 export interface Frame {
   id: string;
   strokes: Stroke[];
+  texts?: TextElement[];
 }
 
 export interface Layer {

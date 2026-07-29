@@ -113,6 +113,7 @@ export function TimelineTimingBar({
   onZoom: (zoom: number) => void;
   onSetDurationMs: (ms: number) => void;
 }) {
+  const rootRef = useRef<HTMLDivElement>(null);
   const rulerRef = useRef<HTMLDivElement>(null);
   const sliderRef = useRef<HTMLDivElement>(null);
   const scrubbing = useRef(false);
@@ -163,8 +164,24 @@ export function TimelineTimingBar({
     };
   });
 
+  // Ctrl/Cmd + scroll (and trackpad pinch → ctrlKey) zooms here too — native
+  // listener because React wheel is passive and can't preventDefault.
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    function onWheel(e: WheelEvent) {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      const next = zoom * (1 - e.deltaY * 0.01);
+      onZoom(Math.min(zoomMax, Math.max(zoomMin, next)));
+    }
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [zoom, zoomMin, zoomMax, onZoom]);
+
   return (
     <div
+      ref={rootRef}
       className="relative shrink-0 overflow-clip rounded-[14px]"
       style={{ height: BAR_H, backgroundColor: PAPER.trackBg }}
     >

@@ -47,16 +47,21 @@ export const PAPER = {
   /** ellipsis / close glyph in the workflow bar — Paper 106-0 */
   ellipsisIcon: "#D9D9D9",
   /**
+   * Modal primary CTA idle fill — Paper 8BI-0 / Export 1CQ-0.
    * Hover treatment for modal primary/secondary/close buttons — out of
    * Paper's scope (a static design tool doesn't spec interaction), built once
    * to be reused rather than re-invented per modal. Bg/border only, no
    * scale/shadow — see `GradientHoverButton`.
    */
+  primaryBtnGradient:
+    "linear-gradient(in oklab 180deg, oklab(0% 0 0) 0%, oklab(48.5% -0.018 -0.082) 100%)",
   primaryBtnHoverGradient:
     "linear-gradient(in oklab 180deg, oklab(10% 0 -0.01) 0%, oklab(58% -0.03 -0.13) 100%)",
   secondaryBtnHoverGradient: "linear-gradient(180deg, #313131 0%, #262626 100%)",
   /** a gradient, not a flat wash — GradientHoverButton pans it to pulse */
   closeChipHoverWash: "linear-gradient(180deg, rgba(255,255,255,0.3) 0%, rgba(255,255,255,0.08) 100%)",
+  /** close chip rim — Paper 8BI-0 / Help 2CD-0 */
+  closeChipBorder: "#C9C9C933",
   insetX: 62,
   insetTop: 24,
   insetBottom: 48,

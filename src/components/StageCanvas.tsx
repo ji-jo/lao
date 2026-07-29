@@ -1,14 +1,19 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent } from "react";
 import { useProject } from "@/state/project";
-import { useTools, isBrushTool } from "@/state/tools";
+import { useTools, isBrushTool, activeShapeTool, type ShapeToolId } from "@/state/tools";
 import { usePlayback } from "@/state/playback";
 import { useSelection } from "@/state/selection";
 import { useViewport } from "@/state/viewport";
-import { renderStrokes, renderStroke } from "@/engine/renderer";
+import { renderStrokes, renderStroke, renderTexts } from "@/engine/renderer";
 import { PressureTracker } from "@/engine/pressure";
 import { paintBackground } from "@/engine/background";
+import {
+  buildShapePoints,
+  shapeDragSignificant,
+} from "@/engine/shapeGeometry";
 import { getShaderSnapshotCanvas } from "@/components/ShaderBackground";
 import { getImageFilterSnapshotCanvas } from "@/components/ImageFilterBackground";
+import { textFontStack } from "@/lib/google-fonts";
 import { hasImageFilter } from "@/lib/image-filters";
 import {
   straightLinePoints,
@@ -17,13 +22,19 @@ import {
   transformPoints,
   boundsCenter,
   handleIndices,
-  distanceToPoints,
+  hitsStroke,
   pointsBounds,
   HANDLE_HIT_PX,
 } from "@/engine/pathEdit";
 import { strokeAtTime } from "@/engine/strokeProgress";
+import {
+  hitTextBox,
+  measureTextBox,
+  textAABB,
+  transformTextElement,
+} from "@/engine/textGeometry";
 import { flattenBezierNodes, projectToCubicBezier, splitCubicBezier } from "@/lib/bezier";
-import { resolveCel, resolveCelIndex, type Stroke, type StrokePoint } from "@/model/types";
+import { resolveCel, resolveCelIndex, type Stroke, type StrokePoint, type TextElement } from "@/model/types";
 
 /**
  * The drawing stage. Committed + live strokes render into an offscreen "art"
@@ -46,6 +57,18 @@ export function StageCanvas() {
   const artRef = useRef<HTMLCanvasElement | null>(null);
   const fitRef = useRef<Fit>({ scale: 1, ox: 0, oy: 0 });
   const liveRef = useRef<{ stroke: Stroke; points: StrokePoint[] } | null>(null);
+  /** Figma-like shape rubber-band (rect / diamond / circle / arrow / line). */
+  const shapeDragRef = useRef<{
+    kind: ShapeToolId;
+    id: string;
+    seed: number;
+    startX: number;
+    startY: number;
+    currentX: number;
+    currentY: number;
+    constrain: boolean;
+    fromCenter: boolean;
+  } | null>(null);
   const warpRef = useRef<{
     strokeId: string;
     handleIndex: number;
@@ -67,6 +90,7 @@ export function StageCanvas() {
     dx: number;
     dy: number;
     snapshots: Map<string, StrokePoint[]>;
+    textSnapshots: Map<string, { x: number; y: number }>;
   } | null>(null);
   const dirtyRef = useRef(true);
   const timerRef = useRef<{ kind: "raf" | "timeout"; id: number }>({ kind: "raf", id: 0 });
@@ -99,9 +123,31 @@ export function StageCanvas() {
     scale: number;
     rotation: number;
     snapshots: Map<string, { points: StrokePoint[]; size: number }>;
+    textSnapshots: Map<string, TextElement>;
+  } | null>(null);
+  /** Text-only side-handle resize, distinct from the uniform corner scale. */
+  const textResizeRef = useRef<{
+    id: string;
+    edge: "left" | "right";
+    startX: number;
+    startWidth: number;
+    startTextX: number;
+    width: number;
+    textX: number;
   } | null>(null);
   const spaceRef = useRef(false);
   const ctrlRef = useRef(false);
+
+  const [textEdit, setTextEdit] = useState<{
+    id?: string;
+    text: string;
+    projectX: number;
+    projectY: number;
+    boxWidth?: number;
+    rotation?: number;
+  } | null>(null);
+  const textEditRef = useRef(textEdit);
+  textEditRef.current = textEdit;
 
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -110,6 +156,7 @@ export function StageCanvas() {
     let strokeStart = 0;
     let handleSpots: { strokeId: string; index: number; sx: number; sy: number; type?: "node" | "handleIn" | "handleOut" }[] = [];
     let transformSpots: { kind: "scale" | "rotate"; sx: number; sy: number }[] = [];
+    let textWidthSpots: { id: string; edge: "left" | "right"; sx: number; sy: number }[] = [];
     let hoverPos: { x: number; y: number } | null = null;
 
     const artCanvas = document.createElement("canvas");
@@ -166,16 +213,19 @@ export function StageCanvas() {
     /** render one cel's strokes into the scratch canvas, then composite */
     function compositeCel(
       strokes: Stroke[],
+      texts: import("@/model/types").TextElement[] | undefined,
       livePoints: StrokePoint[] | null,
       liveStroke: Stroke | null,
       alpha: number,
       colorOverride?: string,
       displaced?: Map<string, StrokePoint[]>,
       displacedBezier?: Map<string, import("@/model/types").BezierNode[]>,
+      skipTextId?: string,
     ) {
       celCtx.setTransform(DRAFT_SCALE, 0, 0, DRAFT_SCALE, 0, 0);
       celCtx.clearRect(0, 0, celCanvas.width / DRAFT_SCALE, celCanvas.height / DRAFT_SCALE);
       renderStrokes(celCtx, strokes, { quality: "draft", colorOverride, displaced, displacedBezier });
+      if (texts) renderTexts(celCtx, texts, { quality: "draft", colorOverride, skipId: skipTextId });
       if (liveStroke && livePoints)
         renderStroke(celCtx, liveStroke, { quality: "draft" }, livePoints);
       artCtx.save();
@@ -229,8 +279,8 @@ export function StageCanvas() {
           if (prevIdx !== null && prevIdx !== lastRenderedCelIndex) {
             const ghost = activeLayer.frames[prevIdx]!;
             const stepOpacity = pb.onionOpacity * (1 - celsFound / pb.onionRange);
-            if (stepOpacity > 0 && ghost.strokes.length > 0) {
-              compositeCel(ghost.strokes, null, null, stepOpacity, pb.onionColor);
+            if (stepOpacity > 0 && (ghost.strokes.length > 0 || (ghost.texts && ghost.texts.length > 0))) {
+              compositeCel(ghost.strokes, ghost.texts, null, null, stepOpacity, pb.onionColor);
             }
             lastRenderedCelIndex = prevIdx;
             celsFound++;
@@ -270,6 +320,23 @@ export function StageCanvas() {
             };
           });
         }
+        let texts = cel?.texts ?? [];
+        if (xf && isTarget) {
+          texts = texts.map((t) => {
+            if (!xf.ids.includes(t.id)) return t;
+            const snap = xf.textSnapshots.get(t.id);
+            if (!snap) return t;
+            const box = measureTextBox(celCtx, snap);
+            return transformTextElement(
+              snap,
+              box,
+              xf.pivotX,
+              xf.pivotY,
+              xf.scale,
+              xf.rotation,
+            );
+          });
+        }
         if (animatron && pb.playing) {
           strokes = strokes
             .map((s) => {
@@ -293,15 +360,35 @@ export function StageCanvas() {
             const orig = move.snapshots.get(id);
             if (orig) displaced.set(id, translatePoints(orig, move.dx, move.dy));
           }
+          texts = texts.map((t) => {
+            if (!move.ids.includes(t.id)) return t;
+            const snap = move.textSnapshots?.get(t.id);
+            if (!snap) return t;
+            return {
+              ...t,
+              x: snap.x + move.dx,
+              y: snap.y + move.dy,
+            };
+          });
+        }
+        const textResize = textResizeRef.current;
+        if (textResize && isTarget) {
+          texts = texts.map((t) =>
+            t.id === textResize.id
+              ? { ...t, x: textResize.textX, boxWidth: textResize.width }
+              : t,
+          );
         }
         compositeCel(
           strokes,
+          texts,
           isTarget && live ? live.points : null,
           isTarget && live ? live.stroke : null,
           1,
           undefined,
           displaced.size ? displaced : undefined,
           displacedBezier.size ? displacedBezier : undefined,
+          textEditRef.current?.id,
         );
       });
 
@@ -371,6 +458,7 @@ export function StageCanvas() {
       // --- selection overlay (select tool) ---
       handleSpots = [];
       transformSpots = [];
+      textWidthSpots = [];
       selBBoxRef.current = null;
       try {
         const selIds = useSelection.getState().ids;
@@ -381,7 +469,7 @@ export function StageCanvas() {
           : null;
         if (selIds.length && selCel) {
           const selStrokes = selCel.strokes.filter((s) => selIds.includes(s.id));
-          const ptsOf = (s: Stroke) => {
+          const ptsOf = (s: import("@/model/types").Stroke) => {
             if (move && move.ids.includes(s.id)) {
               const orig = move.snapshots.get(s.id);
               if (orig) return translatePoints(orig, move.dx, move.dy);
@@ -391,8 +479,45 @@ export function StageCanvas() {
           };
           const allPts: StrokePoint[] = [];
           for (const s of selStrokes) allPts.push(...ptsOf(s));
-          const bounds = pointsBounds(allPts);
-          if (bounds && tools.tool !== "path") {
+          const selTexts = (selCel.texts ?? []).filter((t) => selIds.includes(t.id));
+          let bounds = pointsBounds(allPts);
+          if (selTexts.length > 0) {
+            let minX = bounds ? bounds.minX : Infinity;
+            let minY = bounds ? bounds.minY : Infinity;
+            let maxX = bounds ? bounds.maxX : -Infinity;
+            let maxY = bounds ? bounds.maxY : -Infinity;
+            
+            for (const t of selTexts) {
+              let tt = t;
+              if (move && move.textSnapshots && move.textSnapshots.has(t.id)) {
+                const snap = move.textSnapshots.get(t.id)!;
+                tt = { ...t, x: snap.x + move.dx, y: snap.y + move.dy };
+              }
+              if (xf && xf.textSnapshots && xf.textSnapshots.has(t.id)) {
+                const snap = xf.textSnapshots.get(t.id)!;
+                const box = measureTextBox(celCtx, snap);
+                tt = transformTextElement(
+                  snap,
+                  box,
+                  xf.pivotX,
+                  xf.pivotY,
+                  xf.scale,
+                  xf.rotation,
+                );
+              }
+              const aabb = textAABB(celCtx, tt);
+              if (aabb.minX < minX) minX = aabb.minX;
+              if (aabb.minY < minY) minY = aabb.minY;
+              if (aabb.maxX > maxX) maxX = aabb.maxX;
+              if (aabb.maxY > maxY) maxY = aabb.maxY;
+            }
+            if (minX !== Infinity) bounds = { minX, minY, maxX, maxY };
+          }
+          
+          const editingSelectedText =
+            !!textEditRef.current?.id &&
+            selIds.includes(textEditRef.current.id);
+          if (bounds && tools.tool !== "path" && !editingSelectedText) {
             const pad = 8;
             const rx = bx + bounds.minX * scale - pad;
             const ry = by + bounds.minY * scale - pad;
@@ -404,6 +529,31 @@ export function StageCanvas() {
             ctx.setLineDash([5, 4]);
             ctx.strokeRect(rx, ry, rw, rh);
             ctx.setLineDash([]);
+
+            // A single selected text object gets side handles: these change
+            // only its text box width (and wrapping), unlike corner handles
+            // which uniformly scale the whole selection.
+            if (selTexts.length === 1 && selStrokes.length === 0) {
+              const text = selTexts[0];
+              const aabb = textAABB(celCtx, text);
+              const midY = by + ((aabb.minY + aabb.maxY) / 2) * scale;
+              const leftX = bx + aabb.minX * scale;
+              const rightX = bx + aabb.maxX * scale;
+              const spots = [
+                { id: text.id, edge: "left" as const, sx: leftX, sy: midY },
+                { id: text.id, edge: "right" as const, sx: rightX, sy: midY },
+              ];
+              textWidthSpots.push(...spots);
+              for (const spot of spots) {
+                ctx.fillStyle = "#0e0e11";
+                ctx.strokeStyle = "#2b5cff";
+                ctx.lineWidth = 1.2;
+                ctx.beginPath();
+                ctx.rect(spot.sx - 4, spot.sy - 6, 8, 12);
+                ctx.fill();
+                ctx.stroke();
+              }
+            }
 
             const cx = bx + ((bounds.minX + bounds.maxX) / 2) * scale;
             const corners = [
@@ -652,8 +802,9 @@ export function StageCanvas() {
       return bestHit;
     }
 
-    function celSnapshots(ids: string[], cel: { strokes: Stroke[] }) {
+    function celSnapshots(ids: string[], cel: { strokes: Stroke[]; texts?: TextElement[] }) {
       const snapshots = new Map<string, { points: StrokePoint[]; size: number }>();
+      const textSnapshots = new Map<string, TextElement>();
       for (const s of cel.strokes) {
         if (ids.includes(s.id)) {
           snapshots.set(s.id, {
@@ -662,15 +813,39 @@ export function StageCanvas() {
           });
         }
       }
-      return snapshots;
+      if (cel.texts) {
+        for (const t of cel.texts) {
+          if (ids.includes(t.id)) {
+            textSnapshots.set(t.id, { ...t });
+          }
+        }
+      }
+      return { snapshots, textSnapshots };
     }
 
-    function selectionPivot(ids: string[], cel: { strokes: Stroke[] }) {
+    function selectionPivot(ids: string[], cel: { strokes: Stroke[]; texts?: TextElement[] }) {
       const allPts: StrokePoint[] = [];
       for (const s of cel.strokes) {
         if (ids.includes(s.id)) allPts.push(...s.points);
       }
-      const bounds = pointsBounds(allPts);
+      let bounds = pointsBounds(allPts);
+      if (cel.texts) {
+        const selTexts = cel.texts.filter((t) => ids.includes(t.id));
+        if (selTexts.length > 0) {
+          let minX = bounds ? bounds.minX : Infinity;
+          let minY = bounds ? bounds.minY : Infinity;
+          let maxX = bounds ? bounds.maxX : -Infinity;
+          let maxY = bounds ? bounds.maxY : -Infinity;
+          for (const t of selTexts) {
+            const aabb = textAABB(celCtx, t);
+            if (aabb.minX < minX) minX = aabb.minX;
+            if (aabb.minY < minY) minY = aabb.minY;
+            if (aabb.maxX > maxX) maxX = aabb.maxX;
+            if (aabb.maxY > maxY) maxY = aabb.maxY;
+          }
+          if (minX !== Infinity) bounds = { minX, minY, maxX, maxY };
+        }
+      }
       return bounds ? boundsCenter(bounds) : null;
     }
 
@@ -690,6 +865,101 @@ export function StageCanvas() {
       canvas.style.cursor = "grabbing";
     }
 
+    function findTextAt(
+      x: number,
+      y: number,
+    ): { text: TextElement; layerId: string } | null {
+      const ps = useProject.getState();
+      const animatron = ps.project.workflow === "animatron";
+      for (let i = ps.project.layers.length - 1; i >= 0; i--) {
+        const layer = ps.project.layers[i];
+        if (!layer.visible) continue;
+        const cel = animatron
+          ? layer.frames.find((f) => f)
+          : resolveCel(layer, ps.frameIndex);
+        if (!cel?.texts?.length) continue;
+        for (let j = cel.texts.length - 1; j >= 0; j--) {
+          const t = cel.texts[j];
+          if (hitTextBox(celCtx, t, x, y)) {
+            return { text: t, layerId: layer.id };
+          }
+        }
+      }
+      return null;
+    }
+
+    function openTextEditor(hit: TextElement, layerId: string | null) {
+      const ps = useProject.getState();
+      if (layerId) {
+        const idx = ps.project.layers.findIndex((l) => l.id === layerId);
+        if (idx !== -1 && idx !== ps.layerIndex) ps.setLayerIndex(idx);
+      }
+      const tools = useTools.getState();
+      tools.setFontFamily(hit.fontFamily);
+      tools.setTextSize(hit.size);
+      tools.setColor(hit.color);
+      if (hit.letterSpacing != null) tools.setLetterSpacing(hit.letterSpacing);
+      const box = measureTextBox(celCtx, hit);
+      // Always seed a box width so edge-resize + wrap are available immediately.
+      const boxWidth = hit.boxWidth ?? Math.max(48, Math.ceil(box.w));
+      setTextEdit({
+        id: hit.id,
+        text: hit.text,
+        projectX: hit.x,
+        projectY: hit.y,
+        boxWidth,
+        rotation: hit.rotation,
+      });
+      tools.setTool("text");
+      useSelection.getState().set([hit.id]);
+      dirtyRef.current = true;
+    }
+
+    function tryOpenTextAt(clientX: number, clientY: number) {
+      const rect = canvas.getBoundingClientRect();
+      let { scale, ox, oy } = fitRef.current;
+      if (!(scale > 0)) {
+        resize();
+        ({ scale, ox, oy } = fitRef.current);
+      }
+      if (!(scale > 0)) return false;
+      const px = (clientX - rect.left - ox) / scale;
+      const py = (clientY - rect.top - oy) / scale;
+      const hit = findTextAt(px, py);
+      if (!hit) return false;
+
+      liveRef.current = null;
+      shapeDragRef.current = null;
+      marqueeRef.current = null;
+      moveRef.current = null;
+      transformRef.current = null;
+      warpRef.current = null;
+
+      const ps = useProject.getState();
+      const animatron = ps.project.workflow === "animatron";
+      const layer = ps.project.layers[ps.layerIndex];
+      const cel = layer
+        ? animatron
+          ? layer.frames.find((f) => f) ?? null
+          : resolveCel(layer, ps.frameIndex)
+        : null;
+      const last = cel?.strokes[cel.strokes.length - 1];
+      if (last && last.points.length <= 4) {
+        const near = last.points.some((p) => Math.hypot(p.x - px, p.y - py) < 28);
+        if (near) ps.deleteStrokes([last.id]);
+      }
+
+      openTextEditor(hit.text, hit.layerId);
+      return true;
+    }
+
+    function onDblClick(e: MouseEvent) {
+      if (tryOpenTextAt(e.clientX, e.clientY)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }
+
     function onPointerDown(e: PointerEvent) {
       const tools = useTools.getState();
       if (e.button === 1 || (spaceRef.current && e.button === 0) || tools.tool === "hand") {
@@ -697,6 +967,32 @@ export function StageCanvas() {
         return;
       }
       if (e.button !== 0) return;
+
+      // Universal double-click: open text editor from any tool
+      if (e.detail >= 2) {
+        if (tryOpenTextAt(e.clientX, e.clientY)) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+      }
+
+      if (tools.tool === "text") {
+        e.preventDefault();
+        const { x, y } = toProject(e);
+        const hit = findTextAt(x, y);
+        if (hit) {
+          openTextEditor(hit.text, hit.layerId);
+        } else {
+          setTextEdit({
+            text: "",
+            projectX: x,
+            projectY: y,
+            boxWidth: 160,
+          });
+        }
+        return;
+      }
 
       if (tools.tool === "select" || tools.tool === "path" || ctrlRef.current) {
         const sel = useSelection.getState();
@@ -713,14 +1009,57 @@ export function StageCanvas() {
             : resolveCel(layer, ps.frameIndex)
           : null;
 
+        // Text side handles resize the text box and reflow its lines. Do this
+        // before generic transform handles, which occupy the same rectangle.
+        const textWidthSpot = textWidthSpots.find(
+          (h) => Math.hypot(h.sx - sx, h.sy - sy) <= HANDLE_HIT_PX + 2,
+        );
+        if (textWidthSpot && cel) {
+          const text = cel.texts?.find((t) => t.id === textWidthSpot.id);
+          if (text) {
+            if (e.detail >= 2) {
+              // Double-click a side handle to fit the box to its unwrapped
+              // text line(s), preserving explicit line breaks.
+              const natural = measureTextBox(celCtx, {
+                ...text,
+                boxWidth: undefined,
+              });
+              useProject.getState().updateTextElement(text.id, {
+                boxWidth: Math.max(40, Math.ceil(natural.w) + 6),
+              });
+              dirtyRef.current = true;
+              return;
+            }
+            const { x } = toProject(e);
+            const box = measureTextBox(celCtx, text);
+            const startWidth = text.boxWidth ?? Math.max(40, box.w);
+            try {
+              canvas.setPointerCapture(e.pointerId);
+            } catch {
+              // best-effort
+            }
+            textResizeRef.current = {
+              id: text.id,
+              edge: textWidthSpot.edge,
+              startX: x,
+              startWidth,
+              startTextX: text.x,
+              width: startWidth,
+              textX: text.x,
+            };
+            dirtyRef.current = true;
+            return;
+          }
+        }
+
         // scale / rotate handles on the selection bbox
         if (sel.ids.length && cel) {
           const tspot = transformSpots.find(
             (h) => Math.hypot(h.sx - sx, h.sy - sy) <= HANDLE_HIT_PX,
           );
           const pivot = selectionPivot(sel.ids, cel);
-          const snapshots = celSnapshots(sel.ids, cel);
-          if (tspot && pivot && snapshots.size) {
+          const { snapshots, textSnapshots } = celSnapshots(sel.ids, cel);
+          if (tspot && pivot && (snapshots.size || textSnapshots.size)) {
             try {
               canvas.setPointerCapture(e.pointerId);
             } catch {
@@ -738,6 +1077,7 @@ export function StageCanvas() {
                 scale: 1,
                 rotation: 0,
                 snapshots,
+                textSnapshots,
               };
             } else {
               transformRef.current = {
@@ -750,6 +1090,7 @@ export function StageCanvas() {
                 scale: 1,
                 rotation: 0,
                 snapshots,
+                textSnapshots,
               };
             }
             dirtyRef.current = true;
@@ -808,9 +1149,10 @@ export function StageCanvas() {
           }
         }
 
-        // drag inside selection bbox → group move
+        // drag inside selection bbox → group move (skip on double-click so text edit can open)
         const bbox = selBBoxRef.current;
         if (
+          e.detail < 2 &&
           sel.ids.length &&
           bbox &&
           sx >= bbox.x &&
@@ -819,24 +1161,24 @@ export function StageCanvas() {
           sy <= bbox.y + bbox.h
         ) {
           if (cel) {
-            const snapshots = new Map<string, StrokePoint[]>();
-            for (const s of cel.strokes) {
-              if (sel.ids.includes(s.id)) snapshots.set(s.id, s.points.map((p) => ({ ...p })));
-            }
-            if (snapshots.size) {
+            const { snapshots, textSnapshots } = celSnapshots(sel.ids, cel);
+            if (snapshots.size || textSnapshots.size) {
               try {
                 canvas.setPointerCapture(e.pointerId);
               } catch {
                 // best-effort
               }
               const { x, y } = toProject(e);
+              const moveSnap = new Map<string, StrokePoint[]>();
+              for (const [id, snap] of snapshots.entries()) moveSnap.set(id, snap.points);
               moveRef.current = {
                 ids: [...sel.ids],
                 startX: x,
                 startY: y,
                 dx: 0,
                 dy: 0,
-                snapshots,
+                snapshots: moveSnap,
+                textSnapshots,
               };
               dirtyRef.current = true;
               return;
@@ -851,18 +1193,34 @@ export function StageCanvas() {
         // otherwise pick a stroke (topmost wins), shift toggles
         let hit: string | null = null;
         if (cel) {
-          for (let i = cel.strokes.length - 1; i >= 0; i--) {
-            const s = cel.strokes[i];
-            if (!s.points?.length) continue;
-            if (distanceToPoints(s.points, x, y) <= Math.max(s.size * 1.5, 12)) {
-              hit = s.id;
-              break;
+          if (cel.texts) {
+            for (let i = cel.texts.length - 1; i >= 0; i--) {
+              const t = cel.texts[i];
+              if (hitTextBox(celCtx, t, x, y)) {
+                hit = t.id;
+                break;
+              }
+            }
+          }
+          if (!hit) {
+            for (let i = cel.strokes.length - 1; i >= 0; i--) {
+              const s = cel.strokes[i];
+              if (!s.points?.length) continue;
+              if (hitsStroke(s.points, x, y, Math.max(s.size * 1.5, 12), s.closed)) {
+                hit = s.id;
+                break;
+              }
             }
           }
         }
         if (hit) {
           if (e.shiftKey) sel.toggle(hit);
           else sel.set([hit]);
+          const stroke = cel?.strokes.find((s) => s.id === hit);
+          if (stroke && !e.shiftKey) {
+            useTools.getState().setColor(stroke.color);
+            if (stroke.fillColor) useTools.getState().setFillColor(stroke.fillColor);
+          }
         } else {
           if (!e.shiftKey) {
             if (tools.tool === "select") sel.clear();
@@ -873,6 +1231,63 @@ export function StageCanvas() {
           } catch {}
           marqueeRef.current = { startX: x, startY: y, currentX: x, currentY: y };
         }
+        dirtyRef.current = true;
+        return;
+      }
+
+      // --- shapes pack (Figma-like drag-to-create) ---
+      // Generic `"shapes"` still draws using lastShapeTool (rect by default).
+      const shapeKind = activeShapeTool(
+        tools.tool,
+        useTools.getState().lastShapeTool,
+      );
+      if (shapeKind) {
+        e.preventDefault();
+        try {
+          canvas.setPointerCapture(e.pointerId);
+        } catch {
+          // best-effort
+        }
+        useSelection.getState().clear();
+        // Close the pack once the drag starts so the canvas keeps the pointer.
+        useTools.getState().setShapesOpen(false);
+        const { x, y } = toProject(e);
+        const id = crypto.randomUUID();
+        const seed = Math.floor(Math.random() * 2 ** 31);
+        shapeDragRef.current = {
+          kind: shapeKind,
+          id,
+          seed,
+          startX: x,
+          startY: y,
+          currentX: x,
+          currentY: y,
+          constrain: e.shiftKey,
+          fromCenter: e.altKey,
+        };
+        const { points, closed } = buildShapePoints(
+          shapeKind,
+          x,
+          y,
+          x,
+          y,
+          { constrain: e.shiftKey, fromCenter: e.altKey },
+        );
+        liveRef.current = {
+          stroke: {
+            id,
+            brush: "ink",
+            color: tools.color,
+            size: tools.size,
+            points: [],
+            seed,
+            jitter: tools.jitterByDefault,
+            grain: false,
+            closed,
+            fillColor: closed ? tools.fillColor : undefined,
+          },
+          points,
+        };
         dirtyRef.current = true;
         return;
       }
@@ -1055,9 +1470,70 @@ export function StageCanvas() {
          }
       }
 
+      if (
+        tools.tool === "select" &&
+        e.buttons === 0 &&
+        textWidthSpots.some((h) => {
+          const rect = canvas.getBoundingClientRect();
+          const sx = e.clientX - rect.left;
+          const sy = e.clientY - rect.top;
+          return Math.hypot(h.sx - sx, h.sy - sy) <= HANDLE_HIT_PX + 2;
+        })
+      ) {
+        cursor = "ew-resize";
+      }
+
       if (!panRef.current) canvas.style.cursor = cursor;
 
       dirtyRef.current = true;
+
+      // Hover-select shapes / lines (pointer tool, or shapes pack) — sticky
+      // until click-empty. Seeds the stroke/fill pickers from the hit.
+      if (
+        (tools.tool === "select" ||
+          tools.tool === "shapes" ||
+          activeShapeTool(tools.tool, tools.lastShapeTool) !== null) &&
+        e.buttons === 0 &&
+        !marqueeRef.current &&
+        !panRef.current &&
+        !moveRef.current &&
+        !transformRef.current &&
+        !warpRef.current &&
+        !shapeDragRef.current &&
+        !liveRef.current
+      ) {
+        const ps = useProject.getState();
+        const layer = ps.project.layers[ps.layerIndex];
+        const cel = layer
+          ? ps.project.workflow === "animatron"
+            ? layer.frames.find((f) => f) ?? null
+            : resolveCel(layer, ps.frameIndex)
+          : null;
+        if (cel) {
+          let hitId: string | null = null;
+          let hitStroke: Stroke | null = null;
+          for (let i = cel.strokes.length - 1; i >= 0; i--) {
+            const s = cel.strokes[i];
+            if (!s.points?.length) continue;
+            const threshold = Math.max(s.size * 1.5, 12);
+            if (hitsStroke(s.points, x, y, threshold, s.closed)) {
+              hitId = s.id;
+              hitStroke = s;
+              break;
+            }
+          }
+          if (hitId && hitStroke) {
+            const sel = useSelection.getState();
+            if (sel.ids.length !== 1 || sel.ids[0] !== hitId) {
+              sel.set([hitId]);
+              sel.clearNodes();
+              const t = useTools.getState();
+              t.setColor(hitStroke.color);
+              if (hitStroke.fillColor) t.setFillColor(hitStroke.fillColor);
+            }
+          }
+        }
+      }
 
       const marquee = marqueeRef.current;
       if (marquee) {
@@ -1076,6 +1552,52 @@ export function StageCanvas() {
         dirtyRef.current = true;
         return;
       }
+
+      const textResize = textResizeRef.current;
+      if (textResize) {
+        const dx = x - textResize.startX;
+        if (textResize.edge === "right") {
+          textResize.width = Math.max(40, textResize.startWidth + dx);
+          textResize.textX = textResize.startTextX;
+        } else {
+          const width = Math.max(40, textResize.startWidth - dx);
+          textResize.width = width;
+          textResize.textX =
+            textResize.startTextX + (textResize.startWidth - width);
+        }
+        dirtyRef.current = true;
+        return;
+      }
+
+      const shapeDrag = shapeDragRef.current;
+      if (shapeDrag) {
+        shapeDrag.currentX = x;
+        shapeDrag.currentY = y;
+        shapeDrag.constrain = e.shiftKey;
+        shapeDrag.fromCenter = e.altKey;
+        const { points, closed } = buildShapePoints(
+          shapeDrag.kind,
+          shapeDrag.startX,
+          shapeDrag.startY,
+          shapeDrag.currentX,
+          shapeDrag.currentY,
+          {
+            constrain: shapeDrag.constrain,
+            fromCenter: shapeDrag.fromCenter,
+          },
+        );
+        const live = liveRef.current;
+        if (live && live.stroke.id === shapeDrag.id) {
+          live.points = points;
+          live.stroke.closed = closed;
+          live.stroke.fillColor = closed
+            ? useTools.getState().fillColor
+            : undefined;
+        }
+        dirtyRef.current = true;
+        return;
+      }
+
       const xf = transformRef.current;
       if (xf) {
         const { x, y } = toProject(e);
@@ -1247,6 +1769,26 @@ export function StageCanvas() {
         dirtyRef.current = true;
         return;
       }
+
+      const shapeDrag = shapeDragRef.current;
+      if (shapeDrag) {
+        shapeDragRef.current = null;
+        const live = liveRef.current;
+        liveRef.current = null;
+        const significant = shapeDragSignificant(
+          shapeDrag.startX,
+          shapeDrag.startY,
+          shapeDrag.currentX,
+          shapeDrag.currentY,
+        );
+        if (live && significant && live.points.length > 1) {
+          const stroke = { ...live.stroke, points: live.points };
+          useProject.getState().addStroke(stroke);
+          useSelection.getState().set([stroke.id]);
+        }
+        dirtyRef.current = true;
+        return;
+      }
       
       if (marqueeRef.current) {
         const m = marqueeRef.current;
@@ -1306,6 +1848,19 @@ export function StageCanvas() {
                 }
               }
             }
+            if (cel.texts) {
+              for (const t of cel.texts) {
+                const aabb = textAABB(celCtx, t);
+                if (
+                  aabb.minX < maxX &&
+                  aabb.maxX > minX &&
+                  aabb.minY < maxY &&
+                  aabb.maxY > minY
+                ) {
+                  hitIds.push(t.id);
+                }
+              }
+            }
             if (e.shiftKey) {
               const currentIds = new Set(sel.ids);
               hitIds.forEach(id => currentIds.add(id));
@@ -1314,6 +1869,21 @@ export function StageCanvas() {
               sel.set(hitIds);
             }
           }
+        }
+        dirtyRef.current = true;
+        return;
+      }
+      const textResize = textResizeRef.current;
+      if (textResize) {
+        textResizeRef.current = null;
+        if (
+          textResize.width !== textResize.startWidth ||
+          textResize.textX !== textResize.startTextX
+        ) {
+          useProject.getState().updateTextElement(textResize.id, {
+            x: textResize.textX,
+            boxWidth: textResize.width,
+          });
         }
         dirtyRef.current = true;
         return;
@@ -1376,6 +1946,15 @@ export function StageCanvas() {
           }
         }
       }
+      if (
+        activeShapeTool(prev.tool, prev.lastShapeTool) &&
+        !activeShapeTool(s.tool, s.lastShapeTool)
+      ) {
+        if (shapeDragRef.current) {
+          shapeDragRef.current = null;
+          liveRef.current = null;
+        }
+      }
       dirtyRef.current = true;
     });
     const unsubZoom = useViewport.subscribe(() => {
@@ -1405,6 +1984,16 @@ export function StageCanvas() {
 
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Control") ctrlRef.current = true;
+      if (e.key === "Escape") {
+        if (shapeDragRef.current) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          shapeDragRef.current = null;
+          liveRef.current = null;
+          dirtyRef.current = true;
+          return;
+        }
+      }
       if (e.key === "Enter" || e.key === "Escape") {
         const live = liveRef.current;
         if (live && live.stroke.brush === "pen") {
@@ -1433,6 +2022,7 @@ export function StageCanvas() {
     }
 
     canvas.addEventListener("pointerdown", onPointerDown);
+    canvas.addEventListener("dblclick", onDblClick);
     canvas.addEventListener("pointermove", onPointerMove);
     canvas.addEventListener("pointerup", onPointerUp);
     canvas.addEventListener("pointercancel", onPointerUp);
@@ -1452,6 +2042,7 @@ export function StageCanvas() {
       unsubZoom();
       ro.disconnect();
       canvas.removeEventListener("pointerdown", onPointerDown);
+      canvas.removeEventListener("dblclick", onDblClick);
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerup", onPointerUp);
       canvas.removeEventListener("pointercancel", onPointerUp);
@@ -1462,6 +2053,359 @@ export function StageCanvas() {
   return (
     <div className="absolute inset-0">
       <canvas ref={canvasRef} className="h-full w-full touch-none" />
+      {textEdit && (
+        <TextEditorOverlay
+          textEdit={textEdit}
+          fitRef={fitRef}
+          onCommit={(result) => {
+            const tools = useTools.getState();
+            const project = useProject.getState();
+            if (result) {
+              const targetId = textEdit.id || crypto.randomUUID();
+              const patch = {
+                text: result.text,
+                x: result.projectX,
+                y: result.projectY,
+                fontFamily: tools.fontFamily,
+                size: tools.textSize,
+                color: tools.color,
+                letterSpacing: tools.letterSpacing,
+                boxWidth: result.boxWidth,
+                rotation: textEdit.rotation,
+              };
+              if (textEdit.id) {
+                project.updateTextElement(targetId, patch);
+              } else {
+                project.addTextElement({
+                  id: targetId,
+                  ...patch,
+                });
+              }
+              useSelection.getState().set([targetId]);
+              tools.setTool("select");
+            } else if (textEdit.id) {
+              project.removeTextElement(textEdit.id);
+            }
+            setTextEdit(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function TextEditorOverlay({
+  textEdit,
+  fitRef,
+  onCommit,
+}: {
+  textEdit: {
+    id?: string;
+    text: string;
+    projectX: number;
+    projectY: number;
+    boxWidth?: number;
+    rotation?: number;
+  };
+  fitRef: MutableRefObject<Fit>;
+  onCommit: (
+    result: {
+      text: string;
+      projectX: number;
+      projectY: number;
+      boxWidth?: number;
+    } | null,
+  ) => void;
+}) {
+  const zoom = useViewport((s) => s.zoom);
+  const panX = useViewport((s) => s.panX);
+  const panY = useViewport((s) => s.panY);
+  void zoom;
+  void panX;
+  void panY;
+  const fit = fitRef.current;
+  const scale = fit.scale > 0 ? fit.scale : 1;
+
+  return (
+    <div
+      className="absolute inset-0 pointer-events-none"
+      style={{
+        transformOrigin: "0 0",
+        transform: `matrix(${fit.scale}, 0, 0, ${fit.scale}, ${fit.ox}, ${fit.oy})`,
+      }}
+    >
+      <TextEditor textEdit={textEdit} scale={scale} onCommit={onCommit} />
+    </div>
+  );
+}
+
+function TextEditor({
+  textEdit,
+  scale,
+  onCommit,
+}: {
+  textEdit: {
+    id?: string;
+    text: string;
+    projectX: number;
+    projectY: number;
+    boxWidth?: number;
+    rotation?: number;
+  };
+  scale: number;
+  onCommit: (
+    result: {
+      text: string;
+      projectX: number;
+      projectY: number;
+      boxWidth?: number;
+    } | null,
+  ) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const tools = useTools();
+  const [width, setWidth] = useState(() => textEdit.boxWidth ?? 160);
+  const [height, setHeight] = useState(() => tools.textSize);
+  const [origin, setOrigin] = useState({
+    x: textEdit.projectX,
+    y: textEdit.projectY,
+  });
+  const resizingRef = useRef(false);
+  const resizeRef = useRef<{
+    edge: "left" | "right";
+    startX: number;
+    startW: number;
+    startOriginX: number;
+  } | null>(null);
+
+  useEffect(() => {
+    setOrigin({ x: textEdit.projectX, y: textEdit.projectY });
+    setWidth(textEdit.boxWidth ?? 160);
+    const el = ref.current;
+    if (!el) return;
+    el.innerText = textEdit.text;
+    el.focus();
+    const range = document.createRange();
+    const sel = window.getSelection();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+  }, [textEdit.id, textEdit.text, textEdit.projectX, textEdit.projectY, textEdit.boxWidth]);
+
+  // The edit rectangle is DOM-backed so it tracks wrapping immediately, the
+  // same way Figma's text bounding box moves while typing or resizing.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => setHeight(Math.max(tools.textSize, el.offsetHeight));
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [tools.textSize, width]);
+
+  useEffect(() => {
+    function onMove(e: PointerEvent) {
+      const r = resizeRef.current;
+      if (!r) return;
+      const s = scale > 0 ? scale : 1;
+      const dx = (e.clientX - r.startX) / s;
+      if (r.edge === "right") {
+        setWidth(Math.max(40, r.startW + dx));
+      } else {
+        const newW = Math.max(40, r.startW - dx);
+        setWidth(newW);
+        setOrigin((o) => ({ ...o, x: r.startOriginX + (r.startW - newW) }));
+      }
+    }
+    function onUp() {
+      if (!resizeRef.current) return;
+      resizeRef.current = null;
+      requestAnimationFrame(() => {
+        resizingRef.current = false;
+        ref.current?.focus();
+      });
+    }
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [scale]);
+
+  function startResize(edge: "left" | "right", e: ReactPointerEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    resizingRef.current = true;
+    resizeRef.current = {
+      edge,
+      startX: e.clientX,
+      startW: width,
+      startOriginX: origin.x,
+    };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+
+  function edgeAt(e: ReactPointerEvent | ReactMouseEvent): "left" | "right" | null {
+    const offsetX = e.nativeEvent.offsetX;
+    const edgePx = 16;
+    if (offsetX <= edgePx) return "left";
+    if (offsetX >= width - edgePx) return "right";
+    return null;
+  }
+
+  function autoFit() {
+    const text = ref.current?.innerText ?? "";
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.font = `${tools.textSize}px ${textFontStack(tools.fontFamily)}`;
+    const letterSpacing = tools.letterSpacing || 0;
+    let maxWidth = 0;
+    for (const line of text.split("\n")) {
+      const graphemes = Array.from(
+        new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(line),
+      ).length;
+      maxWidth = Math.max(
+        maxWidth,
+        ctx.measureText(line).width + Math.max(0, graphemes - 1) * letterSpacing,
+      );
+    }
+    setWidth(Math.max(40, Math.ceil(maxWidth) + 6));
+    ref.current?.focus();
+  }
+
+  function commitFromEditor() {
+    if (resizingRef.current) return;
+    const text = (ref.current?.innerText ?? "").trim();
+    if (!text) {
+      onCommit(null);
+      return;
+    }
+    onCommit({
+      text,
+      projectX: origin.x,
+      projectY: origin.y,
+      boxWidth: width,
+    });
+  }
+
+  const rot = textEdit.rotation ?? 0;
+  const edgeHit: CSSProperties = {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    width: 14,
+    cursor: "ew-resize",
+    zIndex: 70,
+    pointerEvents: "auto",
+    background:
+      "linear-gradient(to right, transparent, rgba(255,255,255,0.08), transparent)",
+  };
+
+  return (
+    <div
+      ref={wrapRef}
+      className="absolute pointer-events-auto"
+      style={{
+        left: origin.x,
+        top: origin.y,
+        width,
+        minWidth: 40,
+        minHeight: tools.textSize,
+        boxSizing: "border-box",
+        border: "1px solid #2b5cff",
+        transform: rot ? `rotate(${rot}rad)` : undefined,
+        transformOrigin: "center center",
+      }}
+    >
+      <div
+        ref={ref}
+        contentEditable
+        suppressContentEditableWarning
+        className="relative z-50 min-h-[1em] w-full bg-transparent p-0 leading-none caret-white outline-none"
+        style={{
+          fontFamily: textFontStack(tools.fontFamily),
+          fontSize: tools.textSize,
+          color: tools.color,
+          letterSpacing: `${tools.letterSpacing || 0}px`,
+          whiteSpace: "pre-wrap",
+          overflowWrap: "anywhere",
+          wordBreak: "break-word",
+          boxSizing: "border-box",
+          pointerEvents: "auto",
+        }}
+        onPointerMove={(e) => {
+          const edge = edgeAt(e);
+          e.currentTarget.style.cursor = edge ? "ew-resize" : "text";
+        }}
+        onPointerDown={(e) => {
+          const edge = edgeAt(e);
+          if (edge) startResize(edge, e);
+        }}
+        onDoubleClick={(e) => {
+          if (!edgeAt(e)) return;
+          e.preventDefault();
+          e.stopPropagation();
+          autoFit();
+        }}
+        onKeyDown={(e) => {
+          if ((e.key === "Enter" && !e.shiftKey) || e.key === "Escape") {
+            e.preventDefault();
+            e.currentTarget.blur();
+          }
+        }}
+        onBlur={() => {
+          requestAnimationFrame(() => commitFromEditor());
+        }}
+      />
+      {/* Figma-like live bounding-box corners follow width + wrapped height. */}
+      {[
+        { left: -4, top: -4 },
+        { right: -4, top: -4 },
+        { left: -4, bottom: -4 },
+        { right: -4, bottom: -4 },
+      ].map((position, index) => (
+        <span
+          key={index}
+          aria-hidden
+          className="pointer-events-none absolute size-2 border border-[#2b5cff] bg-white"
+          style={position}
+        />
+      ))}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute left-1/2 top-full z-[80] mt-2 -translate-x-1/2 whitespace-nowrap rounded bg-[#2b5cff] px-1.5 py-0.5 text-[10px] font-medium text-white"
+      >
+        {Math.round(width)} × {Math.round(height)}
+      </span>
+      <div
+        style={{ ...edgeHit, left: -7 }}
+        onMouseDown={(e) => e.preventDefault()}
+        onPointerDown={(e) => startResize("left", e)}
+        onDoubleClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          autoFit();
+        }}
+        aria-hidden
+      />
+      <div
+        style={{ ...edgeHit, right: -7 }}
+        onMouseDown={(e) => e.preventDefault()}
+        onPointerDown={(e) => startResize("right", e)}
+        onDoubleClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          autoFit();
+        }}
+        aria-hidden
+      />
     </div>
   );
 }

@@ -1,16 +1,27 @@
 import { useEffect, useRef, useState } from "react";
+import { useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { useProject } from "@/state/project";
 import { PAPER } from "@/components/chrome/paper-tokens";
+import { Tooltip } from "@/components/motion/tooltip";
 import {
   TimelineRowShell,
   CELL_H,
-  LABEL_COL_W,
+  LABEL_COL_W_ANIMATRON,
   LAYER_ROW_GAP,
   LAYER_ROW_PITCH,
 } from "@/components/timeline/TimelineLayerRow";
+import {
+  animateClipPayload,
+  isStaticLine,
+  layerIsStaticLine,
+  lineStrokesOf,
+  rememberClipStart,
+  staticClipPayload,
+} from "@/components/timeline/lineTiming";
 
-const PX_PER_MS = 0.08;
+/** Default px/ms at zoom=1 — TimingBar zoom multiplies this. */
+export const BASE_PX_PER_MS = 0.08;
 const MIN_TRACK_MS = 4000;
 
 /**
@@ -19,16 +30,22 @@ const MIN_TRACK_MS = 4000;
  * Rows use the **same** `TimelineRowShell` as the stop-motion exposure sheet, so
  * both workflows share one row design (card, grip, eye, name pill, hover tint,
  * `⋮`→trash, pointer-drag reorder). Only the track lane differs: frame cells
- * there, clip bars here.
+ * there, clip bars here. An Animate/Static toggle sits after the eye.
+ *
+ * Scroll + zoom live in the parent `Timeline` (shared `TimelineTimingBar` +
+ * nano ScrollArea), matching stop-motion — this component only paints clips.
  */
 
-/** where the track lane starts: card padding (5) + label lane + the 10px gap */
-const TRACK_LEFT = 5 + LABEL_COL_W + 10;
-
-export function ClipTimeline() {
+export function ClipTimeline({
+  pxPerMs,
+  showLabels = true,
+}: {
+  pxPerMs: number;
+  showLabels?: boolean;
+}) {
   const project = useProject((s) => s.project);
-  const frameIndex = useProject((s) => s.frameIndex);
   const layerIndex = useProject((s) => s.layerIndex);
+  const clipEasing = useProject((s) => s.clipEasing);
   const setFrameIndex = useProject((s) => s.setFrameIndex);
   const setLayerIndex = useProject((s) => s.setLayerIndex);
   const toggleLayerVisible = useProject((s) => s.toggleLayerVisible);
@@ -44,8 +61,10 @@ export function ClipTimeline() {
     MIN_TRACK_MS,
     (project.frameCount / Math.max(project.fps, 1)) * 1000,
   );
-  const playheadMs = (frameIndex / Math.max(project.fps, 1)) * 1000;
-  const trackW = totalMs * PX_PER_MS;
+  const trackW = totalMs * pxPerMs;
+  /** row card = padding + optional label lane + gap + full track */
+  const rowW =
+    10 + (showLabels ? LABEL_COL_W_ANIMATRON + 10 : 0) + trackW;
 
   const dragRef = useRef<{
     strokeId: string;
@@ -104,8 +123,8 @@ export function ClipTimeline() {
 
   function msFromClientX(clientX: number, trackEl: HTMLElement) {
     const rect = trackEl.getBoundingClientRect();
-    const x = clientX - rect.left + trackEl.scrollLeft;
-    return Math.max(0, x / PX_PER_MS);
+    const x = clientX - rect.left;
+    return Math.max(0, x / pxPerMs);
   }
 
   function onTrackPointerDown(e: React.PointerEvent<HTMLDivElement>) {
@@ -138,7 +157,7 @@ export function ClipTimeline() {
   function onClipPointerMove(e: React.PointerEvent) {
     const d = dragRef.current;
     if (!d) return;
-    const deltaMs = (e.clientX - d.originX) / PX_PER_MS;
+    const deltaMs = (e.clientX - d.originX) / pxPerMs;
     let startMs = d.startMs;
     let durationMs = d.durationMs;
     if (d.mode === "move") {
@@ -164,13 +183,31 @@ export function ClipTimeline() {
     dragRef.current = null;
   }
 
+  function toggleLayerStatic(layerId: string) {
+    const layer = project.layers.find((l) => l.id === layerId);
+    if (!layer) return;
+    const strokes = lineStrokesOf(layer);
+    if (strokes.length === 0) return;
+    const makeStatic = !layerIsStaticLine(layer);
+    for (const stroke of strokes) {
+      if (makeStatic) {
+        rememberClipStart(stroke);
+        updateStrokeClip(stroke.id, staticClipPayload(stroke.clip?.easing ?? clipEasing));
+      } else {
+        updateStrokeClip(stroke.id, animateClipPayload(stroke, stroke.clip?.easing ?? clipEasing));
+      }
+    }
+  }
+
   return (
-    <div className="relative max-h-48 min-h-0 w-full min-w-0 overflow-y-auto overscroll-contain [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <div className="relative" style={{ width: rowW, minWidth: "100%" }}>
       <div className="relative flex flex-col" style={{ gap: LAYER_ROW_GAP }}>
         {project.layers.map((layer, li) => {
           const cel = layer.frames.find((f) => f) ?? null;
           const stroke = cel?.strokes[0];
           const clip = stroke?.clip;
+          const staticLine = stroke ? isStaticLine(stroke) : false;
+          const hasLine = !!stroke;
           return (
             <TimelineRowShell
               key={layer.id}
@@ -181,6 +218,17 @@ export function ClipTimeline() {
               onMenuOpenChange={(open) => setOpenMenuIndex(open ? li : null)}
               onSelectLayer={() => setLayerIndex(li)}
               onToggleVisible={() => toggleLayerVisible(li)}
+              showLabels={showLabels}
+              labelColW={LABEL_COL_W_ANIMATRON}
+              className="w-full max-w-none"
+              afterEye={
+                hasLine ? (
+                  <LineAnimateToggle
+                    staticLine={staticLine}
+                    onToggle={() => toggleLayerStatic(layer.id)}
+                  />
+                ) : undefined
+              }
               dragging={layerDrag?.from === li}
               dragOffset={rowDragOffset(li)}
               animateOffset={layerDrag?.from !== li}
@@ -192,12 +240,36 @@ export function ClipTimeline() {
               onDelete={() => deleteLayer(li)}
             >
               <div
-                className="relative min-w-0 flex-1 overflow-hidden"
-                style={{ height: CELL_H }}
+                className="relative shrink-0"
+                style={{ height: CELL_H, width: trackW, minWidth: trackW }}
                 onPointerDown={onTrackPointerDown}
               >
-                <div className="relative h-full" style={{ width: trackW }}>
-                  {clip && stroke && (
+                <div className="relative h-full w-full">
+                  {stroke && staticLine && (
+                    <div
+                      data-clip
+                      className={cn(
+                        "absolute top-0 overflow-clip rounded-[8px]",
+                        li === layerIndex && "ring-1 ring-white/15",
+                      )}
+                      style={{
+                        left: 0,
+                        width: trackW,
+                        height: CELL_H,
+                        backgroundColor: PAPER.frameActive,
+                        border: `0.4px solid ${PAPER.frameActiveBorder}`,
+                      }}
+                      aria-label={`${layer.name} — static`}
+                    >
+                      <div
+                        className="truncate px-1.5 text-[10px] text-white/90"
+                        style={{ fontFamily: PAPER.fontMono, lineHeight: `${CELL_H}px` }}
+                      >
+                        {layer.name} · static
+                      </div>
+                    </div>
+                  )}
+                  {clip && stroke && !staticLine && (
                     <div
                       data-clip
                       className={cn(
@@ -205,8 +277,8 @@ export function ClipTimeline() {
                         li === layerIndex && "ring-1 ring-white/20",
                       )}
                       style={{
-                        left: clip.startMs * PX_PER_MS,
-                        width: Math.max(12, clip.durationMs * PX_PER_MS),
+                        left: clip.startMs * pxPerMs,
+                        width: Math.max(12, clip.durationMs * pxPerMs),
                         height: CELL_H,
                         backgroundColor: PAPER.frameActive,
                         border: `0.4px solid ${PAPER.frameActiveBorder}`,
@@ -250,43 +322,59 @@ export function ClipTimeline() {
             </TimelineRowShell>
           );
         })}
-
-        {/* playhead spans the whole stack, so it lives outside the rows */}
-        <ClipPlayhead
-          left={TRACK_LEFT + playheadMs * PX_PER_MS}
-          label={`${(playheadMs / 1000).toFixed(1)}s`}
-        />
       </div>
     </div>
   );
 }
 
 /**
- * Clip playhead — Paper 63D-0: a 14px column holding a time badge over a 1px
- * line. Paper pins the line at 161px; here it flexes to the stack height so it
- * still reaches the last row whatever the layer count.
+ * 14px Animate / Static toggle — same hit + opacity conventions as the eye.
+ * Static = held bar; Animate = draw-on clock wedge.
  */
-function ClipPlayhead({ left, label }: { left: number; label: string }) {
+function LineAnimateToggle({
+  staticLine,
+  onToggle,
+}: {
+  staticLine: boolean;
+  onToggle: () => void;
+}) {
+  const reduce = useReducedMotion() ?? false;
   return (
-    <div
-      className="pointer-events-none absolute top-0 z-20 flex w-[14px] flex-col items-center px-px"
-      style={{ left: left - 7, height: "100%" }}
-    >
-      <div
-        className="flex shrink-0 flex-col items-start overflow-clip rounded-full px-[2px] py-px"
-        style={{ backgroundColor: PAPER.clipPlayheadBadge }}
+    <Tooltip content={staticLine ? "Static — on for the whole composition" : "Animate — draw on over time"}>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggle();
+        }}
+        aria-label={staticLine ? "Make line animate" : "Make line static"}
+        aria-pressed={staticLine}
+        className={cn(
+          "relative grid h-[14px] w-[14px] shrink-0 cursor-pointer place-items-center transition-[opacity,scale] duration-150 ease-out before:absolute before:-inset-[7px] before:content-['']",
+          staticLine ? "opacity-40 hover:opacity-70" : "opacity-70 hover:opacity-100",
+          !reduce && "active:scale-90",
+        )}
       >
-        <span
-          className="w-fit shrink-0 content-center text-[6px] leading-[5px] text-white"
-          style={{ fontFamily: PAPER.fontMono, height: 6 }}
-        >
-          {label}
-        </span>
-      </div>
-      <div
-        className="w-px flex-1 shrink-0"
-        style={{ backgroundColor: PAPER.clipPlayheadLine }}
-      />
-    </div>
+        {staticLine ? <StaticLineGlyph /> : <AnimateLineGlyph />}
+      </button>
+    </Tooltip>
+  );
+}
+
+function AnimateLineGlyph() {
+  return (
+    <svg width={14} height={14} viewBox="0 0 14 14" aria-hidden>
+      <circle cx="7" cy="7" r="5" fill="none" stroke="#DADADA" strokeWidth="1.2" />
+      <path d="M7 7V3.5" stroke="#DADADA" strokeWidth="1.2" strokeLinecap="round" />
+      <path d="M7 7L9.8 8.6" stroke="#DADADA" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function StaticLineGlyph() {
+  return (
+    <svg width={14} height={14} viewBox="0 0 14 14" aria-hidden>
+      <rect x="2" y="5.5" width="10" height="3" rx="1.5" fill="#DADADA" fillOpacity="0.85" />
+    </svg>
   );
 }

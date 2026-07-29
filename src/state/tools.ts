@@ -29,14 +29,27 @@ export function isShapeTool(tool: ToolId): tool is ShapeToolId {
   );
 }
 
+/** Drawable shape while pack is open (`"shapes"`) or a concrete shape tool is active. */
+export function activeShapeTool(
+  tool: ToolId,
+  last: ShapeToolId,
+): ShapeToolId | null {
+  if (isShapeTool(tool)) return tool;
+  if (tool === "shapes") return last;
+  return null;
+}
+
 interface ToolsState {
   tool: ToolId;
+  /** Last concrete shape from the pack — used when tool is the generic `"shapes"`. */
+  lastShapeTool: ShapeToolId;
   color: string;
   /** closed-shape fill (stroke uses `color`) */
   fillColor: string;
   size: number;
-  /** text tool typeface */
+  textSize: number;
   fontFamily: string;
+  letterSpacing: number;
   /** drawing starts a keyframe automatically; OFF routes strokes to a static layer */
   autoKey: boolean;
   /** new strokes get the boil/jitter flag by default */
@@ -49,7 +62,9 @@ interface ToolsState {
   setColor: (color: string) => void;
   setFillColor: (color: string) => void;
   setSize: (size: number) => void;
+  setTextSize: (size: number) => void;
   setFontFamily: (fontFamily: string) => void;
+  setLetterSpacing: (spacing: number) => void;
   toggleAutoKey: () => void;
   toggleJitterByDefault: () => void;
   toggleGrainByDefault: () => void;
@@ -58,26 +73,34 @@ interface ToolsState {
 
 export const useTools = create<ToolsState>((set) => ({
   tool: "ink",
+  lastShapeTool: "rect",
   color: "#e7e7ea",
   fillColor: "#40608E",
-  size: 6,
-  fontFamily: "Geist",
+  size: 8,
+  textSize: 64,
+  fontFamily: "Inter",
+  letterSpacing: 0,
   autoKey: true,
   jitterByDefault: true,
   grainByDefault: false,
   shapesOpen: false,
   setTool: (tool) =>
-    set({
+    set((s) => ({
       tool,
-      shapesOpen: tool === "shapes" || isShapeTool(tool) ? true : false,
-    }),
+      lastShapeTool: isShapeTool(tool) ? tool : s.lastShapeTool,
+      // Generic chip opens the pack; picking a concrete shape keeps it open if
+      // already open (so the highlight is visible). Other tools close it.
+      shapesOpen: tool === "shapes" || (isShapeTool(tool) && s.shapesOpen),
+    })),
   setColor: (color) => set({ color }),
   setFillColor: (fillColor) => set({ fillColor }),
   setSize: (size) => set({ size }),
+  setTextSize: (textSize) => set({ textSize }),
   setFontFamily: (fontFamily) => {
     ensureFontLoaded(fontFamily);
     set({ fontFamily });
   },
+  setLetterSpacing: (letterSpacing) => set({ letterSpacing }),
   toggleAutoKey: () => set((s) => ({ autoKey: !s.autoKey })),
   toggleJitterByDefault: () => set((s) => ({ jitterByDefault: !s.jitterByDefault })),
   toggleGrainByDefault: () => set((s) => ({ grainByDefault: !s.grainByDefault })),

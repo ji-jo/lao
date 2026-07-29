@@ -16,7 +16,9 @@ import { resolveCelIndex, type Layer } from "@/model/types";
  *
  * Each layer is its own card (28px tall: 4px padding + a 20px band), cards
  * stack 4px apart. The label column is a fixed lane so grips, eyes and pills
- * line up across rows; only the cells scroll, at the shared `scrollLeft` the
+ * Shared layer-row shell — Paper "layer" (2W5-0 stop-motion / 6JD-0 Animatron).
+ * Label lane is sticky so it stays pinned while the track scrolls inside the
+ * parent nano ScrollArea.
  * Timeline owns.
  *
  * Motion notes — everything animates `transform` / `opacity` / colour, never a
@@ -38,13 +40,17 @@ export const CELL_H = 24;
 export const CELL_GAP = 5;
 /** grip 8 + 7 + eye 14 + 7 + pill 88 */
 export const LABEL_COL_W = 125;
+/**
+ * Animatron adds a 14px Animate/Static toggle + 7px gap after the eye
+ * (grip 8 + 7 + eye 14 + 7 + toggle 14 + 7 + pill 88 = 146).
+ */
+export const LABEL_COL_W_ANIMATRON = 146;
 /** card padding (5+5) + the 10px gap after the label lane */
 export const CELLS_INSET = LABEL_COL_W + 10 + 10;
+export const CELLS_INSET_ANIMATRON = LABEL_COL_W_ANIMATRON + 10 + 10;
 /** cells inset once the label lane is hidden (Paper 68F-0 "collapse layers") — just the card padding */
 export const CELLS_INSET_COLLAPSED = 10;
 
-/** row tint + pill cross-fade */
-const TINT_MS = 140;
 /** rows making room, and the dropped row settling into its slot */
 export const LAYER_DROP_MS = 190;
 /** frame-cell state change (playhead, hover wash) */
@@ -67,12 +73,15 @@ export function TimelineRowShell({
   dragOffset,
   animateOffset,
   showLabels = true,
+  labelColW = LABEL_COL_W,
+  afterEye,
   onMenuOpenChange,
   onSelectLayer,
   onToggleVisible,
   onGripPointerDown,
   onDelete,
   children,
+  className,
 }: {
   layer: Layer;
   active: boolean;
@@ -84,6 +93,10 @@ export function TimelineRowShell({
   animateOffset: boolean;
   /** false hides the grip/eye/name-pill lane — "collapse layers" (Paper 68F-0) */
   showLabels?: boolean;
+  /** label lane width — Animatron uses `LABEL_COL_W_ANIMATRON` for the toggle */
+  labelColW?: number;
+  /** optional control after the eye (Animatron Animate/Static toggle) */
+  afterEye?: ReactNode;
   onMenuOpenChange: (open: boolean) => void;
   onSelectLayer: () => void;
   onToggleVisible: () => void;
@@ -91,6 +104,7 @@ export function TimelineRowShell({
   onDelete: () => void;
   /** track lane content — frame cells or clip bars */
   children: ReactNode;
+  className?: string;
 }) {
   const [hovered, setHovered] = useState(false);
   const reduce = useReducedMotion() ?? false;
@@ -107,7 +121,6 @@ export function TimelineRowShell({
     : { ...SPRING_SWAP, opacity: { duration: 0.11 } };
 
   const rowTransition = [
-    `background-color ${TINT_MS}ms ${EASE_OUT_CSS}`,
     `box-shadow ${LAYER_DROP_MS}ms ${EASE_OUT_CSS}`,
     // only the rows making room (and the settling drop) ease their offset —
     // the row under the pointer must not lag behind the cursor
@@ -119,8 +132,9 @@ export function TimelineRowShell({
   return (
     <div
       className={cn(
-        "flex shrink-0 cursor-pointer items-start gap-[10px] overflow-clip rounded-[14px] p-[5px]",
+        "flex w-full min-w-max shrink-0 cursor-pointer items-start gap-[10px] rounded-[14px] p-[5px]",
         dragging && "relative z-10 cursor-grabbing",
+        className,
       )}
       style={{
         height: LAYER_ROW_H,
@@ -137,11 +151,15 @@ export function TimelineRowShell({
       onClick={onSelectLayer}
       aria-current={active ? "true" : undefined}
     >
-      {/* label lane — fixed width so every row aligns; hidden when layers are collapsed (Paper 68F-0) */}
+      {/* label lane — sticky so it stays pinned while the track scrolls */}
       {showLabels && (
       <div
-        className="flex shrink-0 items-center gap-[7px]"
-        style={{ width: LABEL_COL_W, height: CELL_H }}
+        className="sticky left-0 z-[2] flex shrink-0 items-center gap-[7px]"
+        style={{
+          width: labelColW,
+          height: CELL_H,
+          backgroundColor: lit ? PAPER.rowActiveBg : PAPER.trackBg,
+        }}
       >
         <button
           type="button"
@@ -174,6 +192,8 @@ export function TimelineRowShell({
           {layer.visible ? <PaperEyeGlyph size={14} /> : <EyeOff2 size={14} weight="Filled" />}
         </button>
 
+        {afterEye}
+
         {/* name pill — 88px; `⋮` becomes delete once the row is lit (Paper 61L-0) */}
         <div
           className="flex shrink-0 items-center justify-between gap-[8px] overflow-clip rounded-[8px] px-[5px] py-1"
@@ -181,7 +201,6 @@ export function TimelineRowShell({
             width: 88,
             backgroundColor: lit ? PAPER.pillActiveBg : PAPER.layerPill,
             border: `0.4px solid ${lit ? PAPER.pillActiveBorder : PAPER.borderHairline}`,
-            transition: `background-color ${TINT_MS}ms ${EASE_OUT_CSS}, border-color ${TINT_MS}ms ${EASE_OUT_CSS}`,
           }}
         >
           <span
@@ -297,14 +316,12 @@ export function TimelineLayerRow({
   frameCount,
   frameIndex,
   cellWidth,
-  scrollLeft,
   onSelectCell,
   ...shell
 }: Omit<Parameters<typeof TimelineRowShell>[0], "children"> & {
   frameCount: number;
   frameIndex: number;
   cellWidth: number;
-  scrollLeft: number;
   onSelectCell: (frame: number) => void;
 }) {
   const { layer } = shell;
@@ -312,12 +329,9 @@ export function TimelineLayerRow({
 
   return (
     <TimelineRowShell {...shell}>
-      {/* frame cells — shared horizontal offset, native bar suppressed */}
-      <div className="min-w-0 flex-1 overflow-hidden" style={{ height: CELL_H }}>
-        <div
-          className="flex w-max"
-          style={{ gap: CELL_GAP, transform: `translateX(${-scrollLeft}px)` }}
-        >
+      {/* frame cells — grow with the row; nano ScrollArea owns the X scroll */}
+      <div className="min-w-0 flex-1" style={{ height: CELL_H }}>
+        <div className="flex w-max" style={{ gap: CELL_GAP }}>
           {Array.from({ length: frameCount }, (_, fi) => {
             const isKey = layer.isStatic ? fi === 0 : !!layer.frames[fi];
             const isHold = !isKey && !layer.isStatic && resolveCelIndex(layer, fi) !== null;
@@ -335,9 +349,6 @@ export function TimelineLayerRow({
                 className={cn(
                   "flex shrink-0 cursor-pointer justify-center rounded-[8px] px-[2px] py-[7px] hover:brightness-150",
                   isHold ? "items-center" : "items-start",
-                  // a cell is exactly CELL_H tall inside an overflow-hidden lane,
-                  // so it may only ever scale *down* — a hover lift would clip.
-                  // Never width/height: that is layout thrash on 80+ × 7 cells.
                   !reduce && "active:scale-90",
                 )}
                 style={{

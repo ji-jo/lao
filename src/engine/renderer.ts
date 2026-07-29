@@ -1,6 +1,9 @@
 import { getStroke } from "perfect-freehand";
-import type { Stroke, StrokePoint } from "@/model/types";
+import type { Stroke, StrokePoint, TextElement } from "@/model/types";
+import { textFontStack } from "@/lib/google-fonts";
 import { grainTile } from "@/engine/grain";
+import { layoutText } from "@/engine/textLayout";
+import { measureTextBox } from "@/engine/textGeometry";
 
 export type RenderQuality = "draft" | "full";
 
@@ -12,6 +15,8 @@ export interface RenderOptions {
   displacedBezier?: Map<string, import("@/model/types").BezierNode[]>;
   /** force every stroke to this color (onion-skin ghosts) */
   colorOverride?: string;
+  /** optional id to skip rendering */
+  skipId?: string;
 }
 
 /** perfect-freehand options per brush — thinning drives the pressure taper */
@@ -100,9 +105,31 @@ export function renderStroke(
       path.bezierCurveTo(p1.x, p1.y, p2.x, p2.y, p3.x, p3.y);
       path.closePath();
     }
+    if (stroke.closed && stroke.fillColor && stroke.brush !== "eraser") {
+      ctx.fillStyle = stroke.fillColor;
+      ctx.fill(path);
+    }
     ctx.stroke(path);
     ctx.restore();
     return;
+  }
+
+  // Closed shape fill under the ink ribbon (rect / diamond / circle pack).
+  if (
+    stroke.closed &&
+    stroke.fillColor &&
+    stroke.brush !== "eraser" &&
+    points.length > 2
+  ) {
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) {
+      ctx.lineTo(points[i].x, points[i].y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = stroke.fillColor;
+    ctx.globalAlpha = 1;
+    ctx.fill();
   }
 
   if (stroke.brush === "eraser") {
@@ -134,4 +161,50 @@ export function renderStrokes(
   opts: RenderOptions,
 ) {
   for (const stroke of strokes) renderStroke(ctx, stroke, opts);
+}
+
+export function renderTexts(
+  ctx: CanvasRenderingContext2D,
+  texts: TextElement[],
+  opts: RenderOptions,
+) {
+  for (const text of texts) {
+    if (opts.skipId && text.id === opts.skipId) continue;
+    ctx.save();
+    ctx.font = `${text.size}px ${textFontStack(text.fontFamily)}`;
+    ctx.fillStyle = opts.colorOverride ?? text.color;
+    ctx.textBaseline = "top";
+
+    const { w, h, lines } = measureTextBox(ctx, text);
+    const rot = text.rotation ?? 0;
+    if (rot) {
+      const cx = text.x + w / 2;
+      const cy = text.y + h / 2;
+      ctx.translate(cx, cy);
+      ctx.rotate(rot);
+      ctx.translate(-w / 2, -h / 2);
+    } else {
+      ctx.translate(text.x, text.y);
+    }
+
+    const letterSpacing = text.letterSpacing ?? 0;
+    let y = 0;
+    for (const line of lines) {
+      if (letterSpacing) {
+        const layout = layoutText(
+          line,
+          textFontStack(text.fontFamily),
+          text.size,
+          letterSpacing,
+        );
+        for (const glyph of layout.glyphs) {
+          ctx.fillText(glyph.char, glyph.x, y);
+        }
+      } else {
+        ctx.fillText(line, 0, y);
+      }
+      y += text.size;
+    }
+    ctx.restore();
+  }
 }
