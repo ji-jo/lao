@@ -15,7 +15,7 @@
     "@astrojs/react": "^4.2.0",
     "@fontsource-variable/geist": "^5.1.1",
     "@fontsource/redaction-35": "^5.1.1",
-    "@paper-design/shaders-react": "^1.0.0",
+    "@paper-design/shaders-react": "^0.0.78",
     "@tailwindcss/vite": "^4.0.0",
     "astro": "^5.0.0",
     "motion": "^12.4.3",
