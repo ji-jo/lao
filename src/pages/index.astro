@@ -1,0 +1,349 @@
+---
+import Base from '../layouts/Base.astro';
+import HeroShader from '../components/backgrounds/HeroShader';
+import AsciiBackground from '../components/backgrounds/AsciiBackground';
+---
+
+<Base title="LAO Waitlist">
+  <div class="relative bg-ink-900 font-body text-text overflow-x-hidden">
+
+    <nav id="main-nav" class="fixed top-[20px] left-1/2 -translate-x-1/2 z-50 flex items-center justify-between gap-6 w-[min(1160px,calc(100vw-40px))] py-[9px] pr-[10px] pl-[24px] rounded-full border border-rule bg-ink-800/78 backdrop-blur-md transition-all duration-[260ms] ease-[cubic-bezier(0.4,0,0.2,1)]">
+      <a href="#story" class="font-display text-[20px] text-text hover:text-text-hi transition-colors">Story</a>
+      <img src="/assets/wordmark.svg" alt="LAO" class="w-[44px] h-[29px] invert brightness-150" />
+      <a href="#waitlist" class="py-[10px] px-[22px] rounded-full bg-base text-text-hi font-display text-[19px] hover:bg-[#547BB0] transition-colors focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-3">Join Waitlist</a>
+    </nav>
+
+    <section class="relative z-10 bg-ink-900 pt-[150px] pb-[130px]">
+      <HeroShader client:load />
+      <div class="absolute top-0 left-0 right-0 h-[190px] bg-gradient-to-b from-ink-900 from-0% via-ink-900 via-60% to-transparent z-10"></div>
+      <div class="absolute left-0 right-0 bottom-0 h-[260px] bg-gradient-to-t from-ink-900 from-12% to-transparent z-10"></div>
+
+      <div class="relative z-20 max-w-[1200px] mx-auto px-[clamp(20px,5vw,120px)] flex flex-col items-center">
+        <p class="m-0 mb-[26px] flex items-center gap-[7px] font-mono text-[12px] tracking-[0.08em] uppercase text-text-mid">
+          Early access · Building in public
+          <span class="inline-block w-[7px] h-[12px] bg-accent animate-[lao-blink_1s_steps(1)_infinite]"></span>
+        </p>
+        <h1 class="m-0 max-w-[26ch] text-center font-display font-normal text-[clamp(34px,3.7vw,52px)] leading-[1.06] tracking-[-0.015em] text-text-hi text-balance">
+          Animate the thing you're trying to explain.
+        </h1>
+
+        <div id="hero-window" class="w-full mt-[56px] p-[12px] rounded-[24px] bg-ink-700 border border-rule shadow-[0_50px_130px_-50px_rgba(64,96,142,0.55)]">
+          <img src="/assets/hero-image.png" alt="LAO canvas with a hand-drawn flower mid-animation" class="block w-full h-auto rounded-[8px]" />
+        </div>
+      </div>
+    </section>
+
+    <section id="story" class="relative z-10 bg-ink-900 pt-[150px] pb-[40px]">
+      <div class="max-w-[1200px] mx-auto px-[clamp(20px,5vw,120px)] flex flex-col md:grid md:grid-cols-12 gap-[24px] md:gap-[24px]">
+        <div class="md:col-span-6 w-full">
+          <p class="reveal-text m-0 font-display text-[clamp(28px,2.9vw,40px)] leading-[1.12] tracking-[-0.01em] text-text-low transition-colors duration-[420ms] ease-[cubic-bezier(0.22,1,0.36,1)]">
+            I spent more time learning animation tools than animating.
+          </p>
+        </div>
+        <div class="md:col-span-5 md:col-start-8 mt-[56px] md:mt-[96px] w-full">
+          <p class="reveal-text m-0 font-display text-[clamp(28px,2.9vw,40px)] leading-[1.12] tracking-[-0.01em] text-text-low transition-colors duration-[420ms] ease-[cubic-bezier(0.22,1,0.36,1)]">
+            LAO is the tool I wanted.
+          </p>
+          <p class="mt-[26px] mb-0 text-[18px] leading-[1.6] max-w-[60ch] text-text">
+            Two modes — continuous line and stop motion. A canvas, a pen, and a timeline that's already running. Almost nothing to learn.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="relative z-10 bg-ink-900 pt-[80px] pb-[170px]">
+      <div class="max-w-[1200px] mx-auto mb-[46px] px-[clamp(20px,5vw,120px)]">
+        <p class="m-0 max-w-[26ch] font-mono text-[11px] leading-[1.5] tracking-[0.04em] text-text-low">
+          // three steps, and the third<br />// one happens on its own
+        </p>
+      </div>
+      <div class="max-w-[1200px] mx-auto px-[clamp(20px,5vw,120px)] flex flex-col md:grid md:grid-cols-3 gap-[56px] md:gap-[40px]">
+        <div class="mt-0">
+          <img src="/assets/case.svg" alt="Hand-drawn case" class="reveal-wipe block w-full max-w-[223px] mx-auto md:mx-0 h-auto invert transition-all duration-[1200ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:-translate-y-2 hover:translate-x-1 hover:-rotate-[1.5deg]" style="clip-path: inset(0 100% 0 0);" />
+          <p class="mt-[22px] mb-0 font-display text-[26px] text-text-hi text-center md:text-left">Open it</p>
+        </div>
+        <div class="md:mt-[143px]">
+          <img src="/assets/pen-hand.svg" alt="Hand-drawn pen on paper" class="reveal-wipe block w-full max-w-[223px] mx-auto md:mx-0 h-auto invert transition-all duration-[1200ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:-translate-y-2 hover:translate-x-1 hover:-rotate-[1.5deg]" style="clip-path: inset(0 100% 0 0);" />
+          <p class="mt-[22px] mb-0 font-display text-[26px] text-text-hi text-center md:text-left">Draw it</p>
+        </div>
+        <div class="md:mt-[266px]">
+          <img src="/assets/runner.svg" alt="Hand-drawn running figure with motion dashes" class="reveal-wipe block w-full max-w-[223px] mx-auto md:mx-0 h-auto invert transition-all duration-[1200ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:-translate-y-2 hover:translate-x-1 hover:-rotate-[1.5deg]" style="clip-path: inset(0 100% 0 0);" />
+          <p class="mt-[22px] mb-0 font-display text-[26px] text-text-hi text-center md:text-left">Already moving</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="relative z-10 bg-ink-900 px-[20px] pb-[150px] text-center">
+      <h2 class="reveal-text m-0 font-display font-normal text-[clamp(28px,2.8vw,36px)] text-text-low transition-colors duration-[420ms] ease-[cubic-bezier(0.22,1,0.36,1)]">
+        Built for local first
+      </h2>
+    </section>
+
+    <section class="relative z-10 bg-ink-900 pt-[110px] pb-[140px] overflow-hidden">
+      <div class="absolute inset-0 pointer-events-none" style="background: repeating-linear-gradient(to bottom, rgba(232,236,244,0.04) 0px, rgba(232,236,244,0.04) 1px, transparent 1px, transparent 4px);"></div>
+      <div class="absolute inset-0 pointer-events-none" style="background: radial-gradient(120% 90% at 50% 50%, rgba(11,15,22,0) 45%, rgba(11,15,22,0.85) 100%);"></div>
+      
+      <div class="relative max-w-[1200px] mx-auto px-[clamp(20px,5vw,120px)] flex flex-col md:grid md:grid-cols-[1fr_1px_1fr] gap-[56px] md:gap-0">
+        <div class="md:pr-[56px] w-full">
+          <p class="m-0 mb-[14px] font-mono text-[12px] tracking-[0.08em] uppercase text-accent">Mode 01</p>
+          <h3 class="m-0 mb-[16px] font-display font-normal text-[clamp(26px,2.6vw,34px)] text-text-hi">Continuous line</h3>
+          <p class="m-0 mb-[26px] text-[17px] leading-[1.6] max-w-[46ch] text-text">
+            One stroke, moving. Draw and the line keeps its momentum — no keyframes, no rigging.
+          </p>
+          <div class="relative aspect-4/3 border border-rule rounded-[6px] bg-ink-800 flex items-center justify-center">
+            <!-- TODO: replace with actual SVG/Video component -->
+            <span class="absolute bottom-[12px] left-[14px] font-mono text-[11px] tracking-[0.06em] uppercase text-text-low">TODO: continuous-line loop</span>
+          </div>
+        </div>
+        
+        <div class="hidden md:block bg-rule"></div>
+        
+        <div class="md:pl-[56px] w-full">
+          <p class="m-0 mb-[14px] font-mono text-[12px] tracking-[0.08em] uppercase text-signal">Mode 02</p>
+          <h3 class="m-0 mb-[16px] font-display font-normal text-[clamp(26px,2.6vw,34px)] text-text-hi">Stop motion</h3>
+          <p class="m-0 mb-[26px] text-[17px] leading-[1.6] max-w-[46ch] text-text">
+            Frame by frame, onion-skinned. The old way, without the setup.
+          </p>
+          <div class="relative aspect-4/3 border border-rule rounded-[6px] bg-ink-800 flex items-center justify-center">
+            <!-- TODO: replace with actual SVG/Video component -->
+            <span class="absolute bottom-[12px] left-[14px] font-mono text-[11px] tracking-[0.06em] uppercase text-text-low">TODO: stop-motion loop</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="relative z-10 bg-ink-900 pt-[150px] pb-[160px] overflow-hidden">
+      <AsciiBackground client:visible />
+      <div class="relative max-w-[1200px] mx-auto px-[clamp(20px,5vw,120px)]">
+        <h2 class="m-0 mb-[90px] font-display font-normal text-[clamp(28px,2.8vw,36px)] text-text-hi">
+          It's a file. You keep it.
+        </h2>
+
+        <div class="grid grid-cols-[64px_1fr] md:grid-cols-[120px_1fr] gap-[20px] md:gap-[40px] items-start py-[34px] border-t border-rule ml-0">
+          <img src="/assets/numeral-01.svg" alt="01" class="reveal-wipe w-[56px] h-auto invert transition-all duration-[1200ms] ease-[cubic-bezier(0.22,1,0.36,1)]" style="clip-path: inset(0 100% 0 0);" />
+          <div>
+            <h3 class="m-0 mb-[10px] font-display font-normal text-[30px] text-text-hi">Work on it</h3>
+            <p class="m-0 text-[17px] leading-[1.6] max-w-[56ch] text-text">
+              Open the canvas and draw. <span class="bg-rule text-text-hi px-[4px] py-[1px]">It's already moving.</span>
+            </p>
+          </div>
+        </div>
+        <div class="grid grid-cols-[64px_1fr] md:grid-cols-[120px_1fr] gap-[20px] md:gap-[40px] items-start py-[34px] border-t border-rule md:ml-[9%]">
+          <img src="/assets/numeral-02.svg" alt="02" class="reveal-wipe w-[62px] h-auto invert transition-all duration-[1200ms] ease-[cubic-bezier(0.22,1,0.36,1)]" style="clip-path: inset(0 100% 0 0);" />
+          <div>
+            <h3 class="m-0 mb-[10px] font-display font-normal text-[30px] text-text-hi">Save it</h3>
+            <p class="m-0 text-[17px] leading-[1.6] max-w-[56ch] text-text">
+              One file. <span class="font-mono text-[15px] text-text-hi bg-rule px-[5px] py-[1px]">.lao</span>. On your machine, in your folder.
+            </p>
+          </div>
+        </div>
+        <div class="grid grid-cols-[64px_1fr] md:grid-cols-[120px_1fr] gap-[20px] md:gap-[40px] items-start py-[34px] border-t border-rule md:ml-[16%]">
+          <img src="/assets/numeral-03.svg" alt="03" class="reveal-wipe w-[62px] h-auto invert transition-all duration-[1200ms] ease-[cubic-bezier(0.22,1,0.36,1)]" style="clip-path: inset(0 100% 0 0);" />
+          <div>
+            <h3 class="m-0 mb-[10px] font-display font-normal text-[30px] text-text-hi">Open it</h3>
+            <p class="m-0 text-[17px] leading-[1.6] max-w-[56ch] text-text">
+              Any machine, online or off. It'll still open in ten years.
+            </p>
+          </div>
+        </div>
+        <div class="grid grid-cols-[64px_1fr] md:grid-cols-[120px_1fr] gap-[20px] md:gap-[40px] items-start py-[34px] border-y border-rule md:ml-[26%]">
+          <img src="/assets/numeral-04.svg" alt="04" class="reveal-wipe w-[48px] h-auto invert transition-all duration-[1200ms] ease-[cubic-bezier(0.22,1,0.36,1)]" style="clip-path: inset(0 100% 0 0);" />
+          <div>
+            <h3 class="m-0 mb-[10px] font-display font-normal text-[30px] text-text-hi">Share it</h3>
+            <p class="m-0 text-[17px] leading-[1.6] max-w-[56ch] text-text">
+              Export to MP4, WebM, or GIF. Drop it in a deck, a site, a group chat.
+            </p>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-baseline gap-[28px] mt-[52px]">
+          <p class="m-0 font-display italic text-[23px] text-text-mid">Your work outlives the tool. That's the deal.</p>
+          <p class="m-0 font-mono text-[11px] tracking-[0.04em] text-text-low">// no cloud, no account, no export jail</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="relative z-10 bg-ink-900 py-[140px]">
+      <div class="max-w-[1200px] mx-auto px-[clamp(20px,5vw,120px)]">
+        <h2 class="m-0 mb-[48px] font-display font-normal text-[clamp(28px,2.8vw,36px)] text-text-hi">Who is it for?</h2>
+        <div class="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-[10px] md:gap-[32px] items-start py-[32px] border-t border-rule">
+          <p class="m-0 font-mono text-[12px] tracking-[0.08em] uppercase text-text-hi">Teachers</p>
+          <p class="reveal-text m-0 text-[17px] leading-[1.6] max-w-[60ch] text-text-low transition-colors duration-[420ms] ease-[cubic-bezier(0.22,1,0.36,1)]">
+            Turn the thing you keep redrawing on the whiteboard into a loop you reuse every term.
+          </p>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-[10px] md:gap-[32px] items-start py-[32px] border-t border-rule">
+          <p class="m-0 font-mono text-[12px] tracking-[0.08em] uppercase text-text-hi">Explainers &amp; writers</p>
+          <p class="reveal-text m-0 text-[17px] leading-[1.6] max-w-[60ch] text-text-low transition-colors duration-[420ms] ease-[cubic-bezier(0.22,1,0.36,1)]">
+            A moving diagram beats three paragraphs.
+          </p>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-[10px] md:gap-[32px] items-start py-[32px] border-t border-rule">
+          <p class="m-0 font-mono text-[12px] tracking-[0.08em] uppercase text-text-hi">Designers</p>
+          <p class="reveal-text m-0 text-[17px] leading-[1.6] max-w-[60ch] text-text-low transition-colors duration-[420ms] ease-[cubic-bezier(0.22,1,0.36,1)]">
+            Build assets and loops in minutes instead of scheduling them.
+          </p>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-[10px] md:gap-[32px] items-start py-[32px] border-y border-rule">
+          <p class="m-0 font-mono text-[12px] tracking-[0.08em] uppercase text-text-hi">Anyone who thinks by drawing</p>
+          <p class="reveal-text m-0 text-[17px] leading-[1.6] max-w-[60ch] text-text-low transition-colors duration-[420ms] ease-[cubic-bezier(0.22,1,0.36,1)]">
+            This is a sketchbook that moves.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="relative z-10 bg-ink-900 pt-[20px] pb-[150px]">
+      <div class="max-w-[1200px] mx-auto px-[clamp(20px,5vw,120px)]">
+        <div class="relative flex flex-col md:flex-row items-end min-h-0 md:min-h-[640px] rounded-[28px] md:rounded-[59px] bg-paper overflow-hidden">
+          <img src="/assets/palm.svg" alt="Hand-drawn open palm" class="reveal-wipe block md:absolute md:right-[-2%] md:top-[6%] w-[80%] md:w-[66%] h-auto mx-auto md:mx-0 relative inset-auto transition-all duration-[2500ms] ease-[cubic-bezier(0.22,1,0.36,1)]" style="clip-path: inset(0 100% 0 0);" />
+          <div class="relative p-[28px_22px_36px] md:p-[56px] max-w-[620px]">
+            <h2 class="m-0 mb-[20px] font-display font-normal text-[clamp(30px,3.2vw,46px)] leading-[1.06] tracking-[-0.015em] text-ink-800">
+              Designed screen by screen, not prompted.
+            </h2>
+            <p class="m-0 text-[17px] leading-[1.6] max-w-[56ch] text-[#3E4A5C]">
+              Every screen, flow, and interaction designed by hand in Paper, on a small design system built from fluid functionalism, beUI, and chanhdai. AI can help you build. It can't draw your map.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="waitlist" class="relative z-10 bg-ink-900 pt-[160px] pb-[200px] overflow-hidden">
+      <div class="absolute inset-0 pointer-events-none bg-gradient-to-b from-ink-900 from-0% via-ink-900/25 via-32% via-ink-900/25 via-68% to-ink-900 to-100%"></div>
+      <div class="relative max-w-[620px] mx-auto px-[20px] text-center">
+        <h2 class="m-0 mb-[16px] font-display font-normal text-[clamp(32px,3.6vw,48px)] leading-[1.06] tracking-[-0.015em] text-text-hi">
+          Get in early. Take a good username.
+        </h2>
+        <p class="m-0 mb-[46px] text-[17px] leading-[1.6] text-text">
+          Early access goes out in waves. Tell me what you'd animate and you'll be in an earlier one.
+        </p>
+
+        <!-- Waitlist Form Island -->
+        <div id="waitlist-form-container">
+          <form method="POST" action="/api/waitlist" class="flex flex-col gap-[22px] text-left">
+            <div class="flex flex-col gap-[8px]">
+              <label for="lao-username" class="font-mono text-[12px] tracking-[0.08em] uppercase text-text-mid">Username</label>
+              <div class="flex items-center border border-rule rounded-[4px] bg-ink-700 px-[14px]">
+                <span class="font-mono text-[14px] text-text-low">lao.so/</span>
+                <input id="lao-username" name="username" required autocomplete="off" placeholder="spikydino" class="flex-1 border-none outline-none bg-transparent text-text-hi text-[16px] py-[14px] px-[4px]" />
+              </div>
+            </div>
+
+            <div class="flex flex-col gap-[8px]">
+              <label for="lao-email" class="font-mono text-[12px] tracking-[0.08em] uppercase text-text-mid">Email</label>
+              <input id="lao-email" name="email" type="email" required placeholder="you@somewhere.com" class="border border-rule rounded-[4px] bg-ink-700 text-text-hi text-[16px] p-[14px]" />
+            </div>
+
+            <div class="flex flex-col gap-[8px]">
+              <label for="lao-first" class="font-mono text-[12px] tracking-[0.08em] uppercase text-text-mid">What would you animate first?</label>
+              <textarea id="lao-first" name="first_animation" rows={3} placeholder="a diagram I keep redrawing for my students" class="border border-rule rounded-[4px] bg-ink-700 text-text-hi text-[16px] p-[14px] resize-y"></textarea>
+            </div>
+
+            <input type="text" name="company" tabindex="-1" autocomplete="off" aria-hidden="true" class="absolute left-[-9999px] w-[1px] h-[1px] opacity-0" />
+
+            <button type="submit" class="mt-[6px] p-[16px_24px] border-none rounded-[4px] bg-base text-text-hi font-mono text-[13px] tracking-[0.08em] uppercase cursor-pointer transition-colors duration-[180ms] ease-[cubic-bezier(0.4,0,0.2,1)] hover:bg-[#547BB0]">
+              Claim my spot
+            </button>
+
+            <p class="m-0 mt-[6px] text-[14px] leading-[1.6] text-text-mid text-center">
+              No spam. One email when it's ready, and the occasional build update you can leave anytime.
+            </p>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- spacer for fixed footer -->
+    <div class="relative z-10 bg-ink-900 h-0 mb-[100dvh]"></div>
+
+    <footer class="fixed inset-auto 0 0 0 h-[100dvh] z-0 flex flex-col justify-between pt-[110px] px-[clamp(20px,5vw,120px)] pb-0 overflow-hidden">
+      <div class="relative flex justify-between font-mono text-[clamp(14px,2vw,26px)] tracking-[0.06em] uppercase text-text">
+        <span>Line art object</span>
+        <span>Animation</span>
+      </div>
+      <div class="relative flex justify-between items-end font-mono text-[12px] tracking-[0.08em] uppercase text-text-low pb-[16px]">
+        <span>Built in public by Jin</span>
+        <span class="flex gap-[24px]">
+          <a href="https://x.com" class="hover:text-text-hi transition-colors">X</a>
+          <a href="mailto:jin@lao.so" class="hover:text-text-hi transition-colors">Email</a>
+        </span>
+      </div>
+      <div class="relative h-[clamp(3.4rem,11vw,10rem)] overflow-hidden">
+        <p class="m-0 font-display font-normal text-[clamp(4rem,17vw,15rem)] leading-[0.8] tracking-[-0.03em] text-text-hi whitespace-nowrap">Lao Anm</p>
+      </div>
+    </footer>
+  </div>
+</Base>
+
+<script>
+  // Setup CSS-driven scroll animations when JS executes to add classes, or polyfill behaviors.
+  // We use view() timeline in CSS natively. If it's supported, we just add the classes.
+  
+  const setupAnimations = () => {
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    
+    // Polyfill or simple intersection observer for reveal if view() isn't well supported 
+    // or for the specific wipes which want to trigger once.
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const el = entry.target as HTMLElement;
+          if (el.classList.contains('reveal-text')) {
+            el.classList.remove('text-text-low');
+            el.classList.add('text-text-hi');
+          }
+          if (el.classList.contains('reveal-wipe')) {
+            el.style.clipPath = 'inset(0 0 0 0)';
+          }
+          observer.unobserve(el);
+        }
+      });
+    }, { threshold: 0.1 });
+
+    if (!reduced) {
+      document.querySelectorAll('.reveal-text, .reveal-wipe').forEach(el => observer.observe(el));
+    } else {
+      document.querySelectorAll('.reveal-text').forEach(el => {
+        el.classList.remove('text-text-low');
+        el.classList.add('text-text-hi');
+      });
+      document.querySelectorAll('.reveal-wipe').forEach((el) => {
+        (el as HTMLElement).style.clipPath = 'inset(0 0 0 0)';
+      });
+    }
+
+    // Nav blur scroll effect
+    const nav = document.getElementById('main-nav');
+    window.addEventListener('scroll', () => {
+      if (!nav) return;
+      if (window.scrollY > 80) {
+        nav.classList.replace('py-[9px]', 'py-[6px]');
+        nav.classList.replace('pr-[10px]', 'pr-[8px]');
+        nav.classList.replace('pl-[24px]', 'pl-[20px]');
+        nav.classList.replace('bg-ink-800/78', 'bg-ink-800/94');
+        nav.classList.replace('backdrop-blur-md', 'backdrop-blur-xl');
+      } else {
+        nav.classList.replace('py-[6px]', 'py-[9px]');
+        nav.classList.replace('pr-[8px]', 'pr-[10px]');
+        nav.classList.replace('pl-[20px]', 'pl-[24px]');
+        nav.classList.replace('bg-ink-800/94', 'bg-ink-800/78');
+        nav.classList.replace('backdrop-blur-xl', 'backdrop-blur-md');
+      }
+    }, { passive: true });
+
+    // Subtle parallax on hero window
+    const heroWindow = document.getElementById('hero-window');
+    if (heroWindow && !reduced) {
+      window.addEventListener('scroll', () => {
+        const y = window.scrollY;
+        if (y < window.innerHeight * 1.8) {
+          heroWindow.style.transform = `translate3d(0, ${-y * 0.08}px, 0)`;
+        }
+      }, { passive: true });
+    }
+  };
+
+  setupAnimations();
+  document.addEventListener('astro:page-load', setupAnimations);
+</script>

@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink-900: #0B0F16;
+  --color-ink-800: #121A26;
+  --color-ink-700: #16202E;
+  --color-ink-600: #1D2838;
+  --color-rule: #2A3A56;
+  
+  --color-paper: #F6F4F0;
+  
+  --color-text-hi: #E8ECF4;
+  --color-text: #B3BECF;
+  --color-text-mid: #7C8AA3;
+  --color-text-low: #4C5A72;
+  
+  --color-base: #40608E;
+  --color-accent: #7FA6E0;
+  --color-signal: #E0518E;
+
+  --font-display: "Redaction 35", serif;
+  --font-body: "Geist Variable", sans-serif;
+  --font-mono: "Departure Mono", monospace;
+}
+
+@font-face {
+  font-family: 'Departure Mono';
+  src: url('/fonts/DepartureMono-Regular.woff2') format('woff2');
+  font-display: swap;
+  font-weight: normal;
+  font-style: normal;
+}
+
+@layer base {
+  html, body {
+    @apply bg-ink-900 text-text font-body antialiased selection:bg-accent/30 selection:text-text-hi;
+    margin: 0;
+    padding: 0;
+  }
+}

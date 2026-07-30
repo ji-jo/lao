@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  @font-face { font-family:'Departure Mono'; src:url('fonts/DepartureMono-Regular.woff2') format('woff2'); font-weight:400; font-style:normal; font-display:swap; font-feature-settings:"locl"; }
+  html { font-synthesis:none; text-rendering:optimizeLegibility; overflow-x:clip; }
+  @keyframes lao-blink { 0%,100% { opacity:1 } 50% { opacity:0 } }
+  html, body { margin:0; padding:0; background:#0B0F16; }
+  body { -webkit-font-smoothing:antialiased; }
+  * { box-sizing:border-box; }
+  a { color:#7FA6E0; text-decoration:none; }
+  a:hover { color:#E8ECF4; }
+  ::selection { background:#40608E; color:#E8ECF4; }
+  input, textarea, button { font-family:inherit; }
+  input:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visible { outline:2px solid #7FA6E0; outline-offset:3px; }
+  [data-brighten][data-revealed] { color:#E8ECF4 !important; }
+  [data-wipe] { clip-path:inset(0 100% 0 0); transition:clip-path 1200ms cubic-bezier(0.22,1,0.36,1); }
+  [data-wipe][data-revealed] { clip-path:inset(0 0 0 0); }
+  [data-wipe-slow] { transition-duration:2500ms; }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation:none !important; transition:none !important; }
+    [data-wipe] { clip-path:none; }
+  }
+  @media (max-width: 900px) {
+    section, footer, nav { padding-left:20px !important; padding-right:20px !important; }
+    [data-stack] { display:flex !important; flex-direction:column !important; gap:56px !important; }
+    [data-stack] > * { grid-column:auto !important; margin:0 !important; padding-left:0 !important; padding-right:0 !important; width:100% !important; }
+    [data-rule] { display:none !important; }
+    [data-row] { grid-template-columns:1fr !important; gap:10px !important; }
+    [data-step] { grid-template-columns:64px 1fr !important; gap:20px !important; margin-left:0 !important; }
+    [data-paper] { flex-direction:column !important; min-height:0 !important; border-radius:28px !important; }
+    [data-paper] > div { padding:28px 22px 36px !important; }
+    [data-paper] img { position:relative !important; inset:auto !important; width:80% !important; margin:0 auto !important; }
+  }
+</style>
+</helmet>
+
+<div style="position:relative; background:#0B0F16; font-family:Geist, system-ui, sans-serif; color:#B3BECF; overflow-x:hidden">
+
+  <nav ref="{{ navRef }}" style="position:fixed; top:20px; left:50%; transform:translateX(-50%); z-index:50; display:flex; align-items:center; justify-content:space-between; gap:24px; width:min(1160px, calc(100vw - 40px)); padding:9px 10px 9px 24px; border-radius:999px; border:1px solid #2A3A56; background:rgba(18,26,38,0.78); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px); transition:padding 260ms cubic-bezier(0.4,0,0.2,1), background 260ms cubic-bezier(0.4,0,0.2,1)">
+    <a href="#story" style="font-family:'Instrument Serif', Georgia, serif; font-size:20px; color:#B3BECF">Story</a>
+    <img src="assets/wordmark.svg" alt="LAO" style="width:44px; height:29px; filter:invert(1) brightness(1.6)" />
+    <a href="#waitlist" style="padding:10px 22px; border-radius:999px; background:#40608E; color:#E8ECF4; font-family:'Instrument Serif', Georgia, serif; font-size:19px" style-hover="background:#547BB0">Join Waitlist</a>
+  </nav>
+
+  <section style="position:relative; z-index:1; background:#0B0F16; padding:150px 0 130px">
+    <canvas ref="{{ heroDither }}" style="position:absolute; inset:0; width:100%; height:100%; image-rendering:pixelated; z-index:0"></canvas>
+    <div style="position:absolute; top:0; left:0; right:0; height:190px; background:linear-gradient(to bottom, #0B0F16 0%, #0B0F16 60%, rgba(11,15,22,0) 100%); z-index:1"></div>
+    <div style="position:absolute; left:0; right:0; bottom:0; height:260px; background:linear-gradient(to top, #0B0F16 12%, rgba(11,15,22,0) 100%); z-index:1"></div>
+
+    <div style="position:relative; z-index:2; max-width:1200px; margin:0 auto; padding:0 clamp(20px, 5vw, 120px); display:flex; flex-direction:column; align-items:center">
+      <p style="margin:0 0 26px; display:flex; align-items:center; gap:7px; font-family:'Departure Mono', ui-monospace, monospace; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:#7C8AA3">Early access · Building in public<span style="display:inline-block; width:7px; height:12px; background:#7FA6E0; animation:lao-blink 1s steps(1) infinite"></span></p>
+      <h1 style="margin:0; max-width:26ch; text-align:center; font-family:'Instrument Serif', Georgia, serif; font-weight:400; font-size:clamp(34px, 3.7vw, 52px); line-height:1.06; letter-spacing:-0.015em; color:#E8ECF4; text-wrap:balance">Animate the thing you're trying to explain.</h1>
+
+      <div ref="{{ heroWindow }}" style="width:100%; margin-top:56px; padding:12px; border-radius:24px; background:#16202E; border:1px solid #2A3A56; box-shadow:0 50px 130px -50px rgba(64,96,142,0.55)">
+        <img src="assets/hero-image.png" alt="LAO canvas with a hand-drawn flower mid-animation" style="display:block; width:100%; height:auto; border-radius:8px" />
+      </div>
+    </div>
+  </section>
+
+  <section id="story" style="position:relative; z-index:1; background:#0B0F16; padding:150px 0 40px">
+    <div data-stack="" style="max-width:1200px; margin:0 auto; padding:0 clamp(20px, 5vw, 120px); display:grid; grid-template-columns:repeat(12, 1fr); gap:24px">
+      <div style="grid-column:1 / span 6">
+        <p data-brighten="" style="margin:0; font-family:'Instrument Serif', Georgia, serif; font-size:clamp(28px, 2.9vw, 40px); line-height:1.12; letter-spacing:-0.01em; color:#4C5A72; transition:color 420ms cubic-bezier(0.22,1,0.36,1)">I spent more time learning animation tools than animating.</p>
+      </div>
+      <div style="grid-column:8 / span 5; margin-top:96px">
+        <p data-brighten="" style="margin:0; font-family:'Instrument Serif', Georgia, serif; font-size:clamp(28px, 2.9vw, 40px); line-height:1.12; letter-spacing:-0.01em; color:#4C5A72; transition:color 420ms cubic-bezier(0.22,1,0.36,1)">LAO is the tool I wanted.</p>
+        <p style="margin:26px 0 0; font-size:18px; line-height:1.6; max-width:60ch; color:#B3BECF">Two modes — continuous line and stop motion. A canvas, a pen, and a timeline that's already running. Almost nothing to learn.</p>
+      </div>
+    </div>
+  </section>
+
+  <section style="position:relative; z-index:1; background:#0B0F16; padding:80px 0 170px">
+    <div style="max-width:1200px; margin:0 auto 46px; padding:0 clamp(20px, 5vw, 120px)"><p style="margin:0; max-width:26ch; font-family:'Departure Mono', ui-monospace, monospace; font-size:11px; line-height:1.5; letter-spacing:0.04em; color:#4C5A72">// three steps, and the third<br />// one happens on its own</p></div>
+    <div data-stack="" style="max-width:1200px; margin:0 auto; padding:0 clamp(20px, 5vw, 120px); display:grid; grid-template-columns:repeat(3, 1fr); gap:40px">
+      <div style="margin-top:0">
+        <img data-wipe="" src="assets/case.svg" alt="Hand-drawn case" style="display:block; width:100%; max-width:223px; height:auto; filter:invert(1); transition:clip-path 1200ms cubic-bezier(0.22, 1, 0.36, 1), transform 600ms cubic-bezier(0.36, 2.09, 0.07, -1.52)" style-hover="transform:translate(6px, -8px) rotate(-1.5deg)" />
+        <p style="margin:22px 0 0; font-family:'Instrument Serif', Georgia, serif; font-size:26px; color:#E8ECF4">Open it</p>
+      </div>
+      <div style="margin-top:143px">
+        <img data-wipe="" src="assets/pen-hand.svg" alt="Hand-drawn pen on paper" style="display:block; width:100%; max-width:223px; height:auto; filter:invert(1); transition:clip-path 1200ms cubic-bezier(0.22, 1, 0.36, 1), transform 600ms cubic-bezier(0.36, 2.09, 0.07, -1.52)" style-hover="transform:translate(6px, -8px) rotate(-1.5deg)" />
+        <p style="margin:22px 0 0; font-family:'Instrument Serif', Georgia, serif; font-size:26px; color:#E8ECF4">Draw it</p>
+      </div>
+      <div style="margin-top:266px">
+        <img data-wipe="" src="assets/runner.svg" alt="Hand-drawn running figure with motion dashes" style="display:block; width:100%; max-width:223px; height:auto; filter:invert(1); transition:clip-path 1200ms cubic-bezier(0.22, 1, 0.36, 1), transform 600ms cubic-bezier(0.36, 2.09, 0.07, -1.52)" style-hover="transform:translate(6px, -8px) rotate(-1.5deg)" />
+        <p style="margin:22px 0 0; font-family:'Instrument Serif', Georgia, serif; font-size:26px; color:#E8ECF4">Already moving</p>
+      </div>
+    </div>
+  </section>
+
+  <section style="position:relative; z-index:1; background:#0B0F16; padding:0 20px 150px; text-align:center">
+    <h2 data-brighten="" style="margin:0; font-family:'Instrument Serif', Georgia, serif; font-weight:400; font-size:clamp(28px, 2.8vw, 36px); color:#4C5A72; transition:color 420ms cubic-bezier(0.22,1,0.36,1)">Built for local first</h2>
+  </section>
+
+  <section style="position:relative; z-index:1; background:#0B0F16; padding:110px 0 140px; overflow:hidden">
+    <div style="position:absolute; inset:0; background:repeating-linear-gradient(to bottom, rgba(232,236,244,0.04) 0px, rgba(232,236,244,0.04) 1px, transparent 1px, transparent 4px); pointer-events:none"></div>
+    <div style="position:absolute; inset:0; background:radial-gradient(120% 90% at 50% 50%, rgba(11,15,22,0) 45%, rgba(11,15,22,0.85) 100%); pointer-events:none"></div>
+    <div data-stack="" style="position:relative; max-width:1200px; margin:0 auto; padding:0 clamp(20px, 5vw, 120px); display:grid; grid-template-columns:1fr 1px 1fr">
+      <div style="padding-right:56px">
+        <p style="margin:0 0 14px; font-family:'Departure Mono', ui-monospace, monospace; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:#7FA6E0">Mode 01</p>
+        <h3 style="margin:0 0 16px; font-family:'Instrument Serif', Georgia, serif; font-weight:400; font-size:clamp(26px, 2.6vw, 34px); color:#E8ECF4">Continuous line</h3>
+        <p style="margin:0 0 26px; font-size:17px; line-height:1.6; max-width:46ch; color:#B3BECF">One stroke, moving. Draw and the line keeps its momentum — no keyframes, no rigging.</p>
+        <div style="position:relative; aspect-ratio:4/3; border:1px solid #2A3A56; border-radius:6px; background:#121A26; display:flex; align-items:center; justify-content:center">
+          <svg data-draw="" viewBox="0 0 300 220" style="width:74%; height:auto; color:#7FA6E0; overflow:visible">
+            <path d="M30 170 C 80 40, 120 200, 170 90 S 250 130, 274 50" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>
+          </svg>
+          <span style="position:absolute; bottom:12px; left:14px; font-family:'Departure Mono', ui-monospace, monospace; font-size:11px; letter-spacing:0.06em; text-transform:uppercase; color:#4C5A72">TODO: continuous-line loop</span>
+        </div>
+      </div>
+      <div data-rule="" style="background:#2A3A56"></div>
+      <div style="padding-left:56px">
+        <p style="margin:0 0 14px; font-family:'Departure Mono', ui-monospace, monospace; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:#E0518E">Mode 02</p>
+        <h3 style="margin:0 0 16px; font-family:'Instrument Serif', Georgia, serif; font-weight:400; font-size:clamp(26px, 2.6vw, 34px); color:#E8ECF4">Stop motion</h3>
+        <p style="margin:0 0 26px; font-size:17px; line-height:1.6; max-width:46ch; color:#B3BECF">Frame by frame, onion-skinned. The old way, without the setup.</p>
+        <div style="position:relative; aspect-ratio:4/3; border:1px solid #2A3A56; border-radius:6px; background:#121A26; display:flex; align-items:center; justify-content:center">
+          <svg data-draw="" viewBox="0 0 300 220" style="width:74%; height:auto; color:#E0518E; overflow:visible">
+            <path d="M50 160 L 74 110 L 58 70" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" vector-effect="non-scaling-stroke" opacity="0.35"></path>
+            <path d="M130 160 L 156 108 L 138 66" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" vector-effect="non-scaling-stroke" opacity="0.65"></path>
+            <path d="M212 160 L 240 106 L 220 62" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>
+          </svg>
+          <span style="position:absolute; bottom:12px; left:14px; font-family:'Departure Mono', ui-monospace, monospace; font-size:11px; letter-spacing:0.06em; text-transform:uppercase; color:#4C5A72">TODO: stop-motion loop</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section style="position:relative; z-index:1; background:#0B0F16; padding:150px 0 160px; overflow:hidden">
+    <canvas ref="{{ asciiCanvas }}" style="position:absolute; inset:0; width:100%; height:100%; opacity:0.12; pointer-events:none"></canvas>
+    <div style="position:relative; max-width:1200px; margin:0 auto; padding:0 clamp(20px, 5vw, 120px)">
+      <h2 style="margin:0 0 90px; font-family:'Instrument Serif', Georgia, serif; font-weight:400; font-size:clamp(28px, 2.8vw, 36px); color:#E8ECF4">It's a file. You keep it.</h2>
+
+      <div data-step="" style="display:grid; grid-template-columns:120px 1fr; gap:40px; align-items:start; padding:34px 0; border-top:1px solid #2A3A56; margin-left:0">
+        <img data-wipe="" src="assets/numeral-01.svg" alt="01" style="width:56px; height:auto; filter:invert(1)" />
+        <div>
+          <h3 style="margin:0 0 10px; font-family:'Instrument Serif', Georgia, serif; font-weight:400; font-size:30px; color:#E8ECF4">Work on it</h3>
+          <p style="margin:0; font-size:17px; line-height:1.6; max-width:56ch; color:#B3BECF">Open the canvas and draw. <span style="background:#2A3A56; color:#E8ECF4; padding:1px 4px">It's already moving.</span></p>
+        </div>
+      </div>
+      <div data-step="" style="display:grid; grid-template-columns:120px 1fr; gap:40px; align-items:start; padding:34px 0; border-top:1px solid #2A3A56; margin-left:9%">
+        <img data-wipe="" src="assets/numeral-02.svg" alt="02" style="width:62px; height:auto; filter:invert(1)" />
+        <div>
+          <h3 style="margin:0 0 10px; font-family:'Instrument Serif', Georgia, serif; font-weight:400; font-size:30px; color:#E8ECF4">Save it</h3>
+          <p style="margin:0; font-size:17px; line-height:1.6; max-width:56ch; color:#B3BECF">One file. <span style="font-family:'Departure Mono', ui-monospace, monospace; font-size:15px; color:#E8ECF4; background:#2A3A56; padding:1px 5px">.lao</span>. On your machine, in your folder.</p>
+        </div>
+      </div>
+      <div data-step="" style="display:grid; grid-template-columns:120px 1fr; gap:40px; align-items:start; padding:34px 0; border-top:1px solid #2A3A56; margin-left:16%">
+        <img data-wipe="" src="assets/numeral-03.svg" alt="03" style="width:62px; height:auto; filter:invert(1)" />
+        <div>
+          <h3 style="margin:0 0 10px; font-family:'Instrument Serif', Georgia, serif; font-weight:400; font-size:30px; color:#E8ECF4">Open it</h3>
+          <p style="margin:0; font-size:17px; line-height:1.6; max-width:56ch; color:#B3BECF">Any machine, online or off. It'll still open in ten years.</p>
+        </div>
+      </div>
+      <div data-step="" style="display:grid; grid-template-columns:120px 1fr; gap:40px; align-items:start; padding:34px 0; border-top:1px solid #2A3A56; border-bottom:1px solid #2A3A56; margin-left:26%">
+        <img data-wipe="" src="assets/numeral-04.svg" alt="04" style="width:48px; height:auto; filter:invert(1)" />
+        <div>
+          <h3 style="margin:0 0 10px; font-family:'Instrument Serif', Georgia, serif; font-weight:400; font-size:30px; color:#E8ECF4">Share it</h3>
+          <p style="margin:0; font-size:17px; line-height:1.6; max-width:56ch; color:#B3BECF">Export to MP4, WebM, or GIF. Drop it in a deck, a site, a group chat.</p>
+        </div>
+      </div>
+
+      <div style="display:flex; flex-wrap:wrap; align-items:baseline; gap:28px; margin-top:52px">
+        <p style="margin:0; font-family:'Instrument Serif', Georgia, serif; font-style:italic; font-size:23px; color:#7C8AA3">Your work outlives the tool. That's the deal.</p>
+        <p style="margin:0; font-family:'Departure Mono', ui-monospace, monospace; font-size:11px; letter-spacing:0.04em; color:#4C5A72">// no cloud, no account, no export jail</p>
+      </div>
+    </div>
+  </section>
+
+  <section style="position:relative; z-index:1; background:#0B0F16; padding:140px 0">
+    <div style="max-width:1200px; margin:0 auto; padding:0 clamp(20px, 5vw, 120px)">
+      <h2 style="margin:0 0 48px; font-family:'Instrument Serif', Georgia, serif; font-weight:400; font-size:clamp(28px, 2.8vw, 36px); color:#E8ECF4">Who is it for?</h2>
+      <div data-row="" style="display:grid; grid-template-columns:280px 1fr; gap:32px; align-items:start; padding:32px 0; border-top:1px solid #2A3A56">
+        <p style="margin:0; font-family:'Departure Mono', ui-monospace, monospace; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:#E8ECF4">Teachers</p>
+        <p data-brighten="" style="margin:0; font-size:17px; line-height:1.6; max-width:60ch; color:#4C5A72; transition:color 420ms cubic-bezier(0.22,1,0.36,1)">Turn the thing you keep redrawing on the whiteboard into a loop you reuse every term.</p>
+      </div>
+      <div data-row="" style="display:grid; grid-template-columns:280px 1fr; gap:32px; align-items:start; padding:32px 0; border-top:1px solid #2A3A56">
+        <p style="margin:0; font-family:'Departure Mono', ui-monospace, monospace; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:#E8ECF4">Explainers &amp; writers</p>
+        <p data-brighten="" style="margin:0; font-size:17px; line-height:1.6; max-width:60ch; color:#4C5A72; transition:color 420ms cubic-bezier(0.22,1,0.36,1)">A moving diagram beats three paragraphs.</p>
+      </div>
+      <div data-row="" style="display:grid; grid-template-columns:280px 1fr; gap:32px; align-items:start; padding:32px 0; border-top:1px solid #2A3A56">
+        <p style="margin:0; font-family:'Departure Mono', ui-monospace, monospace; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:#E8ECF4">Designers</p>
+        <p data-brighten="" style="margin:0; font-size:17px; line-height:1.6; max-width:60ch; color:#4C5A72; transition:color 420ms cubic-bezier(0.22,1,0.36,1)">Build assets and loops in minutes instead of scheduling them.</p>
+      </div>
+      <div data-row="" style="display:grid; grid-template-columns:280px 1fr; gap:32px; align-items:start; padding:32px 0; border-top:1px solid #2A3A56; border-bottom:1px solid #2A3A56">
+        <p style="margin:0; font-family:'Departure Mono', ui-monospace, monospace; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:#E8ECF4">Anyone who thinks by drawing</p>
+        <p data-brighten="" style="margin:0; font-size:17px; line-height:1.6; max-width:60ch; color:#4C5A72; transition:color 420ms cubic-bezier(0.22,1,0.36,1)">This is a sketchbook that moves.</p>
+      </div>
+    </div>
+  </section>
+
+  <section style="position:relative; z-index:1; background:#0B0F16; padding:20px 0 150px">
+    <div style="max-width:1200px; margin:0 auto; padding:0 clamp(20px, 5vw, 120px)">
+      <div data-paper="" style="position:relative; border-radius:59px; background:#F6F4F0; overflow:hidden; min-height:640px; display:flex; align-items:flex-end">
+        <img data-wipe="" data-wipe-slow="" src="assets/palm.svg" alt="Hand-drawn open palm" style="position:absolute; right:-2%; top:6%; width:66%; height:auto" />
+        <div style="position:relative; padding:56px; max-width:620px">
+          <h2 style="margin:0 0 20px; font-family:'Instrument Serif', Georgia, serif; font-weight:400; font-size:clamp(30px, 3.2vw, 46px); line-height:1.06; letter-spacing:-0.015em; color:#121A26">Designed screen by screen, not prompted.</h2>
+          <p style="margin:0; font-size:17px; line-height:1.6; max-width:56ch; color:#3E4A5C">Every screen, flow, and interaction designed by hand in Paper, on a small design system built from fluid functionalism, beUI, and chanhdai. AI can help you build. It can't draw your map.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="waitlist" style="position:relative; z-index:1; background:#0B0F16; padding:160px 0 200px; overflow:hidden">
+    <div style="position:absolute; inset:0; background:linear-gradient(to bottom, #0B0F16 0%, rgba(11,15,22,0.25) 32%, rgba(11,15,22,0.25) 68%, #0B0F16 100%)"></div>
+    <div style="position:relative; max-width:620px; margin:0 auto; padding:0 20px; text-align:center">
+      <h2 style="margin:0 0 16px; font-family:'Instrument Serif', Georgia, serif; font-weight:400; font-size:clamp(32px, 3.6vw, 48px); line-height:1.06; letter-spacing:-0.015em; color:#E8ECF4">Get in early. Take a good username.</h2>
+      <p style="margin:0 0 46px; font-size:17px; line-height:1.6; color:#B3BECF">Early access goes out in waves. Tell me what you'd animate and you'll be in an earlier one.</p>
+
+      <sc-if value="{{ submitted }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex; flex-direction:column; align-items:center; gap:18px; padding:48px 0">
+          <svg viewBox="0 0 64 64" ref="{{ checkRef }}" style="width:64px; height:64px; color:#7FA6E0"><path d="M14 34 L 27 46 L 50 18" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></path></svg>
+          <p style="margin:0; font-family:'Instrument Serif', Georgia, serif; font-size:28px; color:#E8ECF4">{{ successMessage }}</p>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ notSubmitted }}" hint-placeholder-val="{{ true }}">
+        <form method="POST" action="/api/waitlist" onSubmit="{{ onSubmit }}" style="display:flex; flex-direction:column; gap:22px; text-align:left">
+          <div style="display:flex; flex-direction:column; gap:8px">
+            <label for="lao-username" style="font-family:'Departure Mono', ui-monospace, monospace; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:#7C8AA3">Username</label>
+            <div style="display:flex; align-items:center; border:1px solid #2A3A56; border-radius:4px; background:#16202E; padding:0 14px">
+              <span style="font-family:'Departure Mono', ui-monospace, monospace; font-size:14px; color:#4C5A72">lao.so/</span>
+              <input id="lao-username" name="username" required="" autocomplete="off" placeholder="spikydino" onChange="{{ onUsername }}" style="flex:1; border:none; outline:none; background:transparent; color:#E8ECF4; font-size:16px; padding:14px 4px" />
+            </div>
+            <sc-if value="{{ usernameError }}" hint-placeholder-val="{{ false }}">
+              <p style="margin:0; font-family:'Departure Mono', ui-monospace, monospace; font-size:12px; color:#E0518E">{{ usernameError }}</p>
+            </sc-if>
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:8px">
+            <label for="lao-email" style="font-family:'Departure Mono', ui-monospace, monospace; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:#7C8AA3">Email</label>
+            <input id="lao-email" name="email" type="email" required="" placeholder="you@somewhere.com" onChange="{{ onEmail }}" style="border:1px solid #2A3A56; border-radius:4px; background:#16202E; color:#E8ECF4; font-size:16px; padding:14px" />
+            <sc-if value="{{ emailError }}" hint-placeholder-val="{{ false }}">
+              <p style="margin:0; font-family:'Departure Mono', ui-monospace, monospace; font-size:12px; color:#E0518E">{{ emailError }}</p>
+            </sc-if>
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:8px">
+            <label for="lao-first" style="font-family:'Departure Mono', ui-monospace, monospace; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:#7C8AA3">What would you animate first?</label>
+            <textarea id="lao-first" name="first_animation" rows="3" placeholder="a diagram I keep redrawing for my students" style="border:1px solid #2A3A56; border-radius:4px; background:#16202E; color:#E8ECF4; font-size:16px; padding:14px; resize:vertical"></textarea>
+          </div>
+
+          <input type="text" name="company" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute; left:-9999px; width:1px; height:1px; opacity:0" />
+
+          <button type="submit" style="margin-top:6px; padding:16px 24px; border:none; border-radius:4px; background:#40608E; color:#E8ECF4; font-family:'Departure Mono', ui-monospace, monospace; font-size:13px; letter-spacing:0.08em; text-transform:uppercase; cursor:pointer; transition:background 180ms cubic-bezier(0.4,0,0.2,1)" style-hover="background:#547BB0">Claim my spot</button>
+
+          <p style="margin:6px 0 0; font-size:14px; line-height:1.6; color:#7C8AA3; text-align:center">No spam. One email when it's ready, and the occasional build update you can leave anytime.</p>
+        </form>
+      </sc-if>
+    </div>
+  </section>
+
+  <div style="position:relative; z-index:1; background:#0B0F16; height:0; margin-bottom:100dvh"></div>
+
+  <footer style="position:fixed; inset:auto 0 0 0; height:100dvh; z-index:0; display:flex; flex-direction:column; justify-content:space-between; padding:110px clamp(20px, 5vw, 120px) 0; overflow:hidden">
+    <div style="position:relative; display:flex; justify-content:space-between; font-family:'Departure Mono', ui-monospace, monospace; font-size:clamp(14px, 2vw, 26px); letter-spacing:0.06em; text-transform:uppercase; color:#B3BECF">
+      <span>Line art object</span>
+      <span>Animation</span>
+    </div>
+    <div style="position:relative; display:flex; justify-content:space-between; align-items:flex-end; font-family:'Departure Mono', ui-monospace, monospace; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:#4C5A72; padding-bottom:16px">
+      <span>Built in public by Jin</span>
+      <span style="display:flex; gap:24px"><a href="https://x.com">X</a><a href="mailto:jin@lao.so">Email</a></span>
+    </div>
+    <div style="position:relative; height:clamp(3.4rem, 11vw, 10rem); overflow:hidden">
+      <p style="margin:0; font-family:'Instrument Serif', Georgia, serif; font-weight:400; font-size:clamp(4rem, 17vw, 15rem); line-height:0.8; letter-spacing:-0.03em; color:#E8ECF4; white-space:nowrap">Lao Anm</p>
+    </div>
+  </footer>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;ditherFps&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:24,&quot;min&quot;:12,&quot;max&quot;:60,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Texture&quot;}}">
+class Component extends DCLogic {
+  state = { username: "", email: "", submitted: false, usernameError: "", emailError: "" };
+
+  constructor(p) {
+    super(p);
+    this.heroDither = React.createRef();
+    this.asciiCanvas = React.createRef();
+    this.navRef = React.createRef();
+    this.heroWindow = React.createRef();
+    this.checkRef = React.createRef();
+    this._loops = [];
+  }
+
+  get reduced() {
+    return window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  }
+
+  componentDidMount() {
+    const fps = this.props.ditherFps ?? 24;
+    this.startShader(this.heroDither.current, fps);
+    this.startAscii(this.asciiCanvas.current);
+    this.setupDrawing();
+    [120, 400, 1000, 2200].forEach(ms => setTimeout(() => this.setupDrawing(), ms));
+    this.onScroll = () => this.handleScroll();
+    window.addEventListener("scroll", this.onScroll, { passive: true });
+    document.addEventListener("scroll", this.onScroll, { capture: true, passive: true });
+    window.addEventListener("resize", this.onScroll, { passive: true });
+    const start = performance.now();
+    const poll = () => {
+      if (this._dead) return;
+      this.revealPass();
+      if (performance.now() - start < 6000) requestAnimationFrame(poll);
+    };
+    requestAnimationFrame(poll);
+    this.onVis = () => this._loops.forEach(l => { l.paused = document.hidden || l.offscreen; });
+    document.addEventListener("visibilitychange", this.onVis);
+  }
+
+  componentWillUnmount() {
+    this._dead = true;
+    this._loops.forEach(l => { l.dead = true; });
+    window.removeEventListener("scroll", this.onScroll);
+    document.removeEventListener("scroll", this.onScroll, { capture: true });
+    window.removeEventListener("resize", this.onScroll);
+    document.removeEventListener("visibilitychange", this.onVis);
+  }
+
+  handleScroll() {
+    const y = window.scrollY;
+    const nav = this.navRef.current;
+    if (nav) {
+      const past = y > 80;
+      nav.style.padding = past ? "6px 8px 6px 20px" : "9px 10px 9px 24px";
+      nav.style.background = past ? "rgba(18,26,38,0.94)" : "rgba(18,26,38,0.78)";
+      nav.style.backdropFilter = past ? "blur(24px)" : "blur(16px)";
+    }
+    this.revealPass();
+    if (this.reduced) return;
+    const win = this.heroWindow.current;
+    if (win && y < window.innerHeight * 1.8) win.style.transform = "translate3d(0," + (-y * 0.08) + "px,0)";
+  }
+
+  startShader(canvas, fps) {
+    if (!canvas) return;
+    const gl = canvas.getContext("webgl", { antialias: false, alpha: false, powerPreference: "low-power" });
+    if (!gl) { this.startDither(canvas, fps, 0); return; }
+
+    const vs = "attribute vec2 p; void main(){ gl_Position = vec4(p,0.0,1.0); }";
+    const fs = [
+      "precision mediump float;",
+      "uniform vec2 res; uniform float t;",
+      "float bayer(vec2 c){",
+      "  int x = int(mod(c.x,4.0)); int y = int(mod(c.y,4.0));",
+      "  float m[16];",
+      "  m[0]=0.0;m[1]=8.0;m[2]=2.0;m[3]=10.0;m[4]=12.0;m[5]=4.0;m[6]=14.0;m[7]=6.0;",
+      "  m[8]=3.0;m[9]=11.0;m[10]=1.0;m[11]=9.0;m[12]=15.0;m[13]=7.0;m[14]=13.0;m[15]=5.0;",
+      "  int i = y*4+x; float v = 0.0;",
+      "  for (int k=0;k<16;k++){ if(k==i) v = m[k]; }",
+      "  return v/16.0;",
+      "}",
+      "void main(){",
+      "  vec2 uv = gl_FragCoord.xy / res;",
+      "  float n = 0.5",
+      "    + 0.30*sin(uv.x*6.5 + t*0.45)",
+      "    + 0.22*sin(uv.y*4.6 - t*0.30)",
+      "    + 0.20*sin((uv.x*3.1 + uv.y*4.1)*2.1 + t*0.38)",
+      "    + 0.13*sin((uv.x - uv.y)*8.5 - t*0.20);",
+      "  n *= 1.0 - abs(uv.y - 0.58)*0.95;",
+      "  n = clamp(n, 0.0, 1.0);",
+      "  float q = floor(n*2.35 + bayer(gl_FragCoord.xy));",
+      "  vec3 c0 = vec3(0.043,0.059,0.086);",
+      "  vec3 c1 = vec3(0.102,0.149,0.243);",
+      "  vec3 c2 = vec3(0.157,0.227,0.353);",
+      "  vec3 col = q < 1.0 ? c0 : (q < 2.0 ? c1 : c2);",
+      "  gl_FragColor = vec4(col, 1.0);",
+      "}"
+    ].join("\n");
+
+    const mk = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; };
+    const prog = gl.createProgram();
+    gl.attachShader(prog, mk(gl.VERTEX_SHADER, vs));
+    gl.attachShader(prog, mk(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) { this.startDither(canvas, fps, 0); return; }
+    gl.useProgram(prog);
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(prog, "p");
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    const uRes = gl.getUniformLocation(prog, "res");
+    const uT = gl.getUniformLocation(prog, "t");
+
+    const loop = { paused: false, dead: false, offscreen: false };
+    this._loops.push(loop);
+    const scale = 4;
+    const resize = () => {
+      const r = canvas.getBoundingClientRect();
+      canvas.width = Math.max(2, Math.round(r.width / scale));
+      canvas.height = Math.max(2, Math.round(r.height / scale));
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.uniform2f(uRes, canvas.width, canvas.height);
+    };
+    const draw = (t) => { gl.uniform1f(uT, t); gl.drawArrays(gl.TRIANGLES, 0, 3); };
+    resize();
+    draw(0);
+    window.addEventListener("resize", () => { resize(); draw(this._t || 0); }, { passive: true });
+    if (this.reduced) return;
+    if ("IntersectionObserver" in window) {
+      new IntersectionObserver(e => { loop.offscreen = !e[0].isIntersecting; loop.paused = loop.offscreen || document.hidden; }, { threshold: 0 }).observe(canvas);
+    }
+    const interval = 1000 / fps;
+    let last = 0, t = 0;
+    const tick = (now) => {
+      if (loop.dead) return;
+      requestAnimationFrame(tick);
+      if (loop.paused || now - last < interval) return;
+      last = now; t += 0.05; this._t = t;
+      draw(t);
+    };
+    requestAnimationFrame(tick);
+  }
+
+  startDither(canvas, fps, seed) {
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d", { alpha: false });
+    if (!ctx) return;
+    const bayer = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
+    const pal = [[11, 15, 22], [26, 38, 62], [40, 58, 90]];
+    const loop = { paused: false, dead: false, offscreen: false };
+    this._loops.push(loop);
+    const scale = 5;
+    let w = 1, h = 1, img = null;
+    const resize = () => {
+      const r = canvas.getBoundingClientRect();
+      w = Math.max(2, Math.round(r.width / scale));
+      h = Math.max(2, Math.round(r.height / scale));
+      canvas.width = w; canvas.height = h;
+      img = ctx.createImageData(w, h);
+    };
+    resize();
+
+    const draw = (t) => {
+      const d = img.data;
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const u = x / w, v = y / h;
+          let n = 0.5
+            + 0.30 * Math.sin(u * 7.0 + t * 0.5 + seed)
+            + 0.22 * Math.sin(v * 5.0 - t * 0.32)
+            + 0.20 * Math.sin((u * 3.1 + v * 4.3) * 2.2 + t * 0.4)
+            + 0.14 * Math.sin((u - v) * 9.0 - t * 0.22);
+          n = n * (1.0 - Math.abs(v - 0.42) * 0.9);
+          n = Math.max(0, Math.min(1, n));
+          const b = bayer[y & 3][x & 3] / 16;
+          let q = Math.floor(n * 2.35 + b);
+          if (q < 0) q = 0; if (q > 2) q = 2;
+          const c = pal[q], i = (y * w + x) * 4;
+          d[i] = c[0]; d[i + 1] = c[1]; d[i + 2] = c[2]; d[i + 3] = 255;
+        }
+      }
+      ctx.putImageData(img, 0, 0);
+    };
+
+    window.addEventListener("resize", () => { resize(); draw(this._t || 0); }, { passive: true });
+    draw(seed * 3);
+    if (this.reduced) return;
+    if ("IntersectionObserver" in window) {
+      new IntersectionObserver(e => { loop.offscreen = !e[0].isIntersecting; loop.paused = loop.offscreen || document.hidden; }, { threshold: 0 }).observe(canvas);
+    }
+    const interval = 1000 / fps;
+    let last = 0, t = seed * 3;
+    const tick = (now) => {
+      if (loop.dead) return;
+      requestAnimationFrame(tick);
+      if (loop.paused || now - last < interval) return;
+      last = now; t += 0.05; this._t = t;
+      draw(t);
+    };
+    requestAnimationFrame(tick);
+  }
+
+  startAscii(canvas) {
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const ramp = ["\u00b7", ":", "-", "=", "+", "*", "#", "%"];
+    const cell = 11;
+    const loop = { paused: false, dead: false, offscreen: false };
+    this._loops.push(loop);
+    let cols = 0, rows = 0;
+    const resize = () => {
+      const r = canvas.getBoundingClientRect();
+      canvas.width = Math.max(2, Math.round(r.width));
+      canvas.height = Math.max(2, Math.round(r.height));
+      cols = Math.ceil(canvas.width / cell);
+      rows = Math.ceil(canvas.height / cell);
+    };
+    resize();
+
+    const draw = (t) => {
+      this._at = t;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.font = "11px 'Departure Mono', ui-monospace, monospace";
+      ctx.fillStyle = "#7C8AA3";
+      ctx.textBaseline = "top";
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          const n = 0.5 + 0.3 * Math.sin(x * 0.19 + t * 0.3) + 0.3 * Math.sin(y * 0.23 - t * 0.21) + 0.2 * Math.sin((x + y) * 0.11 + t * 0.13);
+          const idx = Math.max(0, Math.min(ramp.length - 1, Math.floor(n * ramp.length)));
+          ctx.fillText(ramp[idx], x * cell, y * cell);
+        }
+      }
+    };
+
+    window.addEventListener("resize", () => { resize(); draw(this._at || 0); }, { passive: true });
+    draw(0);
+    if (this.reduced) return;
+    if ("IntersectionObserver" in window) {
+      new IntersectionObserver(e => { loop.offscreen = !e[0].isIntersecting; loop.paused = loop.offscreen || document.hidden; }, { threshold: 0 }).observe(canvas);
+    }
+    let last = 0, t = 0;
+    const tick = (now) => {
+      if (loop.dead) return;
+      requestAnimationFrame(tick);
+      if (loop.paused || now - last < 80) return;
+      last = now; t += 0.09; draw(t);
+    };
+    requestAnimationFrame(tick);
+  }
+
+  setupDrawing() {
+    const reduced = this.reduced;
+    document.querySelectorAll("svg[data-draw]").forEach(svg => {
+      if (svg.dataset.drawInit) return;
+      svg.dataset.drawInit = "1";
+      Array.from(svg.querySelectorAll("path")).forEach((p, i) => {
+        const len = p.getTotalLength ? p.getTotalLength() : 600;
+        p.style.strokeDasharray = len + " " + len;
+        p.style.strokeDashoffset = reduced ? "0" : String(len);
+        p.style.transition = "stroke-dashoffset 1100ms cubic-bezier(0.22,1,0.36,1) " + (i * 120) + "ms";
+      });
+      if (reduced) svg.dataset.revealed = "1";
+    });
+    this.revealPass();
+  }
+
+  revealPass() {
+    const vh = window.innerHeight || 800;
+    document.querySelectorAll("svg[data-draw], [data-wipe], [data-brighten]").forEach(el => {
+      if (el.dataset.revealed) return;
+      if (el.getBoundingClientRect().top >= vh * 0.9) return;
+      el.dataset.revealed = "1";
+      if (el.tagName.toLowerCase() === "svg") {
+        el.querySelectorAll("path").forEach(p => { p.style.strokeDashoffset = "0"; });
+      }
+    });
+  }
+
+  animateCheck() {
+    requestAnimationFrame(() => {
+      const svg = this.checkRef.current;
+      if (!svg) return;
+      const p = svg.querySelector("path");
+      const len = p.getTotalLength();
+      p.style.strokeDasharray = len + " " + len;
+      p.style.strokeDashoffset = String(len);
+      p.style.transition = "stroke-dashoffset 620ms cubic-bezier(0.22,1,0.36,1)";
+      requestAnimationFrame(() => { p.style.strokeDashoffset = "0"; });
+    });
+  }
+
+  renderVals() {
+    const taken = ["jin", "admin", "lao"];
+    return {
+      navRef: this.navRef,
+      heroDither: this.heroDither,
+      asciiCanvas: this.asciiCanvas,
+      heroWindow: this.heroWindow,
+      checkRef: this.checkRef,
+      submitted: this.state.submitted,
+      notSubmitted: !this.state.submitted,
+      usernameError: this.state.usernameError,
+      emailError: this.state.emailError,
+      successMessage: "You're in — @" + (this.state.username || "you") + " is yours.",
+      onUsername: (e) => this.setState({ username: e.target.value.trim(), usernameError: "" }),
+      onEmail: (e) => this.setState({ email: e.target.value.trim(), emailError: "" }),
+      onSubmit: (e) => {
+        e.preventDefault();
+        const u = this.state.username, m = this.state.email;
+        const uErr = taken.indexOf(u.toLowerCase()) > -1 ? "Taken. Try another?" : "";
+        const mErr = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(m) ? "" : "That email doesn't look right.";
+        if (uErr || mErr) { this.setState({ usernameError: uErr, emailError: mErr }); return; }
+        this.setState({ submitted: true }, () => this.animateCheck());
+      }
+    };
+  }
+}
+</script>
+</body>
+</html>
