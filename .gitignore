@@ -5,3 +5,15 @@ dist/
 .env
 .dev.vars
 .npmrc
+
+# Local agent/tooling state and generated review notes
+.agents/
+.claude/
+skills-lock.json
+*_output.txt
+*.new
+*.step1
+
+# Duplicate source copies; the app uses public/audio/audio.m4a
+public/audio/Halo 3 Warthog Run OST HQ.m4a
+public/audio/audio/

@@ -2,6 +2,7 @@
 import '../styles/theme.css';
 import '@fontsource/redaction-35';
 import '@fontsource-variable/geist';
+import { SmoothScroller } from '../components/SmoothScroller';
 
 interface Props {
 	title: string;
@@ -20,6 +21,8 @@ const { title } = Astro.props;
 		<title>{title}</title>
 	</head>
 	<body>
+		<SmoothScroller client:load />
 		<slot />
+		<script src="../scripts/reveal.ts"></script>
 	</body>
 </html>

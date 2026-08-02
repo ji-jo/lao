@@ -1,0 +1,71 @@
+.aurora-container {
+  perspective: 1000px;
+}
+
+.aurora-blob {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 50vw;
+  height: 50vw;
+  min-width: 600px;
+  min-height: 600px;
+  border-radius: 50%;
+  filter: blur(80px);
+  transform: translate(-50%, -50%);
+  animation-duration: 20s;
+  animation-iteration-count: infinite;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: transform;
+}
+
+.aurora-blob-1 {
+  background: #3b82f6;
+  animation-name: aurora-move-1;
+}
+
+.aurora-blob-2 {
+  background: #8b5cf6;
+  animation-name: aurora-move-2;
+  animation-delay: -5s;
+}
+
+.aurora-blob-3 {
+  background: #ec4899;
+  animation-name: aurora-move-3;
+  animation-delay: -10s;
+}
+
+.aurora-blob-4 {
+  background: #14b8a6;
+  animation-name: aurora-move-4;
+  animation-delay: -15s;
+}
+
+@keyframes aurora-move-1 {
+  0% { transform: translate(-50%, -50%) rotate(0deg) scale(1) translate(20%, 10%) rotate(0deg); }
+  33% { transform: translate(-50%, -50%) rotate(120deg) scale(1.2) translate(-20%, 20%) rotate(-120deg); }
+  66% { transform: translate(-50%, -50%) rotate(240deg) scale(0.9) translate(10%, -20%) rotate(-240deg); }
+  100% { transform: translate(-50%, -50%) rotate(360deg) scale(1) translate(20%, 10%) rotate(-360deg); }
+}
+
+@keyframes aurora-move-2 {
+  0% { transform: translate(-50%, -50%) rotate(0deg) scale(1.1) translate(-15%, -20%) rotate(0deg); }
+  33% { transform: translate(-50%, -50%) rotate(-120deg) scale(0.9) translate(25%, 15%) rotate(120deg); }
+  66% { transform: translate(-50%, -50%) rotate(-240deg) scale(1.2) translate(-10%, -25%) rotate(240deg); }
+  100% { transform: translate(-50%, -50%) rotate(-360deg) scale(1.1) translate(-15%, -20%) rotate(360deg); }
+}
+
+@keyframes aurora-move-3 {
+  0% { transform: translate(-50%, -50%) rotate(0deg) scale(0.9) translate(25%, -15%) rotate(0deg); }
+  33% { transform: translate(-50%, -50%) rotate(120deg) scale(1.1) translate(-10%, 25%) rotate(-120deg); }
+  66% { transform: translate(-50%, -50%) rotate(240deg) scale(1.2) translate(-20%, -10%) rotate(-240deg); }
+  100% { transform: translate(-50%, -50%) rotate(360deg) scale(0.9) translate(25%, -15%) rotate(-360deg); }
+}
+
+@keyframes aurora-move-4 {
+  0% { transform: translate(-50%, -50%) rotate(0deg) scale(1) translate(-20%, 25%) rotate(0deg); }
+  33% { transform: translate(-50%, -50%) rotate(-120deg) scale(0.9) translate(15%, -20%) rotate(120deg); }
+  66% { transform: translate(-50%, -50%) rotate(-240deg) scale(1.1) translate(25%, 10%) rotate(240deg); }
+  100% { transform: translate(-50%, -50%) rotate(-360deg) scale(1) translate(-20%, 25%) rotate(360deg); }
+}
