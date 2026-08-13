@@ -78,6 +78,45 @@ function resolveEditTarget(
 
 /** Shared offscreen ctx for measuring text during transforms. */
 let measureCtx: CanvasRenderingContext2D | null = null;
+
+function patchArtGroupIds(
+  project: Project,
+  frameIndex: number,
+  ids: string[],
+  groupId: string | undefined,
+): Project | null {
+  const idSet = new Set(ids);
+  let anyChanged = false;
+  const layers = project.layers.map((layer) => {
+    const target = resolveEditTarget(project, layer, frameIndex);
+    if (!target) return layer;
+    const cel = layer.frames[target.readIndex];
+    if (!cel) return layer;
+    let changed = false;
+    const stamp = <T extends { id: string; groupId?: string }>(item: T): T => {
+      if (!idSet.has(item.id)) return item;
+      if (!groupId) {
+        if (!item.groupId) return item;
+        changed = true;
+        const { groupId: _drop, ...rest } = item;
+        return rest as T;
+      }
+      if (item.groupId === groupId) return item;
+      changed = true;
+      return { ...item, groupId };
+    };
+    const strokes = cel.strokes.map(stamp);
+    const texts = cel.texts?.map(stamp);
+    const images = cel.images?.map(stamp);
+    if (!changed) return layer;
+    anyChanged = true;
+    const writeCel = target.cloneFromHeld
+      ? { ...cloneCel(cel), strokes, texts, images }
+      : { ...cel, strokes, texts, images };
+    return setCel(layer, target.writeIndex, writeCel);
+  });
+  return anyChanged ? { ...project, layers } : null;
+}
 function getMeasureCtx(): CanvasRenderingContext2D {
   if (!measureCtx) {
     measureCtx = document.createElement("canvas").getContext("2d")!;
@@ -190,6 +229,10 @@ interface ProjectState {
     scale: number,
     rotationRad: number,
   ) => void;
+  /** Bind selected art into one group (Ctrl+G). */
+  groupSelection: (ids: string[]) => void;
+  /** Clear groupId on selected art (Ctrl+Shift+G). */
+  ungroupSelection: (ids: string[]) => void;
   updateStrokeClip: (strokeId: string, clip: StrokeClip) => void;
   /** Broadcast easing to every stroke clip on every layer (and remember for new paths). */
   applyClipEasing: (easing: ClipEasing) => void;
@@ -1276,11 +1319,36 @@ export const useProject = create<ProjectState>((set, get) => {
               );
             })
           : undefined;
+        const images = cel.images
+          ? cel.images.map((im) => {
+              if (!idSet.has(im.id)) return im;
+              changed = true;
+              const cx = im.x + im.w / 2;
+              const cy = im.y + im.h / 2;
+              const [c] = transformPoints(
+                [{ x: cx, y: cy, pressure: 0, t: 0 }],
+                pivotX,
+                pivotY,
+                scale,
+                rotationRad,
+              );
+              const nw = Math.max(1, im.w * scale);
+              const nh = Math.max(1, im.h * scale);
+              return {
+                ...im,
+                x: c!.x - nw / 2,
+                y: c!.y - nh / 2,
+                w: nw,
+                h: nh,
+                rotation: (im.rotation ?? 0) + rotationRad,
+              };
+            })
+          : undefined;
         if (!changed) continue;
 
         const writeCel = target.cloneFromHeld
-          ? { ...cloneCel(cel), strokes, texts }
-          : { ...cel, strokes, texts };
+          ? { ...cloneCel(cel), strokes, texts, images }
+          : { ...cel, strokes, texts, images };
         nextProject = replaceLayer(
           nextProject,
           li,
@@ -1289,6 +1357,27 @@ export const useProject = create<ProjectState>((set, get) => {
         anyChanged = true;
       }
       if (anyChanged) commit(nextProject);
+    },
+
+    groupSelection: (ids) => {
+      const unique = [...new Set(ids)].filter(Boolean);
+      if (unique.length < 2) return;
+      const { project, frameIndex } = get();
+      const next = patchArtGroupIds(
+        project,
+        frameIndex,
+        unique,
+        crypto.randomUUID(),
+      );
+      if (next) commit(next);
+    },
+
+    ungroupSelection: (ids) => {
+      const unique = [...new Set(ids)].filter(Boolean);
+      if (!unique.length) return;
+      const { project, frameIndex } = get();
+      const next = patchArtGroupIds(project, frameIndex, unique, undefined);
+      if (next) commit(next);
     },
 
     updateStrokeClip: (strokeId, clip) => {

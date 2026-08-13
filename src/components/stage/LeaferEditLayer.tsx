@@ -41,6 +41,9 @@ import {
   getImageLivePreview,
   type GuideLine,
 } from "@/engine/canvasImage";
+import {
+  setShapeLivePreview,
+} from "@/engine/shapeLivePreview";
 import { hitTextBox } from "@/engine/textGeometry";
 import {
   findArtAtProject,
@@ -302,6 +305,7 @@ export function LeaferEditLayer({
     })();
     if (!existing || !canEditShapeWithLeafer(existing)) {
       shapeEditDirtyRef.current = false;
+      setShapeLivePreview(null);
       return;
     }
     const baked = bakeEditableShape(k, node, {
@@ -334,6 +338,7 @@ export function LeaferEditLayer({
           }
         }
         shapeEditDirtyRef.current = false;
+        setShapeLivePreview(null);
         return;
       }
     } else {
@@ -345,6 +350,7 @@ export function LeaferEditLayer({
         prevH >= 1
       ) {
         shapeEditDirtyRef.current = false;
+        setShapeLivePreview(null);
         return;
       }
     }
@@ -353,6 +359,7 @@ export function LeaferEditLayer({
       shapeKind: k,
     });
     shapeEditDirtyRef.current = false;
+    setShapeLivePreview(null);
     node.scaleX = 1;
     node.scaleY = 1;
     if (k === "line" || k === "arrow") {
@@ -431,6 +438,7 @@ export function LeaferEditLayer({
         shapeEditKindRef.current = null;
         shapeEditDirtyRef.current = false;
         shapeEditIgnoreTransformsRef.current = false;
+        setShapeLivePreview(null);
         imageEditProxyRef.current = null;
         imageEditIdRef.current = null;
         imageEditDirtyRef.current = false;
@@ -481,6 +489,7 @@ export function LeaferEditLayer({
         shapeEditKindRef.current = null;
         shapeEditDirtyRef.current = false;
         shapeEditIgnoreTransformsRef.current = false;
+        setShapeLivePreview(null);
         imageEditProxyRef.current = null;
         imageEditIdRef.current = null;
         imageEditDirtyRef.current = false;
@@ -1153,6 +1162,7 @@ export function LeaferEditLayer({
         shapeEditKindRef.current = null;
         shapeEditDirtyRef.current = false;
         shapeEditIgnoreTransformsRef.current = false;
+        setShapeLivePreview(null);
       }
       return;
     }
@@ -1180,6 +1190,7 @@ export function LeaferEditLayer({
       shapeEditStrokeIdRef.current = null;
       shapeEditKindRef.current = null;
       shapeEditDirtyRef.current = false;
+      setShapeLivePreview(null);
     };
 
     const commitIfDirty = () => {
@@ -1194,10 +1205,39 @@ export function LeaferEditLayer({
       }
     };
 
+    const publishLive = () => {
+      const node = shapeEditProxyRef.current;
+      const id = shapeEditStrokeIdRef.current;
+      const k = shapeEditKindRef.current;
+      if (!node || !id || !k) return;
+      const existing = (() => {
+        const ps = useProject.getState();
+        for (const layer of ps.project.layers) {
+          for (const frame of layer.frames) {
+            const hit = frame?.strokes.find((s) => s.id === id);
+            if (hit) return hit;
+          }
+        }
+        return null;
+      })();
+      if (!existing) return;
+      const baked = bakeEditableShape(k, node, {
+        cornerRadius: existing.cornerRadius,
+        squircle: existing.squircle,
+        cornerSmoothing: existing.cornerSmoothing,
+      });
+      setShapeLivePreview({
+        id,
+        points: baked.points,
+        shapeBox: baked.shapeBox,
+      });
+    };
+
     const markDirty = () => {
       // Programmatic editor.select() emits SCALE/MOVE — ignore until user pointerdown.
       if (shapeEditIgnoreTransformsRef.current) return;
       shapeEditDirtyRef.current = true;
+      publishLive();
     };
 
     const onPointerUp = () => commitIfDirty();
@@ -1248,24 +1288,13 @@ export function LeaferEditLayer({
       } else {
         const node = shapeEditProxyRef.current!;
         if (!shapeEditDirtyRef.current) {
-          const squircleOn = kind === "rect" && !!stroke.squircle;
-          // Squircle preview comes from canvas-baked points; keep Leafer chrome
-          // hittable but invisible so we don't double-draw circular corners.
-          // Line/arrow ink is painted on canvas — keep Leafer nearly invisible
-          // but not fully transparent (zero bounds → bake collapses to a dot).
-          if (kind === "line" || kind === "arrow") {
-            node.stroke = stroke.color;
-            node.strokeWidth = Math.max(0.5, stroke.size, 8);
-            node.opacity = 0.001;
-          } else {
-            node.stroke = squircleOn ? "transparent" : stroke.color;
-            node.strokeWidth = Math.max(0.5, stroke.size);
-            node.opacity = 1;
-          }
+          // Keep Leafer nearly invisible so canvas ink is the only drawing.
+          // Zero opacity collapses editor bounds and bakes the stroke to a dot.
+          node.stroke = stroke.color;
+          node.strokeWidth = Math.max(0.5, stroke.size, 8);
+          node.opacity = 0.001;
           if (isClosedShape(kind)) {
-            (node as Rect | Ellipse | Polygon).fill = squircleOn
-              ? "transparent"
-              : (stroke.fillColor ?? "transparent");
+            (node as Rect | Ellipse | Polygon).fill = "transparent";
           }
           if (kind === "rect") {
             (node as Rect).cornerRadius = Math.max(0, stroke.cornerRadius ?? 0);
@@ -1286,7 +1315,8 @@ export function LeaferEditLayer({
         app.editor.on(EditorMoveEvent.MOVE, markDirty);
         app.editor.on(EditorScaleEvent.SCALE, markDirty);
         app.editor.on(EditorRotateEvent.ROTATE, markDirty);
-        host?.addEventListener("pointerdown", armUserTransforms);
+        host?.addEventListener("pointerdown", armUserTransforms, true);
+        window.addEventListener("pointerdown", armUserTransforms, true);
         window.addEventListener("pointerup", onPointerUp);
         window.addEventListener("keydown", onKeyDown);
       }
@@ -1303,7 +1333,8 @@ export function LeaferEditLayer({
         app.editor.off(EditorScaleEvent.SCALE, markDirty);
         app.editor.off(EditorRotateEvent.ROTATE, markDirty);
       }
-      host?.removeEventListener("pointerdown", armUserTransforms);
+      host?.removeEventListener("pointerdown", armUserTransforms, true);
+      window.removeEventListener("pointerdown", armUserTransforms, true);
       window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("keydown", onKeyDown);
       commitIfDirty();

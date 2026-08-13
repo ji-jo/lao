@@ -74,6 +74,11 @@ import {
   setImageLivePreview,
   subscribeImageLivePreview,
 } from "@/engine/canvasImage";
+import {
+  getShapeLivePreview,
+  setShapeLivePreview,
+  subscribeShapeLivePreview,
+} from "@/engine/shapeLivePreview";
 import { findArtAtProject } from "@/engine/artHitTest";
 import {
   computeFloodFill,
@@ -389,11 +394,15 @@ export function StageCanvas() {
     const unsubLive = subscribeImageLivePreview(() => {
       dirtyRef.current = true;
     });
+    const unsubShapeLive = subscribeShapeLivePreview(() => {
+      dirtyRef.current = true;
+    });
     const unsubTools = useTools.subscribe((s, prev) => {
       // Leaving select tears Leafer down — drop any stale live preview so
       // StageCanvas paints from project bounds (not a zero-size drag ghost).
       if (prev.tool === "select" && s.tool !== "select") {
         setImageLivePreview(null);
+        setShapeLivePreview(null);
       }
       if (s.tool === "path" && prev.tool !== "path") {
         const selIds = useSelection.getState().ids;
@@ -417,6 +426,7 @@ export function StageCanvas() {
     return () => {
       unsubRef();
       unsubLive();
+      unsubShapeLive();
       unsubTools();
     };
   }, []);
@@ -579,12 +589,14 @@ export function StageCanvas() {
       skipImageId?: string,
     ) {
       const liveImg = getImageLivePreview();
+      const liveShape = getShapeLivePreview();
       // Never memoize cels that contain images — empty-blit cache races made
       // placed photos vanish after tool switches / HMR.
       const canCacheBase =
         !displaced &&
         !displacedBezier &&
         !liveImg &&
+        !liveShape &&
         !(images && images.length > 0);
       const baseKey = canCacheBase
         ? celContentKey(strokes, texts, images, colorOverride, skipTextId, skipImageId)
@@ -913,6 +925,56 @@ export function StageCanvas() {
               // Avoid stale bezierNodes winning over transformed points.
               next.bezierNodes = undefined;
             }
+            if (s.shapeBox) {
+              const box = s.shapeBox;
+              if (s.shapeKind === "line" || s.shapeKind === "arrow") {
+                const [p0] = transformPoints(
+                  [{ x: box.x, y: box.y, pressure: 0, t: 0 }],
+                  xf.pivotX,
+                  xf.pivotY,
+                  xf.scale,
+                  xf.rotation,
+                );
+                const [p1] = transformPoints(
+                  [
+                    {
+                      x: box.x + box.w,
+                      y: box.y + box.h,
+                      pressure: 0,
+                      t: 0,
+                    },
+                  ],
+                  xf.pivotX,
+                  xf.pivotY,
+                  xf.scale,
+                  xf.rotation,
+                );
+                next.shapeBox = {
+                  x: p0!.x,
+                  y: p0!.y,
+                  w: p1!.x - p0!.x,
+                  h: p1!.y - p0!.y,
+                  rotation: 0,
+                };
+              } else {
+                const cx = box.x + box.w / 2;
+                const cy = box.y + box.h / 2;
+                const [c] = transformPoints(
+                  [{ x: cx, y: cy, pressure: 0, t: 0 }],
+                  xf.pivotX,
+                  xf.pivotY,
+                  xf.scale,
+                  xf.rotation,
+                );
+                next.shapeBox = {
+                  x: c!.x - (box.w * xf.scale) / 2,
+                  y: c!.y - (box.h * xf.scale) / 2,
+                  w: Math.max(1, box.w * xf.scale),
+                  h: Math.max(1, box.h * xf.scale),
+                  rotation: (box.rotation ?? 0) + xf.rotation || undefined,
+                };
+              }
+            }
             return next;
           });
         }
@@ -973,29 +1035,6 @@ export function StageCanvas() {
             return timeMs >= c.startMs;
           });
         }
-        // Leafer owns the selected shape while select-tool editor is up — hide
-        // canvas duplicate. Squircle corners are baked into stroke points and
-        // Leafer Rect can't draw them, so keep canvas paint in that case.
-        // Canvas images always paint here (artboard clip + export parity). Leafer
-        // only adds transform chrome on top while selected — never skip the blit
-        // or the bitmap vanishes the moment the user leaves the select tool.
-        if (
-          isTarget &&
-          tools.tool === "select" &&
-          !textEditRef.current
-        ) {
-          const ids = useSelection.getState().ids;
-          if (ids.length === 1) {
-            const hit = (cel?.strokes ?? []).find((s) => s.id === ids[0]);
-            if (hit && canEditShapeWithLeafer(hit) && !hit.squircle) {
-              // Line/arrow ink (+ arrow head) stays on canvas; Leafer proxy is
-              // near-invisible chrome only (no @leafer-in/arrow plugin).
-              if (hit.shapeKind !== "line" && hit.shapeKind !== "arrow") {
-                strokes = strokes.filter((s) => s.id !== hit.id);
-              }
-            }
-          }
-        }
         const workflow = ps.project.workflow ?? "animatron";
         // Path Maker: pose art on Draw scrub/play (parity with paintProjectFrame).
         const hasMotion =
@@ -1038,6 +1077,14 @@ export function StageCanvas() {
         }
         const displaced = new Map<string, StrokePoint[]>();
         const displacedBezier = new Map<string, import("@/model/types").BezierNode[]>();
+        const shapeLive = getShapeLivePreview();
+        if (shapeLive) {
+          strokes = strokes.map((s) =>
+            s.id === shapeLive.id
+              ? { ...s, points: shapeLive.points, shapeBox: shapeLive.shapeBox }
+              : s,
+          );
+        }
         const motionDisp = hasMotion
           ? motionDisplacement(
               layer,

@@ -116,6 +116,8 @@ export interface Stroke {
   squircle?: boolean;
   /** Corner smoothing 0–1 when squircle is on (0 = circular, 1 = continuous). */
   cornerSmoothing?: number;
+  /** Shared with other art when grouped (Ctrl+G). */
+  groupId?: string;
 }
 
 export type TextAlign = "left" | "center" | "right";
@@ -183,6 +185,8 @@ export interface TextElement {
    * - `>0` — reveal by elapsed time × speed (preview === export)
    */
   typewriterSpeed?: number;
+  /** Shared with other art when grouped (Ctrl+G). */
+  groupId?: string;
 }
 
 /**
@@ -209,6 +213,8 @@ export interface ImageElement {
   naturalHeight: number;
   /** Animatron clip timing (ignored in stop-motion paint) */
   clip?: StrokeClip;
+  /** Shared with other art when grouped (Ctrl+G). */
+  groupId?: string;
 }
 
 export interface Frame {

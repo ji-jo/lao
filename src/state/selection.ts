@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { resolveCel } from "@/model/types";
 import { selectableIdsInLayers } from "@/engine/layerCel";
+import { expandSelectionByGroups } from "@/engine/artGroup";
 import { useProject } from "@/state/project";
 
 interface SelectionState {
@@ -55,13 +56,22 @@ export const useSelection = create<SelectionState>((set, get) => ({
   ids: [],
   nodeIds: [],
   layerIndices: [],
-  set: (ids) => set({ ids, nodeIds: [], layerIndices: [] }),
-  toggle: (id) =>
-    set((s) => ({
-      ids: s.ids.includes(id) ? s.ids.filter((x) => x !== id) : [...s.ids, id],
-      nodeIds: [],
-      layerIndices: [],
-    })),
+  set: (ids) => {
+    const p = useProject.getState();
+    const expanded = expandSelectionByGroups(ids, p.project, p.frameIndex);
+    set({ ids: expanded, nodeIds: [], layerIndices: [] });
+  },
+  toggle: (id) => {
+    const p = useProject.getState();
+    const expanded = expandSelectionByGroups([id], p.project, p.frameIndex);
+    set((s) => {
+      const removing = s.ids.includes(id);
+      const next = removing
+        ? s.ids.filter((x) => !expanded.includes(x))
+        : [...new Set([...s.ids, ...expanded])];
+      return { ids: next, nodeIds: [], layerIndices: [] };
+    });
+  },
   setNodes: (nodeIds) => set({ nodeIds }),
   toggleNode: (strokeId, index) =>
     set((s) => {

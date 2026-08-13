@@ -203,6 +203,13 @@ export default function App() {
           useSelection.getState().selectAll();
           return;
         }
+        if (e.key.toLowerCase() === "g") {
+          e.preventDefault();
+          const ids = useSelection.getState().ids;
+          if (e.shiftKey) useProject.getState().ungroupSelection(ids);
+          else useProject.getState().groupSelection(ids);
+          return;
+        }
         if (e.key.toLowerCase() === "c" && !e.shiftKey) {
           const ids = useSelection.getState().ids;
           if (!ids.length) return;

@@ -2,7 +2,6 @@ import { Ellipse, Line, Polygon, Rect } from "leafer-ui";
 import type { Stroke } from "@/model/types";
 import {
   bakeShapeGeometry,
-  isClosedShape,
   type ShapeBakeResult,
 } from "@/engine/shapeGeometry";
 import {
@@ -21,21 +20,21 @@ export function makeEditableShapeFromStroke(
   const box = shapeBoxFromStroke(stroke);
   const rotDeg = ((box.rotation ?? 0) * 180) / Math.PI;
   const strokeColor = stroke.color;
-  const fill = isClosedShape(kind)
-    ? (stroke.fillColor ?? "transparent")
-    : "transparent";
   const strokeWidth = Math.max(0.5, stroke.size);
 
   if (kind === "circle") {
+    // Canvas paints the ink; Leafer is transform chrome only (opacity ~0).
+    // Visible fill/stroke here doubles the shape and lags during rotate/move.
     return new Ellipse({
       x: box.x,
       y: box.y,
       width: Math.max(1, box.w),
       height: Math.max(1, box.h),
-      fill,
+      fill: "transparent",
       stroke: strokeColor,
-      strokeWidth,
+      strokeWidth: Math.max(strokeWidth, 8),
       rotation: rotDeg,
+      opacity: 0.001,
       editable: true,
       hittable: true,
     });
@@ -48,10 +47,11 @@ export function makeEditableShapeFromStroke(
       y: box.y,
       width: rw,
       height: rh,
-      fill,
+      fill: "transparent",
       stroke: strokeColor,
-      strokeWidth,
+      strokeWidth: Math.max(strokeWidth, 8),
       rotation: rotDeg,
+      opacity: 0.001,
       points: [
         { x: rw / 2, y: 0 },
         { x: rw, y: rh / 2 },
@@ -98,10 +98,11 @@ export function makeEditableShapeFromStroke(
     y: box.y,
     width: Math.max(1, box.w),
     height: Math.max(1, box.h),
-    fill,
+    fill: "transparent",
     stroke: strokeColor,
-    strokeWidth,
+    strokeWidth: Math.max(strokeWidth, 8),
     rotation: rotDeg,
+    opacity: 0.001,
     cornerRadius: Math.max(0, stroke.cornerRadius ?? 0),
     editable: true,
     hittable: true,
