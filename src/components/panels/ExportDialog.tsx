@@ -78,7 +78,7 @@ function formatBytes(n: number): string {
 }
 
 function formatLabel(format: DialogExportFormat, animated: boolean): string {
-  if (format === "tsx") return animated ? "React player + JSON" : "React + JSON (static)";
+  if (format === "tsx") return animated ? "React TSX (inline SVG)" : "React TSX (static)";
   if (format === "json") return animated ? "lao-scene JSON" : "lao-scene JSON (static)";
   return animated ? "animated SVG" : "static SVG";
 }
@@ -241,8 +241,7 @@ export function ExportDialog({
     const scene = buildLaoScene(project, codeOpts);
     if (format === "json") return new TextEncoder().encode(JSON.stringify(scene)).length;
     if (format === "svg") return new TextEncoder().encode(renderSceneToSvg(scene)).length;
-    const files = emitProjectReactFiles(project, codeOpts);
-    return new TextEncoder().encode(files.tsx).length + new TextEncoder().encode(files.json).length;
+    return new TextEncoder().encode(emitProjectReact(project, codeOpts)).length;
   }, [isCodeExport, format, project, codeOpts]);
   const previewFrame = useMemo(
     () => previewFrameForExport(project, frameIndex),
@@ -303,7 +302,7 @@ export function ExportDialog({
       await navigator.clipboard.writeText(code);
       toastCopied(
         format === "tsx"
-          ? "React player copied"
+          ? "React component copied"
           : format === "json"
             ? "Scene JSON copied"
             : "SVG code copied",
@@ -341,10 +340,11 @@ export function ExportDialog({
         const name = project.name || "animation";
         if (format === "tsx") {
           const files = emitProjectReactFiles(project, codeOpts);
-          downloadBlob(new Blob([files.json], { type: "application/json" }), files.jsonFileName);
-          await new Promise((r) => setTimeout(r, 80));
-          downloadBlob(new Blob([files.tsx], { type: "text/plain;charset=utf-8" }), files.tsxFileName);
-          toastExported("tsx+json", name);
+          downloadBlob(
+            new Blob([files.tsx], { type: "text/plain;charset=utf-8" }),
+            files.tsxFileName,
+          );
+          toastExported("tsx", name);
         } else {
           const code = emitCode();
           const ext = format === "json" ? "json" : "svg";
@@ -400,7 +400,8 @@ export function ExportDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         hideClose
-        className="w-[400px] max-w-[400px] overflow-clip border-0 p-4 antialiased sm:max-w-[400px]"
+        size="lg"
+        className="w-[520px] max-h-[min(90dvh,calc(100dvh-2rem))] max-w-[min(520px,calc(100vw-2rem))] overflow-x-hidden overflow-y-auto border-0 p-5 antialiased sm:max-w-[min(520px,calc(100vw-2rem))]"
         // radius inline: the design-system shape context sets 18px on the panel
         // and would win over a `rounded-2xl` class — Paper 1CQ-0 specifies 16px
         style={{ backgroundColor: PAPER.surface, borderRadius: 16 }}
@@ -459,9 +460,9 @@ export function ExportDialog({
           </GradientHoverButton>
         </div>
 
-        {/* Export Type + Quality */}
-        <div className="flex items-start gap-4 self-stretch">
-          <div className="flex flex-1 flex-col items-start gap-3">
+        {/* Export Type, then Quality stacked — side-by-side clipped at 400px */}
+        <div className="flex flex-col items-stretch gap-4 self-stretch">
+          <div className="flex flex-col items-start gap-3 self-stretch">
             <FieldLabel>Export Type</FieldLabel>
             <PaperTabs
               label="Export Type"
@@ -471,7 +472,7 @@ export function ExportDialog({
             />
           </div>
           {!isCodeExport && (
-            <div className="flex flex-1 flex-col items-start gap-3">
+            <div className="flex flex-col items-start gap-3 self-stretch">
               <FieldLabel>Quality</FieldLabel>
               <PaperTabs
                 label="Quality"
@@ -487,7 +488,7 @@ export function ExportDialog({
         <div className="flex flex-col items-start gap-3 self-stretch">
           <FieldLabel>{isStillExport ? "Frame Preview" : "Video Preview"}</FieldLabel>
           <div
-            className="relative h-[200px] shrink-0 self-stretch overflow-clip rounded-lg"
+            className="relative h-[220px] shrink-0 self-stretch overflow-clip rounded-lg"
             style={
               transparent
                 ? {

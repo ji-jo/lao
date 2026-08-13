@@ -292,16 +292,45 @@ describe("animated animatron export", () => {
   });
 });
 
-describe("react + json export", () => {
-  test("React emit fetches JSON and does not inline SVG_INNER", async () => {
+describe("react export", () => {
+  test("React emit is a self-contained inline SVG component", async () => {
     const { emitProjectReact } = await import("@/export/code/emitReact");
-    const project = makeProject([inkStroke({ points: freehandPoints() })]);
+    const project = makeProject(
+      [
+        inkStroke({
+          points: freehandPoints(),
+          clip: {
+            startMs: 0,
+            durationMs: 400,
+            easing: { bezier: [0.44, 0, 0.56, 1], fadeInFrames: 0, fadeOutFrames: 0 },
+          },
+        }),
+      ],
+      "animatron",
+    );
     project.name = "hello clip";
     const tsx = emitProjectReact(project, { animated: true, transparent: true });
-    expect(tsx).toContain("src");
-    expect(tsx).toContain("./hello-clip.json");
-    expect(tsx).not.toContain("SVG_INNER");
-    expect(tsx.length).toBeLessThan(16_000);
+    expect(tsx).not.toContain("fetch(");
+    expect(tsx).not.toContain(".json");
+    expect(tsx).not.toContain("fonts.googleapis.com");
+    expect(tsx).toContain("className");
+    expect(tsx).toContain("viewBox");
+    expect(tsx).toContain("<path");
+    expect(tsx).toContain("<animate");
+    expect(tsx).toContain("strokeLinecap");
+    expect(tsx).toContain("strokeDashoffset");
+    expect(tsx).toContain("export const LaoAnimation");
+  });
+
+  test("React emit accepts className and uses a responsive viewBox", async () => {
+    const { emitProjectReact } = await import("@/export/code/emitReact");
+    const project = makeProject([inkStroke({ points: freehandPoints() })]);
+    const tsx = emitProjectReact(project, { animated: false, transparent: true, frame: 0 });
+    expect(tsx).toContain("className?: string");
+    expect(tsx).toContain('viewBox={"0 0 240 240"}');
+    expect(tsx).toContain('width: "100%"');
+    expect(tsx).toContain("preserveAspectRatio");
+    expect(tsx).not.toMatch(/\bsrc\s*[:=]/);
   });
 
   test("scene JSON round-trips path count", async () => {

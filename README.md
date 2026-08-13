@@ -29,7 +29,7 @@ npx tsc -b    # type-check
 - **Backgrounds**: color, linear/radial gradient, image (fill/cover/contain/crop), and
   live WebGL shaders (@paper-design/shaders-react).
 - **Export**: MP4 (H.264) / WebM VP9 with alpha / PNG composite / GIF via mediabunny +
-  gifenc; compact SVG, React player + JSON for code.
+  gifenc; compact SVG, self-contained React TSX (inline SVG), lao-scene JSON.
 
 ## Docs
 
