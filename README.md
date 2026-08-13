@@ -2,8 +2,10 @@
 
 A browser-based, hand-drawn animation studio. Draw with pressure brushes, animate
 frame-by-frame with onion skin and auto-key, let lines **boil** (seeded jitter, on 2s),
-preview at full quality, and export GIF / MP4 / WebM. Projects save offline as `.lao` files
-with IndexedDB autosave recovery.
+preview at full quality, and export GIF / MP4 / WebM / PNG / SVG. Projects save offline
+as `.lao` files with IndexedDB autosave recovery.
+
+The marketing site lives in [`website/`](website/).
 
 ## Run
 
@@ -26,8 +28,8 @@ npx tsc -b    # type-check
 - **Preview**: Remotion Player playback, reference image/video attachment.
 - **Backgrounds**: color, linear/radial gradient, image (fill/cover/contain/crop), and
   live WebGL shaders (@paper-design/shaders-react).
-- **Export**: MP4 (H.264) / WebM (VP9) via mediabunny (WebCodecs), GIF via gifenc,
-  resolution presets from 9:16 Reels to 2.39:1 Scope.
+- **Export**: MP4 (H.264) / WebM VP9 with alpha / PNG composite / GIF via mediabunny +
+  gifenc; compact SVG, React player + JSON for code.
 
 ## Docs
 
