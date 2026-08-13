@@ -14,6 +14,7 @@ import {
   applyFitToGroup,
   canEditShapeWithLeafer,
   leaferTextToCommit,
+  shapeBoxToLeaferCenter,
   textElementToLeaferProps,
   type StageFit,
   type TextCommitResult,
@@ -370,8 +371,9 @@ export function LeaferEditLayer({
         y: baked.shapeBox.h,
       };
     } else {
-      node.x = baked.shapeBox.x;
-      node.y = baked.shapeBox.y;
+      const c = shapeBoxToLeaferCenter(baked.shapeBox);
+      node.x = c.x;
+      node.y = c.y;
       node.width = baked.shapeBox.w;
       node.height = baked.shapeBox.h;
       node.rotation = ((baked.shapeBox.rotation ?? 0) * 180) / Math.PI;
@@ -462,6 +464,8 @@ export function LeaferEditLayer({
         selectedStyle: { stroke: "#A78BFA", strokeWidth: 2 },
         hoverStyle: { stroke: "#A78BFA", strokeWidth: 1.5 },
         pointSize: 10,
+        around: "center",
+        rotateAround: "center",
         // 0 falls back to Leafer's default 45° — use 5° for image/shape rotate.
         rotateGap: 5,
       },
@@ -1632,8 +1636,8 @@ export function LeaferEditLayer({
           Math.abs(snapped.box.x - baked.x) > 0.01 ||
           Math.abs(snapped.box.y - baked.y) > 0.01
         ) {
-          node.x = snapped.box.x;
-          node.y = snapped.box.y;
+          node.x = snapped.box.x + snapped.box.w / 2;
+          node.y = snapped.box.y + snapped.box.h / 2;
         }
       }
       commitIfDirty();
@@ -1677,8 +1681,8 @@ export function LeaferEditLayer({
         }
       } else if (!imageEditDirtyRef.current) {
         const node = imageEditProxyRef.current!;
-        node.x = image.x;
-        node.y = image.y;
+        node.x = image.x + image.w / 2;
+        node.y = image.y + image.h / 2;
         node.width = image.w;
         node.height = image.h;
         node.rotation = ((image.rotation ?? 0) * 180) / Math.PI;

@@ -138,6 +138,32 @@ export function shapeBoxFromStroke(stroke: Stroke): ShapeBox {
   return { x: box.x, y: box.y, w: box.w, h: box.h, rotation: 0 };
 }
 
+/** Editor rotates around center — Leafer x/y is the box center, shapeBox is top-left. */
+export function shapeBoxToLeaferCenter(box: {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}): { x: number; y: number } {
+  return { x: box.x + box.w / 2, y: box.y + box.h / 2 };
+}
+
+export function leaferCenterToShapeBox(geo: {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rotationDeg: number;
+}): { x: number; y: number; w: number; h: number; rotationDeg: number } {
+  return {
+    x: geo.x - geo.w / 2,
+    y: geo.y - geo.h / 2,
+    w: geo.w,
+    h: geo.h,
+    rotationDeg: geo.rotationDeg,
+  };
+}
+
 export function applyFitToGroup(
   group: { x?: number; y?: number; scaleX?: number; scaleY?: number },
   fit: StageFit,

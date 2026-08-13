@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 import {
   canEditShapeWithLeafer,
   extrasAfterPathEdit,
+  leaferCenterToShapeBox,
   leaferTextToCommit,
+  shapeBoxToLeaferCenter,
   textElementToLeaferProps,
 } from "@/components/stage/leaferBridge";
 import { bakeShapeGeometry } from "@/engine/shapeGeometry";
@@ -109,5 +111,27 @@ describe("bakeShapeGeometry", () => {
     expect(baked.shapeBox.rotation ?? 0).toBe(0);
     expect(Math.abs(baked.shapeBox.w)).toBeLessThan(1e-6);
     expect(Math.abs(baked.shapeBox.h)).toBeCloseTo(100, 5);
+  });
+
+  test("center origin round-trips to the unrotated top-left box", () => {
+    const box = { x: 10, y: 20, w: 100, h: 50 };
+    const c = shapeBoxToLeaferCenter(box);
+    expect(c.x).toBeCloseTo(60, 5);
+    expect(c.y).toBeCloseTo(45, 5);
+    const back = leaferCenterToShapeBox({
+      ...c,
+      w: box.w,
+      h: box.h,
+      rotationDeg: 45,
+    });
+    expect(back.x).toBeCloseTo(10, 5);
+    expect(back.y).toBeCloseTo(20, 5);
+    const baked = bakeShapeGeometry("rect", back);
+    const xs = baked.points.map((p) => p.x);
+    const ys = baked.points.map((p) => p.y);
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+    const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    expect(cx).toBeCloseTo(60, 1);
+    expect(cy).toBeCloseTo(45, 1);
   });
 });

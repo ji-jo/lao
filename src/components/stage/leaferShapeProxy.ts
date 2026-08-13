@@ -6,10 +6,15 @@ import {
 } from "@/engine/shapeGeometry";
 import {
   shapeBoxFromStroke,
+  shapeBoxToLeaferCenter,
+  leaferCenterToShapeBox,
 } from "@/components/stage/leaferBridge";
 import type { ShapeToolId } from "@/state/tools";
 
 export type EditableShapeProxy = Rect | Ellipse | Line | Polygon;
+
+/** Editor rotates around center; x/y must be the box center so bake matches canvas. */
+const CENTER_XFORM = { origin: "center" as const, around: "center" as const };
 
 /** Mount a Leafer primitive that matches a shape-tool stroke. */
 export function makeEditableShapeFromStroke(
@@ -24,10 +29,10 @@ export function makeEditableShapeFromStroke(
 
   if (kind === "circle") {
     // Canvas paints the ink; Leafer is transform chrome only (opacity ~0).
-    // Visible fill/stroke here doubles the shape and lags during rotate/move.
+    const c = shapeBoxToLeaferCenter(box);
     return new Ellipse({
-      x: box.x,
-      y: box.y,
+      x: c.x,
+      y: c.y,
       width: Math.max(1, box.w),
       height: Math.max(1, box.h),
       fill: "transparent",
@@ -37,14 +42,16 @@ export function makeEditableShapeFromStroke(
       opacity: 0.001,
       editable: true,
       hittable: true,
+      ...CENTER_XFORM,
     });
   }
   if (kind === "diamond") {
     const rw = Math.max(1, box.w);
     const rh = Math.max(1, box.h);
+    const c = shapeBoxToLeaferCenter(box);
     return new Polygon({
-      x: box.x,
-      y: box.y,
+      x: c.x,
+      y: c.y,
       width: rw,
       height: rh,
       fill: "transparent",
@@ -60,6 +67,7 @@ export function makeEditableShapeFromStroke(
       ],
       editable: true,
       hittable: true,
+      ...CENTER_XFORM,
     });
   }
   if (kind === "line" || kind === "arrow") {
@@ -93,9 +101,10 @@ export function makeEditableShapeFromStroke(
     }
     return line;
   }
+  const c = shapeBoxToLeaferCenter(box);
   return new Rect({
-    x: box.x,
-    y: box.y,
+    x: c.x,
+    y: c.y,
     width: Math.max(1, box.w),
     height: Math.max(1, box.h),
     fill: "transparent",
@@ -106,6 +115,7 @@ export function makeEditableShapeFromStroke(
     cornerRadius: Math.max(0, stroke.cornerRadius ?? 0),
     editable: true,
     hittable: true,
+    ...CENTER_XFORM,
   });
 }
 
@@ -143,11 +153,13 @@ export function bakeEditableShape(
   }
 
   return bakeShapeGeometry(kind, {
-    x: Number(node.x) || 0,
-    y: Number(node.y) || 0,
-    w: Math.max(1, (Number(node.width) || 1) * sx),
-    h: Math.max(1, (Number(node.height) || 1) * sy),
-    rotationDeg: rotDeg,
+    ...leaferCenterToShapeBox({
+      x: Number(node.x) || 0,
+      y: Number(node.y) || 0,
+      w: Math.max(1, (Number(node.width) || 1) * sx),
+      h: Math.max(1, (Number(node.height) || 1) * sy),
+      rotationDeg: rotDeg,
+    }),
     cornerRadius: corners?.cornerRadius,
     squircle: corners?.squircle,
     cornerSmoothing: corners?.cornerSmoothing,

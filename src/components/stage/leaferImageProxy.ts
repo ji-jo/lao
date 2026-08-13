@@ -1,6 +1,8 @@
 import { Rect } from "leafer-ui";
 import type { ImageElement } from "@/model/types";
 
+const CENTER_XFORM = { origin: "center" as const, around: "center" as const };
+
 /**
  * Leafer proxy for a canvas ImageElement.
  * Shows the real bitmap while selected (transform chrome). StageCanvas also
@@ -9,14 +11,15 @@ import type { ImageElement } from "@/model/types";
 export function makeEditableImageFromElement(el: ImageElement): Rect {
   const rotDeg = ((el.rotation ?? 0) * 180) / Math.PI;
   return new Rect({
-    x: el.x,
-    y: el.y,
+    x: el.x + el.w / 2,
+    y: el.y + el.h / 2,
     width: Math.max(1, el.w),
     height: Math.max(1, el.h),
     rotation: rotDeg,
     opacity: el.opacity ?? 1,
     editable: !el.locked,
     hittable: true,
+    ...CENTER_XFORM,
     fill: {
       type: "image",
       url: el.src,
@@ -39,11 +42,13 @@ export function bakeEditableImage(node: Rect): {
   const snappedDeg = Math.round(rotDeg / 5) * 5;
   const sx = Math.abs(Number(node.scaleX) || 1);
   const sy = Math.abs(Number(node.scaleY) || 1);
+  const w = Math.max(1, (Number(node.width) || 1) * sx);
+  const h = Math.max(1, (Number(node.height) || 1) * sy);
   return {
-    x: Number(node.x) || 0,
-    y: Number(node.y) || 0,
-    w: Math.max(1, (Number(node.width) || 1) * sx),
-    h: Math.max(1, (Number(node.height) || 1) * sy),
+    x: (Number(node.x) || 0) - w / 2,
+    y: (Number(node.y) || 0) - h / 2,
+    w,
+    h,
     rotation: (snappedDeg * Math.PI) / 180,
   };
 }
