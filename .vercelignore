@@ -1,0 +1,15 @@
+.tmp-*
+*.log
+tsc-out.txt
+debug-*.log
+test_*.cjs
+test_*.ts
+test_*.png
+onion_test*.png
+demo-*.html
+.agents
+.claude
+.cursor
+docs
+/scripts
+/tools

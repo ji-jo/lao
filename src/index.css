@@ -1,0 +1,616 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/inter/wght-italic.css";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+@import "@fontsource/redaction-35";
+
+/* Include sibling-consumer builds (for example Demo's Vite shell). */
+@source "./";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --font-heading: var(--font-sans);
+    --font-sans: 'Geist Variable', 'Inter Variable', sans-serif;
+    --font-mono: 'Geist Mono Variable', ui-monospace, monospace;
+    --font-redaction: 'Redaction 35', serif;
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar: var(--sidebar);
+    --color-chart-5: var(--chart-5);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
+    --color-surface-1: var(--surface-1);
+    --color-surface-2: var(--surface-2);
+    --color-surface-3: var(--surface-3);
+    --color-surface-4: var(--surface-4);
+    --color-surface-5: var(--surface-5);
+    --color-surface-6: var(--surface-6);
+    --color-surface-7: var(--surface-7);
+    --color-surface-8: var(--surface-8);
+    --shadow-surface-1: var(--shadow-1);
+    --shadow-surface-2: var(--shadow-2);
+    --shadow-surface-3: var(--shadow-3);
+    --shadow-surface-4: var(--shadow-4);
+    --shadow-surface-5: var(--shadow-5);
+    --shadow-surface-6: var(--shadow-6);
+    --shadow-surface-7: var(--shadow-7);
+    --shadow-surface-8: var(--shadow-8);
+    --color-dm-drop: var(--dm-drop);
+    --color-dm-ring-high: var(--dm-ring-high);
+    --color-dm-ring-mid: var(--dm-ring-mid);
+    --color-dm-ring-base: var(--dm-ring-base);
+    --color-dm-hi-peak: var(--dm-hi-peak);
+    --color-dm-hi-high: var(--dm-hi-high);
+    --color-dm-hi-mid: var(--dm-hi-mid);
+    --color-dm-hi-base: var(--dm-hi-base);
+    --shadow-8: var(--shadow-8);
+    --shadow-7: var(--shadow-7);
+    --shadow-6: var(--shadow-6);
+    --shadow-5: var(--shadow-5);
+    --shadow-4: var(--shadow-4);
+    --shadow-3: var(--shadow-3);
+    --shadow-2: var(--shadow-2);
+    --shadow-1: var(--shadow-1);
+    --color-shadow-color: var(--shadow-color);
+  @keyframes spinner-move {
+  to {
+    stroke-dashoffset: -100;
+        }
+    }
+  @keyframes spinner-dash {
+  0%, 100% {
+    stroke-dasharray: 15 85;
+        }
+  50% {
+    stroke-dasharray: 40 60;
+        }
+    }
+}
+
+:root {
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.145 0 0);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.145 0 0);
+    --primary: oklch(0.205 0 0);
+    --primary-foreground: oklch(0.985 0 0);
+    --secondary: oklch(0.97 0 0);
+    --secondary-foreground: oklch(0.205 0 0);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+    --accent: oklch(0.97 0 0);
+    --accent-foreground: oklch(0.205 0 0);
+    --destructive: oklch(0.577 0.245 27.325);
+    --border: oklch(0.922 0 0);
+    --input: oklch(0.922 0 0);
+    --ring: oklch(0.708 0 0);
+    --chart-1: oklch(0.87 0 0);
+    --chart-2: oklch(0.556 0 0);
+    --chart-3: oklch(0.439 0 0);
+    --chart-4: oklch(0.371 0 0);
+    --chart-5: oklch(0.269 0 0);
+    --radius: 0.625rem;
+    --sidebar: oklch(0.985 0 0);
+    --sidebar-foreground: oklch(0.145 0 0);
+    --sidebar-primary: oklch(0.205 0 0);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.97 0 0);
+    --sidebar-accent-foreground: oklch(0.205 0 0);
+    --sidebar-border: oklch(0.922 0 0);
+    --sidebar-ring: oklch(0.708 0 0);
+    --surface-1: #FAFAFA;
+    --surface-2: #FCFCFC;
+    --surface-3: #FFFFFF;
+    --surface-4: #FFFFFF;
+    --surface-5: #FFFFFF;
+    --surface-6: #FFFFFF;
+    --surface-7: #FFFFFF;
+    --surface-8: #FFFFFF;
+    /* Fluid scroll-area thumb tint — space-separated RGB channels */
+    --overlay: 0 0 0;
+    --shadow-color: rgb(0 0 0 / 0.06);
+    --shadow-1: 0 0 0 1px var(--shadow-color);
+    --shadow-2: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color);
+    --shadow-3: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color), 0 3px 3px -1.5px var(--shadow-color);
+    --shadow-4: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color), 0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color);
+    --shadow-5: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color), 0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color), 0 12px 12px -6px var(--shadow-color);
+    --shadow-6: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color), 0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color), 0 12px 12px -6px var(--shadow-color), 0 24px 24px -12px var(--shadow-color);
+    --shadow-7: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color), 0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color), 0 12px 12px -6px var(--shadow-color), 0 24px 24px -12px var(--shadow-color), 0 48px 48px -24px var(--shadow-color);
+    --shadow-8: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color), 0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color), 0 12px 12px -6px var(--shadow-color), 0 24px 24px -12px var(--shadow-color), 0 48px 48px -24px var(--shadow-color), 0 96px 96px -48px var(--shadow-color);
+}
+
+.dark {
+    --overlay: 255 255 255;
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.205 0 0);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.205 0 0);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.922 0 0);
+    --primary-foreground: oklch(0.205 0 0);
+    --secondary: oklch(0.269 0 0);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+    --accent: oklch(0.269 0 0);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.556 0 0);
+    --chart-1: oklch(0.87 0 0);
+    --chart-2: oklch(0.556 0 0);
+    --chart-3: oklch(0.439 0 0);
+    --chart-4: oklch(0.371 0 0);
+    --chart-5: oklch(0.269 0 0);
+    --sidebar: oklch(0.205 0 0);
+    --sidebar-foreground: oklch(0.985 0 0);
+    --sidebar-primary: oklch(0.488 0.243 264.376);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.269 0 0);
+    --sidebar-accent-foreground: oklch(0.985 0 0);
+    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-ring: oklch(0.556 0 0);
+    --surface-1: #171717;
+    --surface-2: #1E1E1E;
+    --surface-3: #252525;
+    --surface-4: #2C2C2C;
+    --surface-5: #333333;
+    --surface-6: #3A3A3A;
+    --surface-7: #414141;
+    --surface-8: #484848;
+    --dm-hi-base: rgba(255,255,255,0.01);
+    --dm-hi-mid: rgba(255,255,255,0.02);
+    --dm-hi-high: rgba(255,255,255,0.04);
+    --dm-hi-peak: rgba(255,255,255,0.06);
+    --dm-ring-base: rgba(255,255,255,0.02);
+    --dm-ring-mid: rgba(255,255,255,0.04);
+    --dm-ring-high: rgba(255,255,255,0.06);
+    --dm-drop: rgba(0,0,0,0.18);
+    --shadow-1: inset 0 0 0 1px var(--dm-ring-base);
+    --shadow-2: inset 0 1px 0 0 var(--dm-hi-base), inset 0 0 0 1px var(--dm-ring-base), 0 1px 1px -0.5px var(--dm-drop);
+    --shadow-3: inset 0 1px 0 0 var(--dm-hi-mid), inset 0 0 0 1px var(--dm-ring-base), 0 0 0 1px rgba(0,0,0,0.12), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop);
+    --shadow-4: inset 0 1px 0 0 var(--dm-hi-mid), inset 0 0 0 1px var(--dm-ring-mid), 0 0 0 1px rgba(0,0,0,0.14), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop), 0 6px 6px -3px var(--dm-drop);
+    --shadow-5: inset 0 1px 0 0 var(--dm-hi-high), inset 0 0 0 1px var(--dm-ring-mid), 0 0 0 1px rgba(0,0,0,0.16), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop), 0 6px 6px -3px var(--dm-drop), 0 12px 12px -6px var(--dm-drop);
+    --shadow-6: inset 0 1px 0 0 var(--dm-hi-high), inset 0 0 0 1px var(--dm-ring-high), 0 0 0 1px rgba(0,0,0,0.18), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop), 0 6px 6px -3px var(--dm-drop), 0 12px 12px -6px var(--dm-drop), 0 24px 24px -12px var(--dm-drop);
+    --shadow-7: inset 0 1px 0 0 var(--dm-hi-peak), inset 0 0 0 1px var(--dm-ring-high), 0 0 0 1px rgba(0,0,0,0.20), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop), 0 6px 6px -3px var(--dm-drop), 0 12px 12px -6px var(--dm-drop), 0 24px 24px -12px var(--dm-drop), 0 48px 48px -24px var(--dm-drop);
+    --shadow-8: inset 0 1px 0 0 var(--dm-hi-peak), inset 0 0 0 1px var(--dm-ring-high), 0 0 0 1px rgba(0,0,0,0.22), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop), 0 6px 6px -3px var(--dm-drop), 0 12px 12px -6px var(--dm-drop), 0 24px 24px -12px var(--dm-drop), 0 48px 48px -24px var(--dm-drop), 0 96px 96px -48px var(--dm-drop);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+/* @ncdai/scroll-fade-effect — scroll-driven edge masks */
+@keyframes show-top-mask {
+  to {
+    --top-mask-height: var(--mask-height);
+  }
+}
+@keyframes hide-bottom-mask {
+  to {
+    --bottom-mask-height: 0px;
+  }
+}
+@keyframes show-left-mask {
+  to {
+    --left-mask-width: var(--mask-width);
+  }
+}
+@keyframes hide-right-mask {
+  to {
+    --right-mask-width: 0px;
+  }
+}
+
+/**
+ * GradientHoverButton (src/components/ui/gradient-hover-button.tsx) — the
+ * hover gradient breathes instead of sitting static once faded in. A
+ * background-image string can't be interpolated by the browser, so this
+ * doesn't tween the gradient's colors; it pans a taller-than-the-box
+ * gradient up and down (`background-size` + `background-position-y`, both
+ * genuinely interpolable), which reads as the gradient itself pulsing.
+ * Applied only while the pointer is over the button (D: pulse on hover
+ * only — not on focus / autoFocus).
+ */
+@keyframes gradient-hover-pulse {
+  0%,
+  100% {
+    background-position-y: 0%;
+  }
+  50% {
+    background-position-y: 100%;
+  }
+}
+
+/* react-nano-scrollbar — fill sized parents + dark thumbs; hover-only bars */
+.lao-nano-scroll.react-nano-scrollbar-wrapper {
+  min-height: 0;
+  min-width: 0;
+  max-width: 100%;
+}
+.lao-nano-scroll > .react-nano-scrollbar-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  /* both axes — nano hides the native bars and draws its own thumbs */
+  overflow: auto;
+}
+/*
+ * Cap mode — host has max-height (e.g. brush pack). Percentage height:100%
+ * does not resolve against max-height alone, so the list blew past the cap.
+ * Inherit the host max-height onto the scrollport and size to content.
+ */
+.lao-nano-fade-host.lao-nano-cap {
+  overflow: hidden;
+}
+.lao-nano-fade-host.lao-nano-cap > .lao-nano-scroll {
+  height: auto;
+  max-height: inherit;
+  flex: 0 1 auto;
+}
+.lao-nano-fade-host.lao-nano-cap > .lao-nano-scroll > .react-nano-scrollbar-content {
+  height: auto;
+  max-height: inherit;
+}
+/* @ncdai/scroll-fade-effect on every nano scrollport */
+.lao-nano-scroll.lao-nano-fade-y > .react-nano-scrollbar-content {
+  @apply scroll-fade-effect-y;
+}
+.lao-nano-scroll.lao-nano-fade-x > .react-nano-scrollbar-content {
+  @apply scroll-fade-effect-x;
+}
+.lao-nano-scroll.lao-nano-fade-both > .react-nano-scrollbar-content {
+  @apply scroll-fade-effect-y scroll-fade-effect-x;
+}
+.lao-nano-scroll .react-nano-scrollbar-x,
+.lao-nano-scroll .react-nano-scrollbar-y {
+  background: rgb(255 255 255 / 0.35);
+}
+/* 4px-thick horizontal bar (timeline gutter) */
+.lao-nano-scroll.lao-nano-thin .react-nano-scrollbar-track-x {
+  height: 4px;
+}
+.lao-nano-scroll.lao-nano-thin .react-nano-scrollbar-track-x .react-nano-scrollbar-x {
+  bottom: 0;
+  height: 4px;
+}
+.lao-nano-scroll.lao-nano-thin
+  .react-nano-scrollbar-track-x.react-nano-scrollbar-active
+  .react-nano-scrollbar-x,
+.lao-nano-scroll.lao-nano-thin
+  .react-nano-scrollbar-track-x:hover
+  .react-nano-scrollbar-x {
+  height: 4px;
+}
+.dark .lao-nano-scroll .react-nano-scrollbar-x,
+.dark .lao-nano-scroll .react-nano-scrollbar-y {
+  background: rgb(255 255 255 / 0.4);
+}
+/*
+ * Motion-driven thumb fade (see scroll-area.tsx useThumbFade).
+ * Opacity comes from --lao-sb-opacity; pointer-events from data-sb-visible.
+ */
+.lao-nano-fade-host {
+  --lao-sb-opacity: 0;
+}
+.lao-nano-fade-host .lao-nano-motion-thumbs .react-nano-scrollbar-track-x,
+.lao-nano-fade-host .lao-nano-motion-thumbs .react-nano-scrollbar-track-y {
+  opacity: var(--lao-sb-opacity);
+  transition: none;
+  pointer-events: none;
+}
+.lao-nano-fade-host[data-sb-visible="1"]
+  .lao-nano-motion-thumbs
+  .react-nano-scrollbar-track-x,
+.lao-nano-fade-host[data-sb-visible="1"]
+  .lao-nano-motion-thumbs
+  .react-nano-scrollbar-track-y {
+  pointer-events: auto;
+}
+
+/* Legacy CSS autohide (if anything still sets nano autohide without Motion). */
+.lao-nano-scroll.react-nano-scrollbar-autohide .react-nano-scrollbar-track-x,
+.lao-nano-scroll.react-nano-scrollbar-autohide .react-nano-scrollbar-track-y {
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.18s,
+    pointer-events 0s linear 0.63s;
+}
+.lao-nano-scroll.react-nano-scrollbar-autohide:hover .react-nano-scrollbar-track-x,
+.lao-nano-scroll.react-nano-scrollbar-autohide:hover .react-nano-scrollbar-track-y,
+.lao-nano-scroll.react-nano-scrollbar-autohide.react-nano-scrollbar-moving
+  .react-nano-scrollbar-track-x,
+.lao-nano-scroll.react-nano-scrollbar-autohide.react-nano-scrollbar-moving
+  .react-nano-scrollbar-track-y {
+  opacity: 0.55;
+  pointer-events: auto;
+  transition:
+    opacity 0.22s cubic-bezier(0.22, 1, 0.36, 1) 0s,
+    pointer-events 0s linear 0s;
+}
+  @property --top-mask-height {
+    syntax: "<length>";
+    inherits: true;
+    initial-value: 0px;
+}
+  @property --bottom-mask-height {
+    syntax: "<length>";
+    inherits: true;
+    initial-value: 64px;
+}
+  @property --left-mask-width {
+    syntax: "<length>";
+    inherits: true;
+    initial-value: 0px;
+}
+  @property --right-mask-width {
+    syntax: "<length>";
+    inherits: true;
+    initial-value: 64px;
+}
+
+@utility scroll-fade-effect-y {
+    --mask-height: 64px;
+    --mask-offset-top: 0px;
+    --mask-offset-bottom: 0px;
+    --scroll-buffer: 2rem;
+    mask-image: linear-gradient(to top, transparent, black 90%), linear-gradient(to bottom, transparent 0%, black 100%), linear-gradient(black, black);
+    mask-size: 100% var(--top-mask-height), 100% var(--bottom-mask-height), 100% 100%;
+    mask-repeat: no-repeat, no-repeat, no-repeat;
+    mask-position: 0 var(--mask-offset-top), 0 calc(100% - var(--mask-offset-bottom)), 0 0;
+    mask-composite: exclude;
+    animation-name: show-top-mask, hide-bottom-mask;
+    animation-timeline: scroll(self), scroll(self);
+    animation-range: 0 var(--scroll-buffer), calc(100% - var(--scroll-buffer)) 100%;
+    animation-fill-mode: both;
+}
+
+@utility scroll-fade-effect-x {
+    --mask-width: 64px;
+    --mask-offset-left: 0px;
+    --mask-offset-right: 0px;
+    --scroll-buffer: 2rem;
+    mask-image: linear-gradient(to left, transparent, black 90%), linear-gradient(to right, transparent 0%, black 100%), linear-gradient(black, black);
+    mask-size: var(--left-mask-width) 100%, var(--right-mask-width) 100%, 100% 100%;
+    mask-repeat: no-repeat, no-repeat, no-repeat;
+    mask-position: var(--mask-offset-left) 0, calc(100% - var(--mask-offset-right)) 0, 0 0;
+    mask-composite: exclude;
+    animation-name: show-left-mask, hide-right-mask;
+    animation-timeline: scroll(self inline), scroll(self inline);
+    animation-range: 0 var(--scroll-buffer), calc(100% - var(--scroll-buffer)) 100%;
+    animation-fill-mode: both;
+}
+
+/* react-best-gradient-color-picker — match lao dark chrome */
+.lao-bg-color-picker {
+  --rbgcp-background-color: #121212;
+  --rbgcp-input-color: #1a1f24;
+  --rbgcp-input-border: 1px solid #292a2a;
+  color: rgb(255 255 255 / 0.85);
+  font-family: Geist, "Inter Variable", system-ui, sans-serif;
+}
+.lao-bg-color-picker .rbgcp-control-btn-wrapper {
+  background: #121212;
+  border: 1px solid #292a2a;
+  border-radius: 8px;
+}
+.lao-bg-color-picker .rbgcp-control-btn,
+.lao-bg-color-picker .rbgcp-control-icon-btn {
+  color: rgb(255 255 255 / 0.7);
+  background: transparent;
+  font-family: Geist, "Inter Variable", system-ui, sans-serif;
+}
+.lao-bg-color-picker .rbgcp-control-btn-selected {
+  background: #313131;
+  color: #fff;
+}
+.lao-bg-color-picker .rbgcp-color-model-dropdown,
+.lao-bg-color-picker [id*="rbgcp-color-model-dropdown"] {
+  background: #1a1f24;
+  border: 1px solid #292a2a;
+  color: #fff;
+  font-family: Geist, "Inter Variable", system-ui, sans-serif;
+  /* Sit flush under the 24px trigger — library default top:34px left a dead gap. */
+  top: 100% !important;
+  margin-top: 4px !important;
+}
+/* Values — Geist Mono; labels stay Geist (inherited) */
+.lao-bg-color-picker input,
+.lao-bg-color-picker .rbgcp-control-input,
+.lao-bg-color-picker .rbgcp-input,
+.lao-bg-color-picker .rbgcp-hex-input {
+  background: #121212 !important;
+  border: 1px solid #292a2a !important;
+  color: rgb(255 255 255 / 0.85) !important;
+  border-radius: 6px;
+  font-family: "Geist Mono", ui-monospace, monospace !important;
+  font-size: 11px !important;
+  pointer-events: auto !important;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+.lao-bg-color-picker .rbgcp-input-label,
+.lao-bg-color-picker [id*="input-label"],
+.lao-bg-color-picker [class*="InputLabel"] {
+  font-family: Geist, "Inter Variable", system-ui, sans-serif !important;
+}
+/* Gradient angle / stop: keep icons readable + 8px gap to input */
+.lao-bg-color-picker [id*="rbgcp-degree-input-wrapper"],
+.lao-bg-color-picker [id*="rbgcp-stop-input-wrapper"] {
+  width: auto !important;
+  min-width: max-content !important;
+  flex-shrink: 0 !important;
+  align-items: center !important;
+  box-sizing: border-box !important;
+}
+.lao-bg-color-picker [id*="rbgcp-degree-input-wrapper"] > svg,
+.lao-bg-color-picker [id*="rbgcp-stop-input-wrapper"] > svg {
+  width: 18px !important;
+  height: 18px !important;
+  min-width: 18px !important;
+  min-height: 18px !important;
+  flex-shrink: 0 !important;
+  margin-right: 8px !important;
+  display: block !important;
+}
+.lao-bg-color-picker [id*="rbgcp-stop-input-wrapper"] > svg {
+  width: 22px !important;
+  height: 22px !important;
+  min-width: 22px !important;
+  min-height: 22px !important;
+}
+
+/* AdvBar labels — Saturation / Lightness / Brightness */
+.lao-bg-color-picker [id*="rbgcp-advanced-bar-"][id*="-label"] {
+  left: 50% !important;
+  right: auto !important;
+  top: 50% !important;
+  bottom: auto !important;
+  transform: translate(-50%, -50%) !important;
+  width: max-content !important;
+  height: auto !important;
+  line-height: 1.2 !important;
+  text-align: center !important;
+  font-family: Geist, "Inter Variable", system-ui, sans-serif !important;
+  font-size: 11px !important;
+  font-weight: 400 !important;
+  color: rgb(255 255 255 / 0.6) !important;
+  text-shadow: none !important;
+  pointer-events: none !important;
+}
+/* Leafer TextEditor DOM overlay (@leafer-in/text-editor) */
+.leafer-text-editor {
+  z-index: 9999 !important;
+  outline: none !important;
+  caret-color: #ffffff;
+  background: transparent !important;
+  margin: 0 !important;
+  border: none !important;
+  overflow: visible !important;
+}
+.leafer-text-editor:empty::before {
+  content: "Type…";
+  color: rgb(255 255 255 / 0.35);
+  pointer-events: none;
+}
+
+/*
+ * App shell is select-none so canvas drags near timeline/settings don't
+ * highlight chrome labels. Re-enable selection for real text entry + dialogs.
+ */
+.lao-app input,
+.lao-app textarea,
+.lao-app select,
+.lao-app [contenteditable="true"],
+.lao-app [contenteditable=""],
+.lao-app [role="dialog"],
+.leafer-text-editor {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Bucket tool — droplet fills empty → full (clip rises from the tip). */
+.lao-bucket-drop {
+  transition: fill-opacity 0.2s ease;
+}
+.lao-bucket-drop--active {
+  /* Navy preview @ 15% is set via fill/#40608E + fillOpacity on the path. */
+  animation: lao-bucket-fill 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.lao-bucket-drop--pour {
+  fill-opacity: 1;
+  animation: lao-bucket-fill 0.48s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes lao-bucket-fill {
+  from {
+    clip-path: inset(100% 0 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+/* sonner — Paper tokens (surface #131212, text #DEDEDE, accent #40608E) */
+[data-sonner-toaster] [data-sonner-toast] {
+  --normal-bg: #131212;
+  --normal-border: #363636;
+  --normal-text: #dedede;
+  --success-bg: #131212;
+  --success-border: #304263;
+  --success-text: #dedede;
+  --error-bg: #160e0c;
+  --error-border: #22110f;
+  --error-text: #dedede;
+}
+
+.lao-toast-description {
+  color: #dadada !important;
+  opacity: 0.75;
+  font-family: "Geist Variable", "Inter Variable", sans-serif !important;
+  font-size: 12px !important;
+}
+
+.lao-toast-close {
+  background: #252525 !important;
+  border: 1px solid #363636 !important;
+  color: #dedede !important;
+}
+
+.lao-toast-success [data-icon] {
+  color: #40608e;
+}
+
+.lao-toast-error [data-icon] {
+  color: #f96d57;
+}

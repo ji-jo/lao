@@ -1,0 +1,22 @@
+---
+description: lao project handbook — always read before working
+alwaysApply: true
+---
+
+Read `AGENTS.md` (environment traps, hard product constraints, commands, verification
+workflow), `docs/ARCHITECTURE.md` (data model, stores, engine), and `docs/ROADMAP.md`
+(parked features incl. the Animatron mode spec) before making changes.
+
+Critical, non-negotiable:
+
+- Repo is on **X:** (`X:\Line Animations\lao`, NTFS). Use `npm install` for
+  dependencies (lockfile is `package-lock.json`; do not bun install), but
+  `bun run dev` / `bun test` for running. Dev server is **http://localhost:5173**.
+- UI + icons come from **exactly four sources, nothing else**:
+  1. **fluid functionalism** — UI components (`@fluid/<name>` via shadcn).
+  2. **beui** — UI components (`@beui/<name>` via shadcn).
+  3. **itshover** — icons (`https://itshover.com/r/<name>-icon.json`).
+  4. **reicon.dev** — icons (`import { X } from "reicon-react"`).
+  Never add another component library, icon pack, or design system. If it's not in one of
+  these four, build it by hand with Tailwind + existing tokens.
+- All panels float; keep `npx tsc -b` clean and `bun test` green before committing.
