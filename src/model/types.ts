@@ -427,3 +427,18 @@ export function createEmptyProject(): Project {
     ],
   };
 }
+
+/** True if the session has any authored art (not just empty layers / settings). */
+export function projectHasArt(project: Project): boolean {
+  if (project.morphs && project.morphs.length > 0) return true;
+  return project.layers.some((l) => {
+    if (l.motionPaths && l.motionPaths.length > 0) return true;
+    return l.frames.some(
+      (f) =>
+        !!f &&
+        (f.strokes.length > 0 ||
+          (f.texts != null && f.texts.length > 0) ||
+          (f.images != null && f.images.length > 0)),
+    );
+  });
+}

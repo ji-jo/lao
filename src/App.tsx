@@ -6,7 +6,7 @@ import { ExportDialog } from "@/components/panels/ExportDialog";
 import { SaveFirstDialog } from "@/components/panels/SaveFirstDialog";
 import { saveLaoFile, openLaoFile, parseLao } from "@/file/laoFile";
 import { startAutosave, readAutosave, clearAutosave } from "@/file/autosave";
-import { createEmptyProject, type Project } from "@/model/types";
+import { createEmptyProject, projectHasArt, type Project } from "@/model/types";
 import { createImageElementFromFile } from "@/engine/canvasImage";
 import { StageCanvas } from "@/components/StageCanvas";
 import { PreviewStage } from "@/components/PreviewStage";
@@ -96,10 +96,7 @@ export default function App() {
     }
   }
   function handleNew() {
-    const hasArt = useProject.getState().project.layers.some((l) =>
-      l.frames.some((f) => f && f.strokes.length > 0),
-    );
-    if (hasArt) {
+    if (projectHasArt(useProject.getState().project)) {
       setNewFilePromptOpen(true);
       return;
     }
@@ -116,12 +113,9 @@ export default function App() {
     const stop = startAutosave();
     void readAutosave().then((saved) => {
       if (!saved?.project) return;
-      const hasArt = saved.project.layers.some((l) =>
-        l.frames.some((f) => f && f.strokes.length > 0),
-      );
       const current = useProject.getState();
       const untouched = current.undoStack.length === 0 && current.redoStack.length === 0;
-      if (hasArt && untouched) setRecovered(saved.project);
+      if (projectHasArt(saved.project) && untouched) setRecovered(saved.project);
     });
     return stop;
   }, []);

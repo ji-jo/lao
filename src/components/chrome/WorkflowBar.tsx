@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { usePlayback, type Workflow } from "@/state/playback";
 import { useProject } from "@/state/project";
+import { projectHasArt } from "@/model/types";
 import { saveLaoFile } from "@/file/laoFile";
 import { PAPER } from "@/components/chrome/paper-tokens";
 import { SaveFirstDialog } from "@/components/panels/SaveFirstDialog";
@@ -66,14 +67,18 @@ export function WorkflowBar({
     };
   }, [fileOpen]);
 
-  function requestSwitch(next: Workflow) {
-    if (next === workflow) return;
-    setPendingWorkflow(next);
-  }
-
   function applySwitch(next: Workflow) {
     setWorkflow(next);
     useProject.getState().setProjectSettings({ workflow: next });
+  }
+
+  function requestSwitch(next: Workflow) {
+    if (next === workflow) return;
+    if (!projectHasArt(useProject.getState().project)) {
+      applySwitch(next);
+      return;
+    }
+    setPendingWorkflow(next);
   }
 
   function runAction(fn: () => void) {
