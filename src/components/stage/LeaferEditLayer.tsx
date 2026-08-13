@@ -464,8 +464,12 @@ export function LeaferEditLayer({
         selectedStyle: { stroke: "#A78BFA", strokeWidth: 2 },
         hoverStyle: { stroke: "#A78BFA", strokeWidth: 1.5 },
         pointSize: 10,
-        around: "center",
+        // Rotate around the shape center. Do NOT set `around: "center"` —
+        // that doubles side-handle drags so width/height grow from both
+        // edges (Figma Alt). Default: opposite edge stays put. Alt still
+        // scales from center via Leafer getAround(around, altKey).
         rotateAround: "center",
+        editSize: "size",
         // 0 falls back to Leafer's default 45° — use 5° for image/shape rotate.
         rotateGap: 5,
       },

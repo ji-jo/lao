@@ -13,8 +13,9 @@ import type { ShapeToolId } from "@/state/tools";
 
 export type EditableShapeProxy = Rect | Ellipse | Line | Polygon;
 
-/** Editor rotates around center; x/y must be the box center so bake matches canvas. */
-const CENTER_XFORM = { origin: "center" as const, around: "center" as const };
+/** x/y is the box center so rotateAround:center bake matches canvas.
+ * Do not set `around: "center"` — that pins resize to the center (both sides). */
+const CENTER_XFORM = { origin: "center" as const };
 
 /** Mount a Leafer primitive that matches a shape-tool stroke. */
 export function makeEditableShapeFromStroke(
