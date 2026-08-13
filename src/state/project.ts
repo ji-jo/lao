@@ -8,24 +8,73 @@ import {
   type ClipEasing,
   type Frame,
   type Layer,
+  type MorphClip,
+  type MotionAssignment,
+  type MotionPath,
   type Project,
   type Stroke,
   type StrokeClip,
   type TextElement,
+  type ImageElement,
 } from "@/model/types";
 import { useTools } from "@/state/tools";
 import { usePlayback } from "@/state/playback";
-import { translatePoints, transformPoints } from "@/engine/pathEdit";
+import { translatePoints, transformPoints, translateBezierNodes, transformBezierNodes } from "@/engine/pathEdit";
 import { measureTextBox, transformTextElement } from "@/engine/textGeometry";
-import { flattenBezierNodes } from "@/lib/bezier";
+import { extrasAfterPathEdit } from "@/components/stage/leaferBridge";
+import { flattenBezierNodes, pointsToBezierNodes } from "@/lib/bezier";
+import { clearBrushDraftCache } from "@/engine/brushStyles";
 import {
-  allProjectStrokes,
+  allProjectClipItems,
   projectClipEndMs,
+  retimeStrokePoints,
   strokeDurationMs,
+  typewriterDurationMs,
 } from "@/engine/strokeProgress";
-
+import { generateInbetweenFrames } from "@/engine/tween";
+import { syncMotionPathPoints } from "@/engine/motionPathPresets";
 const MAX_UNDO = 100;
 const MIN_CLIP_MS = 80;
+
+/**
+ * Which cel to mutate for an edit.
+ * Animatron path layers are sparse (`frames[0]` only). Advancing the playhead
+ * for clip timing must NOT trigger stop-motion "held exposure" clone/no-op —
+ * that made every move after create preview then snap back to frames[0].
+ */
+function resolveEditTarget(
+  project: Project,
+  layer: Layer,
+  frameIndex: number,
+): {
+  readIndex: number;
+  writeIndex: number;
+  cloneFromHeld: boolean;
+} | null {
+  if (project.workflow === "animatron") {
+    const idx = layer.frames.findIndex((f) => f !== null);
+    if (idx < 0) return null;
+    return { readIndex: idx, writeIndex: idx, cloneFromHeld: false };
+  }
+  const celIndex = resolveCelIndex(layer, layer.isStatic ? 0 : frameIndex);
+  if (celIndex === null) return null;
+  const isHeld = celIndex !== frameIndex && !layer.isStatic;
+  const pb = usePlayback.getState();
+  const tools = useTools.getState();
+  const shouldClone =
+    tools.autoKey && (!pb.onionSkin || pb.onionAutoDuplicate);
+  if (isHeld && !shouldClone) {
+    // Previously returned null — path/node live previews then snapped back on
+    // pointer-up because replaceStrokePoints / convertStrokeToBezier no-op'd.
+    // Edit the keyframe that feeds this hold (what the user is looking at).
+    return { readIndex: celIndex, writeIndex: celIndex, cloneFromHeld: false };
+  }
+  return {
+    readIndex: celIndex,
+    writeIndex: isHeld ? frameIndex : celIndex,
+    cloneFromHeld: isHeld,
+  };
+}
 
 /** Shared offscreen ctx for measuring text during transforms. */
 let measureCtx: CanvasRenderingContext2D | null = null;
@@ -81,17 +130,56 @@ interface ProjectState {
   addStroke: (stroke: Stroke) => void;
   addTextElement: (text: TextElement) => void;
   updateTextElement: (id: string, patch: Partial<TextElement>) => void;
+  /** Place image on a new layer (MVP §25) and select it. */
+  addImageElement: (image: ImageElement) => void;
+  /** Place image on the active edit cel (bucket fill pockets). */
+  addImageToActiveCel: (image: ImageElement) => void;
+  updateImageElement: (id: string, patch: Partial<ImageElement>) => void;
   /** Patch color / fill / size on strokes in the active cel (one undo step). */
   updateStrokes: (
     ids: string[],
-    patch: Partial<Pick<Stroke, "color" | "fillColor" | "size" | "jitter" | "grain">>,
+    patch: Partial<
+      Pick<
+        Stroke,
+        | "color"
+        | "fillColor"
+        | "size"
+        | "jitter"
+        | "grain"
+        | "brush"
+        | "p5Brush"
+        | "points"
+        | "closed"
+        | "shapeBox"
+        | "cornerRadius"
+        | "squircle"
+        | "cornerSmoothing"
+      >
+    >,
   ) => void;
   removeTextElement: (id: string) => void;
+  /** Reorder text in its cel: forward/backward one step, or to front/back. */
+  reorderTextElement: (
+    id: string,
+    where: "forward" | "backward" | "front" | "back",
+  ) => void;
+  /** Duplicate text at a slight offset; returns new id or null. */
+  duplicateTextElement: (id: string) => string | null;
   /** paste strokes into the current frame at their original coordinates; returns the new ids */
   pasteStrokes: (strokes: Stroke[]) => string[];
   deleteStrokes: (ids: string[]) => void;
   deleteNodes: (nodeIds: { strokeId: string; index: number }[]) => void;
-  replaceStrokePoints: (strokeId: string, points: Stroke["points"], bezierNodes?: Stroke["bezierNodes"]) => void;
+  /** Freehand / brush strokes → editable cubic-bezier path for the Path tool. */
+  convertStrokeToBezier: (strokeId: string) => void;
+  replaceStrokePoints: (
+    strokeId: string,
+    points: Stroke["points"],
+    bezierNodes?: Stroke["bezierNodes"],
+    extras?: {
+      shapeBox?: Stroke["shapeBox"];
+      shapeKind?: Stroke["shapeKind"];
+    },
+  ) => void;
   /** translate many strokes in one undo step */
   translateStrokes: (ids: string[], dx: number, dy: number) => void;
   /** scale + rotate many strokes around a pivot in one undo step */
@@ -105,6 +193,28 @@ interface ProjectState {
   updateStrokeClip: (strokeId: string, clip: StrokeClip) => void;
   /** Broadcast easing to every stroke clip on every layer (and remember for new paths). */
   applyClipEasing: (easing: ClipEasing) => void;
+  /** Path Maker — add/update/remove motion guides + assignments on a layer. */
+  addMotionPath: (layerId: string, path: MotionPath) => void;
+  updateMotionPath: (layerId: string, path: MotionPath) => void;
+  /** Live drag of guide nodes — no undo; commit with updateMotionPath on up. */
+  updateMotionPathLive: (layerId: string, path: MotionPath) => void;
+  removeMotionPath: (layerId: string, pathId: string) => void;
+  addMotionAssignment: (layerId: string, assignment: MotionAssignment) => void;
+  updateMotionAssignment: (
+    layerId: string,
+    assignmentId: string,
+    patch: Partial<MotionAssignment>,
+  ) => void;
+  removeMotionAssignment: (layerId: string, assignmentId: string) => void;
+  /** Animatron live morph clips */
+  addMorphClip: (clip: MorphClip) => void;
+  updateMorphClip: (clipId: string, patch: Partial<MorphClip>) => void;
+  removeMorphClip: (clipId: string) => void;
+  /**
+   * Stop-motion: bake N in-between cels between two keyframe indices on the
+   * active layer. Inserts after `fromFrame` and shifts later frames.
+   */
+  generateInbetweens: (fromFrame: number, toFrame: number, count: number) => void;
   addKeyframe: () => void;
   duplicateFrameForward: () => void;
   deleteKeyframe: () => void;
@@ -136,6 +246,8 @@ interface ProjectState {
   setBoilLive: (boil: NonNullable<Project["boil"]>) => void;
   addLayer: () => void;
   deleteLayer: (layerIndex: number) => void;
+  /** Remove many timeline layers in one undo step (keeps at least one). */
+  deleteLayers: (layerIndices: number[]) => void;
   reorderLayer: (from: number, to: number) => void;
   toggleLayerVisible: (layerIndex: number) => void;
 
@@ -156,7 +268,7 @@ function setCel(layer: Layer, fi: number, cel: Frame | null): Layer {
 }
 
 function emptyCel(): Frame {
-  return { id: crypto.randomUUID(), strokes: [], texts: [] };
+  return { id: crypto.randomUUID(), strokes: [], texts: [], images: [] };
 }
 
 function cloneCel(cel: Frame): Frame {
@@ -169,18 +281,40 @@ function cloneCel(cel: Frame): Frame {
       bezierNodes: st.bezierNodes ? st.bezierNodes.map(n => ({...n})) : undefined,
     })),
     texts: cel.texts ? cel.texts.map(t => ({ ...t })) : [],
+    images: cel.images ? cel.images.map((im) => ({ ...im })) : [],
   };
 }
 
 function ensureAnimatronLength(project: Project): Project {
-  const endMs = projectClipEndMs(allProjectStrokes(project.layers));
-  const need = Math.max(project.frameCount, Math.ceil(endMs / 1000 * project.fps) + 1);
+  let endMs = projectClipEndMs(allProjectClipItems(project.layers));
+  for (const layer of project.layers) {
+    for (const a of layer.motionAssignments ?? []) {
+      endMs = Math.max(endMs, a.startMs + a.durationMs);
+    }
+  }
+  for (const m of project.morphs ?? []) {
+    endMs = Math.max(endMs, m.startMs + m.durationMs);
+  }
+  // Need a frame whose timeMs >= endMs so strokeAtTime returns the full stroke.
+  // i >= endMs/1000*fps → frameCount >= ceil(...) + 1.
+  const fps = Math.max(1, project.fps);
+  const need = Math.max(
+    project.frameCount,
+    Math.ceil((endMs / 1000) * fps) + 1,
+  );
   if (need === project.frameCount) return project;
   return { ...project, frameCount: need };
 }
 
+/** Playhead frame at or past clip end (full stroke visible under strokeAtTime). */
+function frameIndexAtOrPastMs(project: Project, timeMs: number): number {
+  const fps = Math.max(1, project.fps);
+  const fi = Math.ceil((timeMs / 1000) * fps);
+  return Math.min(project.frameCount - 1, Math.max(0, fi));
+}
+
 function nextAnimatronClipStart(project: Project): number {
-  return projectClipEndMs(allProjectStrokes(project.layers));
+  return projectClipEndMs(allProjectClipItems(project.layers));
 }
 
 export const useProject = create<ProjectState>((set, get) => {
@@ -206,7 +340,14 @@ export const useProject = create<ProjectState>((set, get) => {
 
     const active = project.layers[s.layerIndex];
     const activeCel = active?.frames.find((f) => f) ?? null;
-    const activeEmpty = !!active && (!activeCel || activeCel.strokes.length === 0);
+    // Image / text layers look "empty" for strokes but still have content —
+    // never replace their frames or the bitmap/text vanishes on first draw.
+    const celHasArt =
+      !!activeCel &&
+      (activeCel.strokes.length > 0 ||
+        (activeCel.texts?.length ?? 0) > 0 ||
+        (activeCel.images?.length ?? 0) > 0);
+    const activeEmpty = !!active && !celHasArt;
 
     if (activeEmpty && active) {
       // reuse the empty active layer for the first path
@@ -214,7 +355,14 @@ export const useProject = create<ProjectState>((set, get) => {
         ...active,
         name: active.name.startsWith("Layer") ? `Path 1` : active.name,
         isStatic: false,
-        frames: [{ id: crypto.randomUUID(), strokes: [clipped] }],
+        frames: [
+          {
+            id: crypto.randomUUID(),
+            strokes: [clipped],
+            texts: [],
+            images: [],
+          },
+        ],
       };
       project = ensureAnimatronLength({
         ...replaceLayer(project, s.layerIndex, layer),
@@ -222,17 +370,28 @@ export const useProject = create<ProjectState>((set, get) => {
       });
       commit(project);
       usePlayback.getState().setWorkflow("animatron");
+      // Scrub past clip end so strokeAtTime shows the full path (not a 1-pt "dot").
+      const endMs = clipped.clip!.startMs + clipped.clip!.durationMs;
+      set({ frameIndex: frameIndexAtOrPastMs(project, endMs) });
       return;
     }
 
     // insert new layer immediately below the previous path's layer
+    // (keeps image/text layers intact when they were the active target)
     const insertAt = Math.min(s.layerIndex + 1, project.layers.length);
     const layer: Layer = {
       id: crypto.randomUUID(),
       name: `Path ${project.layers.length + 1}`,
       visible: true,
       isStatic: false,
-      frames: [{ id: crypto.randomUUID(), strokes: [clipped] }],
+      frames: [
+        {
+          id: crypto.randomUUID(),
+          strokes: [clipped],
+          texts: [],
+          images: [],
+        },
+      ],
     };
     const layers = [
       ...project.layers.slice(0, insertAt),
@@ -245,7 +404,11 @@ export const useProject = create<ProjectState>((set, get) => {
       workflow: "animatron",
     });
     commit(project);
-    set({ layerIndex: insertAt });
+    const endMs = clipped.clip!.startMs + clipped.clip!.durationMs;
+    set({
+      layerIndex: insertAt,
+      frameIndex: frameIndexAtOrPastMs(project, endMs),
+    });
     usePlayback.getState().setWorkflow("animatron");
   }
 
@@ -329,16 +492,164 @@ export const useProject = create<ProjectState>((set, get) => {
       const active = s.project.layers[s.layerIndex];
       if (!active) return;
 
-      const { autoKey } = useTools.getState();
-      let fIdx = autoKey ? s.frameIndex : resolveCelIndex(active, s.frameIndex) ?? s.frameIndex;
-      if (active.isStatic && usePlayback.getState().workflow !== "animatron") {
-        fIdx = 0;
+      // Animatron: always the painted cel (frames.find). Stop-motion: exposure
+      // sheet via resolveEditTarget. Writing to scrubbed frameIndex made text
+      // commit succeed while the stage still painted frames[0] without it.
+      const target = resolveEditTarget(s.project, active, s.frameIndex);
+      if (!target) return;
+
+      const tools = useTools.getState();
+      const animatron =
+        s.project.workflow === "animatron" ||
+        usePlayback.getState().workflow === "animatron";
+      let stamped = text;
+      if (animatron && !text.clip) {
+        const cps = tools.textTypewriter ? tools.textTypewriterSpeed : 0;
+        const durationMs = Math.max(
+          MIN_CLIP_MS,
+          cps > 0 ? typewriterDurationMs(text.text, cps) : 1000,
+        );
+        stamped = {
+          ...text,
+          typewriterSpeed: text.typewriterSpeed ?? cps,
+          clip: {
+            startMs: tools.autoKey ? nextAnimatronClipStart(s.project) : 0,
+            durationMs,
+            easing: { ...s.clipEasing },
+          },
+        };
       }
-      const cel = active.frames[fIdx] ?? emptyCel();
-      const nextCel = { ...cel, texts: [...(cel.texts || []), text] };
-      const layer = setCel(active, fIdx, nextCel);
-      commit(replaceLayer(s.project, s.layerIndex, layer));
-      if (autoKey) set({ frameIndex: s.frameIndex });
+
+      const cel = active.frames[target.readIndex]!;
+      const texts = [...(cel.texts || []), stamped];
+      const writeCel = target.cloneFromHeld
+        ? { ...cloneCel(cel), texts }
+        : { ...cel, texts };
+      let next = replaceLayer(
+        s.project,
+        s.layerIndex,
+        setCel(active, target.writeIndex, writeCel),
+      );
+      if (animatron) {
+        next = ensureAnimatronLength({ ...next, workflow: "animatron" });
+      }
+      commit(next);
+      if (animatron && stamped.clip) {
+        const endMs = stamped.clip.startMs + stamped.clip.durationMs;
+        set({ frameIndex: frameIndexAtOrPastMs(next, endMs) });
+      }
+    },
+
+    addImageElement: (image) => {
+      const s = get();
+      const fi = Math.max(0, s.frameIndex);
+      const animatron = usePlayback.getState().workflow === "animatron";
+      const stamped: ImageElement =
+        animatron && !image.clip
+          ? {
+              ...image,
+              clip: {
+                startMs: nextAnimatronClipStart(s.project),
+                durationMs: Math.max(MIN_CLIP_MS, 1000),
+                easing: { ...s.clipEasing },
+              },
+            }
+          : image;
+      const layer: Layer = {
+        id: crypto.randomUUID(),
+        name: `Image ${s.project.layers.length + 1}`,
+        visible: true,
+        isStatic: false,
+        frames: Array.from({ length: Math.max(1, s.project.frameCount) }, (_, i) =>
+          i === fi
+            ? { id: crypto.randomUUID(), strokes: [], texts: [], images: [stamped] }
+            : null,
+        ),
+      };
+      // Ensure frame slot exists
+      while (layer.frames.length <= fi) layer.frames.push(null);
+      if (!layer.frames[fi]) {
+        layer.frames[fi] = {
+          id: crypto.randomUUID(),
+          strokes: [],
+          texts: [],
+          images: [stamped],
+        };
+      }
+      const next = animatron
+        ? ensureAnimatronLength({ ...s.project, layers: [...s.project.layers, layer] })
+        : { ...s.project, layers: [...s.project.layers, layer] };
+      commit(next);
+      set({ layerIndex: s.project.layers.length, frameIndex: fi });
+    },
+
+    addImageToActiveCel: (image) => {
+      const s = get();
+      const layer = s.project.layers[s.layerIndex];
+      if (!layer) return;
+      const target = resolveEditTarget(s.project, layer, s.frameIndex);
+      if (!target) return;
+      const cel = layer.frames[target.readIndex];
+      if (!cel) return;
+      const animatron =
+        s.project.workflow === "animatron" ||
+        usePlayback.getState().workflow === "animatron";
+      const stamped: ImageElement =
+        animatron && !image.clip
+          ? {
+              ...image,
+              clip: {
+                startMs: nextAnimatronClipStart(s.project),
+                durationMs: Math.max(MIN_CLIP_MS, 1000),
+                easing: { ...s.clipEasing },
+              },
+            }
+          : image;
+      const writeCel = target.cloneFromHeld
+        ? {
+            ...cloneCel(cel),
+            images: [...(cel.images ?? []), stamped],
+          }
+        : {
+            ...cel,
+            images: [...(cel.images ?? []), stamped],
+          };
+      commit(
+        replaceLayer(
+          s.project,
+          s.layerIndex,
+          setCel(layer, target.writeIndex, writeCel),
+        ),
+      );
+    },
+
+    updateImageElement: (id, patch) => {
+      const s = get();
+      let found = false;
+      let nextProject = { ...s.project, layers: [...s.project.layers] };
+
+      for (let li = 0; li < nextProject.layers.length; li++) {
+        const layer = nextProject.layers[li]!;
+        let newFrames = [...layer.frames];
+        let layerChanged = false;
+
+        for (let fi = 0; fi < newFrames.length; fi++) {
+          const cel = newFrames[fi];
+          if (!cel?.images?.length) continue;
+          const idx = cel.images.findIndex((im) => im.id === id);
+          if (idx === -1) continue;
+          const cur = cel.images[idx]!;
+          const nextImages = [...cel.images];
+          nextImages[idx] = { ...cur, ...patch };
+          newFrames[fi] = { ...cel, images: nextImages };
+          layerChanged = true;
+          found = true;
+        }
+        if (layerChanged) {
+          nextProject.layers[li] = { ...layer, frames: newFrames };
+        }
+      }
+      if (found) commit(nextProject);
     },
 
     updateTextElement: (id, patch) => {
@@ -373,50 +684,63 @@ export const useProject = create<ProjectState>((set, get) => {
 
     updateStrokes: (ids, patch) => {
       if (!ids.length) return;
+      const idSet = new Set(ids);
       const { project, layerIndex, frameIndex } = get();
-      const layer = project.layers[layerIndex];
-      if (!layer) return;
       const pb = usePlayback.getState();
       const tools = useTools.getState();
       const animatron = project.workflow === "animatron";
-      const celIndex = animatron
-        ? layer.frames.findIndex((f) => f !== null)
-        : resolveCelIndex(layer, layer.isStatic ? 0 : frameIndex);
-      if (celIndex === null || celIndex < 0) return;
 
-      const isHeld = !animatron && celIndex !== frameIndex && !layer.isStatic;
-      const shouldClone = tools.autoKey && (!pb.onionSkin || pb.onionAutoDuplicate);
-      if (isHeld && !shouldClone) return;
+      let nextProject = project;
+      let anyChanged = false;
 
-      const cel = layer.frames[celIndex]!;
-      let changed = false;
-      const strokes = cel.strokes.map((s) => {
-        if (!ids.includes(s.id)) return s;
-        const nextPatch = { ...patch };
-        if (!s.closed) delete nextPatch.fillColor;
-        if (Object.keys(nextPatch).length === 0) return s;
-        changed = true;
-        return { ...s, ...nextPatch };
-      });
-      if (!changed) return;
+      // Patch matching strokes on every layer — Animatron keeps one path per layer.
+      for (let li = 0; li < nextProject.layers.length; li++) {
+        const layer = nextProject.layers[li]!;
+        const celIndex = animatron
+          ? layer.frames.findIndex((f) => f !== null)
+          : resolveCelIndex(
+              layer,
+              layer.isStatic ? 0 : li === layerIndex ? frameIndex : frameIndex,
+            );
+        if (celIndex === null || celIndex < 0) continue;
 
-      if (isHeld) {
-        commit(
-          replaceLayer(
-            project,
-            layerIndex,
-            setCel(layer, frameIndex, { ...cloneCel(cel), strokes }),
-          ),
-        );
-      } else {
-        commit(
-          replaceLayer(
-            project,
-            layerIndex,
-            setCel(layer, celIndex, { ...cel, strokes }),
-          ),
+        const isHeld =
+          !animatron &&
+          li === layerIndex &&
+          celIndex !== frameIndex &&
+          !layer.isStatic;
+        const shouldClone =
+          tools.autoKey && (!pb.onionSkin || pb.onionAutoDuplicate);
+        if (isHeld && !shouldClone) continue;
+
+        const cel = layer.frames[celIndex]!;
+        if (!cel.strokes.some((s) => idSet.has(s.id))) continue;
+
+        let changed = false;
+        const strokes = cel.strokes.map((s) => {
+          if (!idSet.has(s.id)) return s;
+          const nextPatch = { ...patch };
+          const closedAfter = patch.closed ?? s.closed;
+          if (!closedAfter) delete nextPatch.fillColor;
+          if (Object.keys(nextPatch).length === 0) return s;
+          changed = true;
+          return { ...s, ...nextPatch };
+        });
+        if (!changed) continue;
+        anyChanged = true;
+
+        const writeFi = isHeld ? frameIndex : celIndex;
+        const writeCel = isHeld
+          ? { ...cloneCel(cel), strokes }
+          : { ...cel, strokes };
+        nextProject = replaceLayer(
+          nextProject,
+          li,
+          setCel(layer, writeFi, writeCel),
         );
       }
+
+      if (anyChanged) commit(nextProject);
     },
 
     removeTextElement: (id) => {
@@ -449,6 +773,71 @@ export const useProject = create<ProjectState>((set, get) => {
       if (found) commit(nextProject);
     },
 
+    reorderTextElement: (id, where) => {
+      const s = get();
+      let found = false;
+      let nextProject = { ...s.project, layers: [...s.project.layers] };
+
+      for (let li = 0; li < nextProject.layers.length; li++) {
+        const layer = nextProject.layers[li];
+        let newFrames = [...layer.frames];
+        let layerChanged = false;
+
+        for (let fi = 0; fi < newFrames.length; fi++) {
+          const cel = newFrames[fi];
+          if (!cel?.texts?.length) continue;
+          const idx = cel.texts.findIndex((t) => t.id === id);
+          if (idx === -1) continue;
+          const nextTexts = [...cel.texts];
+          const [item] = nextTexts.splice(idx, 1);
+          if (where === "front") nextTexts.push(item);
+          else if (where === "back") nextTexts.unshift(item);
+          else if (where === "forward") {
+            const to = Math.min(nextTexts.length, idx + 1);
+            nextTexts.splice(to, 0, item);
+          } else {
+            const to = Math.max(0, idx - 1);
+            nextTexts.splice(to, 0, item);
+          }
+          newFrames[fi] = { ...cel, texts: nextTexts };
+          layerChanged = true;
+          found = true;
+        }
+        if (layerChanged) {
+          nextProject.layers[li] = { ...layer, frames: newFrames };
+        }
+      }
+      if (found) commit(nextProject);
+    },
+
+    duplicateTextElement: (id) => {
+      const s = get();
+      const { project, layerIndex, frameIndex } = s;
+      const layer = project.layers[layerIndex];
+      if (!layer) return null;
+      const animatron = project.workflow === "animatron";
+      const celIndex = animatron
+        ? layer.frames.findIndex((f) => f !== null)
+        : resolveCelIndex(layer, layer.isStatic ? 0 : frameIndex);
+      if (celIndex === null || celIndex < 0) return null;
+      const cel = layer.frames[celIndex];
+      if (!cel?.texts) return null;
+      const src = cel.texts.find((t) => t.id === id);
+      if (!src) return null;
+      const newId = crypto.randomUUID();
+      const copy: TextElement = {
+        ...src,
+        id: newId,
+        x: src.x + 16,
+        y: src.y + 16,
+        path: src.path ? { ...src.path } : src.path,
+        shadow: src.shadow ? { ...src.shadow } : src.shadow,
+      };
+      const nextCel = { ...cel, texts: [...cel.texts, copy] };
+      commit(replaceLayer(project, layerIndex, setCel(layer, celIndex, nextCel)));
+      return newId;
+    },
+
     pasteStrokes: (strokes) => {
       if (strokes.length === 0) return [];
       const { project, layerIndex, frameIndex } = get();
@@ -474,24 +863,121 @@ export const useProject = create<ProjectState>((set, get) => {
       const { project, layerIndex, frameIndex } = get();
       const layer = project.layers[layerIndex];
       if (!layer) return;
-      const pb = usePlayback.getState();
-      const tools = useTools.getState();
-      const celIndex = resolveCelIndex(layer, layer.isStatic ? 0 : frameIndex);
-      if (celIndex === null) return;
-      
-      const isHeld = celIndex !== frameIndex && !layer.isStatic;
-      const shouldClone = tools.autoKey && (!pb.onionSkin || pb.onionAutoDuplicate);
-      if (isHeld && !shouldClone) return; // Cannot edit held cel if auto-key is off/prevented
+      const target = resolveEditTarget(project, layer, frameIndex);
+      if (!target) return;
 
-      const cel = layer.frames[celIndex]!;
+      const cel = layer.frames[target.readIndex]!;
       const strokes = cel.strokes.filter((s) => !ids.includes(s.id));
       const texts = cel.texts?.filter((t) => !ids.includes(t.id));
-      if (strokes.length === cel.strokes.length && (!cel.texts || texts?.length === cel.texts.length)) return;
-      
-      if (isHeld) {
-        commit(replaceLayer(project, layerIndex, setCel(layer, frameIndex, { ...cloneCel(cel), strokes, texts })));
-      } else {
-        commit(replaceLayer(project, layerIndex, setCel(layer, celIndex, { ...cel, strokes, texts })));
+      const images = cel.images?.filter((im) => !ids.includes(im.id));
+      const removedImage =
+        (cel.images?.length ?? 0) > 0 &&
+        (images?.length ?? 0) < (cel.images?.length ?? 0);
+      if (
+        strokes.length === cel.strokes.length &&
+        (!cel.texts || texts?.length === cel.texts.length) &&
+        (!cel.images || images?.length === cel.images.length)
+      ) {
+        return;
+      }
+
+      // MVP §25 — deleting a canvas image also removes its dedicated layer
+      // when that layer has no other content.
+      if (
+        removedImage &&
+        strokes.length === 0 &&
+        !(texts?.length) &&
+        !(images?.length) &&
+        project.layers.length > 1
+      ) {
+        const layers = project.layers.filter((_, i) => i !== layerIndex);
+        commit({ ...project, layers });
+        set({
+          layerIndex: Math.min(
+            layerIndex,
+            Math.max(0, layers.length - 1),
+          ),
+        });
+        return;
+      }
+
+      const writeCel = target.cloneFromHeld
+        ? { ...cloneCel(cel), strokes, texts, images }
+        : { ...cel, strokes, texts, images };
+      commit(
+        replaceLayer(
+          project,
+          layerIndex,
+          setCel(layer, target.writeIndex, writeCel),
+        ),
+      );
+    },
+
+    convertStrokeToBezier: (strokeId) => {
+      const { project, frameIndex } = get();
+      for (let li = 0; li < project.layers.length; li++) {
+        const layer = project.layers[li];
+        const target = resolveEditTarget(project, layer, frameIndex);
+        if (!target) continue;
+        const cel = layer.frames[target.readIndex];
+        if (!cel) continue;
+        const stroke = cel.strokes.find((s) => s.id === strokeId);
+        if (!stroke || stroke.bezierNodes?.length || stroke.points.length < 2) {
+          continue;
+        }
+
+        const { nodes, closed } = pointsToBezierNodes(stroke.points, {
+          closed: stroke.closed,
+          strokeSize: stroke.size,
+        });
+        if (nodes.length < 2) continue;
+
+        const durationHint =
+          stroke.clip?.durationMs ?? strokeDurationMs(stroke.points);
+        const points = flattenBezierNodes(
+          nodes,
+          closed || stroke.closed,
+          durationHint > 0 ? durationHint : undefined,
+        );
+        const extras = extrasAfterPathEdit(stroke);
+        const strokes = cel.strokes.map((s) => {
+          if (s.id !== strokeId) return s;
+          const next: Stroke = {
+            ...s,
+            points,
+            bezierNodes: nodes,
+            closed: closed || s.closed || undefined,
+          };
+          if (s.clip) {
+            next.clip = {
+              ...s.clip,
+              durationMs: Math.max(MIN_CLIP_MS, strokeDurationMs(points)),
+            };
+          }
+          if (extras) {
+            if ("shapeBox" in extras) {
+              if (extras.shapeBox === undefined) delete next.shapeBox;
+              else next.shapeBox = extras.shapeBox;
+            }
+            if ("shapeKind" in extras) {
+              if (extras.shapeKind === undefined) delete next.shapeKind;
+              else next.shapeKind = extras.shapeKind;
+            }
+          }
+          return next;
+        });
+
+        const writeCel = target.cloneFromHeld
+          ? { ...cloneCel(cel), strokes }
+          : { ...cel, strokes };
+        commit(
+          replaceLayer(
+            project,
+            li,
+            setCel(layer, target.writeIndex, writeCel),
+          ),
+        );
+        return;
       }
     },
 
@@ -499,154 +985,310 @@ export const useProject = create<ProjectState>((set, get) => {
       const { project, layerIndex, frameIndex } = get();
       const layer = project.layers[layerIndex];
       if (!layer) return;
-      const pb = usePlayback.getState();
-      const tools = useTools.getState();
-      const celIndex = resolveCelIndex(layer, layer.isStatic ? 0 : frameIndex);
-      if (celIndex === null) return;
-      
-      const isHeld = celIndex !== frameIndex && !layer.isStatic;
-      const shouldClone = tools.autoKey && (!pb.onionSkin || pb.onionAutoDuplicate);
-      if (isHeld && !shouldClone) return;
+      const target = resolveEditTarget(project, layer, frameIndex);
+      if (!target) return;
 
-      const cel = layer.frames[celIndex]!;
-      
+      const cel = layer.frames[target.readIndex]!;
+
       const toDelete = new Map<string, Set<number>>();
       for (const { strokeId, index } of nodeIds) {
         if (!toDelete.has(strokeId)) toDelete.set(strokeId, new Set());
         toDelete.get(strokeId)!.add(index);
       }
-      
+
       let changed = false;
-      const strokes = cel.strokes.map(s => {
-        const delSet = toDelete.get(s.id);
-        if (!delSet) return s;
-        changed = true;
-        if (s.bezierNodes) {
-          const newNodes = s.bezierNodes.filter((_, i) => !delSet.has(i));
-          const newPoints = flattenBezierNodes(newNodes, s.closed);
-          return { ...s, bezierNodes: newNodes, points: newPoints };
-        }
-        return { ...s, points: s.points.filter((_, i) => !delSet.has(i)) };
-      }).filter(s => (s.bezierNodes ? s.bezierNodes.length > 0 : s.points.length > 0));
-      
+      const strokes = cel.strokes
+        .map((s) => {
+          const delSet = toDelete.get(s.id);
+          if (!delSet) return s;
+          changed = true;
+          if (s.bezierNodes) {
+            const newNodes = s.bezierNodes.filter((_, i) => !delSet.has(i));
+            const durationHint =
+              s.clip?.durationMs ?? strokeDurationMs(s.points);
+            const newPoints = flattenBezierNodes(
+              newNodes,
+              s.closed,
+              durationHint > 0 ? durationHint : undefined,
+            );
+            const next: Stroke = {
+              ...s,
+              bezierNodes: newNodes,
+              points: newPoints,
+            };
+            if (s.clip) {
+              next.clip = {
+                ...s.clip,
+                durationMs: Math.max(MIN_CLIP_MS, strokeDurationMs(newPoints)),
+              };
+            }
+            return next;
+          }
+          return { ...s, points: s.points.filter((_, i) => !delSet.has(i)) };
+        })
+        .filter((s) =>
+          s.bezierNodes ? s.bezierNodes.length > 0 : s.points.length > 0,
+        );
+
       if (!changed) return;
-      
-      if (isHeld) {
-        commit(replaceLayer(project, layerIndex, setCel(layer, frameIndex, { ...cloneCel(cel), strokes })));
-      } else {
-        commit(replaceLayer(project, layerIndex, setCel(layer, celIndex, { ...cel, strokes })));
-      }
+
+      const writeCel = target.cloneFromHeld
+        ? { ...cloneCel(cel), strokes }
+        : { ...cel, strokes };
+      commit(
+        replaceLayer(
+          project,
+          layerIndex,
+          setCel(layer, target.writeIndex, writeCel),
+        ),
+      );
     },
 
-    replaceStrokePoints: (strokeId, points, bezierNodes) => {
+    replaceStrokePoints: (strokeId, points, bezierNodes, extras) => {
       const { project, layerIndex, frameIndex } = get();
       const layer = project.layers[layerIndex];
       if (!layer) return;
-      const pb = usePlayback.getState();
-      const tools = useTools.getState();
-      const celIndex = resolveCelIndex(layer, layer.isStatic ? 0 : frameIndex);
-      if (celIndex === null) return;
-      
-      const isHeld = celIndex !== frameIndex && !layer.isStatic;
-      const shouldClone = tools.autoKey && (!pb.onionSkin || pb.onionAutoDuplicate);
-      if (isHeld && !shouldClone) return;
+      const target = resolveEditTarget(project, layer, frameIndex);
+      if (!target) return;
 
-      const cel = layer.frames[celIndex]!;
+      const cel = layer.frames[target.readIndex]!;
       if (!cel.strokes.some((s) => s.id === strokeId)) return;
-      const strokes = cel.strokes.map((s) => (s.id === strokeId ? { ...s, points, ...(bezierNodes ? { bezierNodes } : {}) } : s));
-      
-      if (isHeld) {
-        commit(replaceLayer(project, layerIndex, setCel(layer, frameIndex, { ...cloneCel(cel), strokes })));
-      } else {
-        commit(replaceLayer(project, layerIndex, setCel(layer, celIndex, { ...cel, strokes })));
-      }
+      const strokes = cel.strokes.map((s) => {
+        if (s.id !== strokeId) return s;
+        const durationHint =
+          s.clip?.durationMs ?? strokeDurationMs(s.points);
+        const timedPoints = bezierNodes
+          ? retimeStrokePoints(
+              points,
+              durationHint > 0 ? durationHint : undefined,
+            )
+          : points;
+        const next: Stroke = {
+          ...s,
+          points: timedPoints,
+          ...(bezierNodes ? { bezierNodes } : {}),
+        };
+        if (s.clip) {
+          next.clip = {
+            ...s.clip,
+            durationMs: Math.max(MIN_CLIP_MS, strokeDurationMs(timedPoints)),
+          };
+        }
+        if (extras) {
+          if ("shapeBox" in extras) {
+            if (extras.shapeBox === undefined) delete next.shapeBox;
+            else next.shapeBox = extras.shapeBox;
+          }
+          if ("shapeKind" in extras) {
+            if (extras.shapeKind === undefined) delete next.shapeKind;
+            else next.shapeKind = extras.shapeKind;
+          }
+        }
+        return next;
+      });
+
+      const writeCel = target.cloneFromHeld
+        ? { ...cloneCel(cel), strokes }
+        : { ...cel, strokes };
+      commit(
+        replaceLayer(
+          project,
+          layerIndex,
+          setCel(layer, target.writeIndex, writeCel),
+        ),
+      );
     },
 
     translateStrokes: (ids, dx, dy) => {
       if (!ids.length || (dx === 0 && dy === 0)) return;
-      const { project, layerIndex, frameIndex } = get();
-      const layer = project.layers[layerIndex];
-      if (!layer) return;
-      const pb = usePlayback.getState();
-      const tools = useTools.getState();
-      const celIndex = resolveCelIndex(layer, layer.isStatic ? 0 : frameIndex);
-      if (celIndex === null) return;
-
-      const isHeld = celIndex !== frameIndex && !layer.isStatic;
-      const shouldClone = tools.autoKey && (!pb.onionSkin || pb.onionAutoDuplicate);
-      if (isHeld && !shouldClone) return;
-
-      const cel = layer.frames[celIndex]!;
+      const { project, frameIndex } = get();
       const idSet = new Set(ids);
-      let changed = false;
-      const strokes = cel.strokes.map((s) => {
-        if (!idSet.has(s.id)) return s;
-        changed = true;
-        return { ...s, points: translatePoints(s.points, dx, dy) };
-      });
-      const texts = cel.texts ? cel.texts.map((t) => {
-        if (!idSet.has(t.id)) return t;
-        changed = true;
-        return { ...t, x: t.x + dx, y: t.y + dy };
-      }) : undefined;
-      if (!changed) return;
+      let nextProject = project;
+      let anyChanged = false;
 
-      if (isHeld) {
-        commit(replaceLayer(project, layerIndex, setCel(layer, frameIndex, { ...cloneCel(cel), strokes, texts })));
-      } else {
-        commit(replaceLayer(project, layerIndex, setCel(layer, celIndex, { ...cel, strokes, texts })));
+      for (let li = 0; li < nextProject.layers.length; li++) {
+        const layer = nextProject.layers[li];
+        const target = resolveEditTarget(nextProject, layer, frameIndex);
+        if (!target) continue;
+        const cel = layer.frames[target.readIndex];
+        if (!cel) continue;
+
+        let changed = false;
+        const strokes = cel.strokes.map((s) => {
+          if (!idSet.has(s.id)) return s;
+          changed = true;
+          const next: typeof s = {
+            ...s,
+            points: translatePoints(s.points, dx, dy),
+          };
+          if (s.bezierNodes?.length) {
+            next.bezierNodes = translateBezierNodes(s.bezierNodes, dx, dy);
+            const durationHint =
+              s.clip?.durationMs ?? strokeDurationMs(s.points);
+            next.points = flattenBezierNodes(
+              next.bezierNodes,
+              s.closed,
+              durationHint > 0 ? durationHint : undefined,
+            );
+          }
+          if (s.shapeBox) {
+            next.shapeBox = {
+              ...s.shapeBox,
+              x: s.shapeBox.x + dx,
+              y: s.shapeBox.y + dy,
+            };
+          }
+          return next;
+        });
+        const texts = cel.texts
+          ? cel.texts.map((t) => {
+              if (!idSet.has(t.id)) return t;
+              changed = true;
+              return { ...t, x: t.x + dx, y: t.y + dy };
+            })
+          : undefined;
+        const images = cel.images
+          ? cel.images.map((im) => {
+              if (!idSet.has(im.id)) return im;
+              changed = true;
+              return { ...im, x: im.x + dx, y: im.y + dy };
+            })
+          : undefined;
+        if (!changed) continue;
+
+        const writeCel = target.cloneFromHeld
+          ? { ...cloneCel(cel), strokes, texts, images }
+          : { ...cel, strokes, texts, images };
+        nextProject = replaceLayer(
+          nextProject,
+          li,
+          setCel(nextProject.layers[li], target.writeIndex, writeCel),
+        );
+        anyChanged = true;
       }
+      if (anyChanged) commit(nextProject);
     },
 
     transformStrokes: (ids, pivotX, pivotY, scale, rotationRad) => {
       if (!ids.length || (scale === 1 && rotationRad === 0)) return;
-      const { project, layerIndex, frameIndex } = get();
-      const layer = project.layers[layerIndex];
-      if (!layer) return;
-      const pb = usePlayback.getState();
-      const tools = useTools.getState();
-      const celIndex = resolveCelIndex(layer, layer.isStatic ? 0 : frameIndex);
-      if (celIndex === null) return;
-
-      const isHeld = celIndex !== frameIndex && !layer.isStatic;
-      const shouldClone = tools.autoKey && (!pb.onionSkin || pb.onionAutoDuplicate);
-      if (isHeld && !shouldClone) return;
-
-      const cel = layer.frames[celIndex]!;
+      const { project, frameIndex } = get();
       const idSet = new Set(ids);
-      let changed = false;
-      const strokes = cel.strokes.map((s) => {
-        if (!idSet.has(s.id)) return s;
-        changed = true;
-        return {
-          ...s,
-          points: transformPoints(s.points, pivotX, pivotY, scale, rotationRad),
-          size: Math.max(0.5, s.size * scale),
-        };
-      });
       const mctx = getMeasureCtx();
-      const texts = cel.texts
-        ? cel.texts.map((t) => {
-            if (!idSet.has(t.id)) return t;
-            changed = true;
-            const box = measureTextBox(mctx, t);
-            return transformTextElement(
-              t,
-              box,
+      let nextProject = project;
+      let anyChanged = false;
+
+      for (let li = 0; li < nextProject.layers.length; li++) {
+        const layer = nextProject.layers[li];
+        const target = resolveEditTarget(nextProject, layer, frameIndex);
+        if (!target) continue;
+        const cel = layer.frames[target.readIndex];
+        if (!cel) continue;
+
+        let changed = false;
+        const strokes = cel.strokes.map((s) => {
+          if (!idSet.has(s.id)) return s;
+          changed = true;
+          const next: typeof s = {
+            ...s,
+            points: transformPoints(s.points, pivotX, pivotY, scale, rotationRad),
+            size: Math.max(0.5, s.size * scale),
+          };
+          if (s.bezierNodes?.length) {
+            next.bezierNodes = transformBezierNodes(
+              s.bezierNodes,
               pivotX,
               pivotY,
               scale,
               rotationRad,
             );
-          })
-        : undefined;
-      if (!changed) return;
+            next.points = flattenBezierNodes(
+              next.bezierNodes,
+              s.closed,
+              (s.clip?.durationMs ?? strokeDurationMs(s.points)) > 0
+                ? s.clip?.durationMs ?? strokeDurationMs(s.points)
+                : undefined,
+            );
+          }
+          if (s.shapeBox) {
+            const box = s.shapeBox;
+            if (s.shapeKind === "line" || s.shapeKind === "arrow") {
+              const [p0] = transformPoints(
+                [{ x: box.x, y: box.y, pressure: 0, t: 0 }],
+                pivotX,
+                pivotY,
+                scale,
+                rotationRad,
+              );
+              const [p1] = transformPoints(
+                [
+                  {
+                    x: box.x + box.w,
+                    y: box.y + box.h,
+                    pressure: 0,
+                    t: 0,
+                  },
+                ],
+                pivotX,
+                pivotY,
+                scale,
+                rotationRad,
+              );
+              next.shapeBox = {
+                x: p0!.x,
+                y: p0!.y,
+                w: p1!.x - p0!.x,
+                h: p1!.y - p0!.y,
+                rotation: 0,
+              };
+            } else {
+              const cx = box.x + box.w / 2;
+              const cy = box.y + box.h / 2;
+              const [c] = transformPoints(
+                [{ x: cx, y: cy, pressure: 0, t: 0 }],
+                pivotX,
+                pivotY,
+                scale,
+                rotationRad,
+              );
+              next.shapeBox = {
+                x: c!.x - (box.w * scale) / 2,
+                y: c!.y - (box.h * scale) / 2,
+                w: Math.max(1, box.w * scale),
+                h: Math.max(1, box.h * scale),
+                rotation: (box.rotation ?? 0) + rotationRad || undefined,
+              };
+            }
+          }
+          return next;
+        });
+        const texts = cel.texts
+          ? cel.texts.map((t) => {
+              if (!idSet.has(t.id)) return t;
+              changed = true;
+              const box = measureTextBox(mctx, t);
+              return transformTextElement(
+                t,
+                box,
+                pivotX,
+                pivotY,
+                scale,
+                rotationRad,
+              );
+            })
+          : undefined;
+        if (!changed) continue;
 
-      if (isHeld) {
-        commit(replaceLayer(project, layerIndex, setCel(layer, frameIndex, { ...cloneCel(cel), strokes, texts })));
-      } else {
-        commit(replaceLayer(project, layerIndex, setCel(layer, celIndex, { ...cel, strokes, texts })));
+        const writeCel = target.cloneFromHeld
+          ? { ...cloneCel(cel), strokes, texts }
+          : { ...cel, strokes, texts };
+        nextProject = replaceLayer(
+          nextProject,
+          li,
+          setCel(nextProject.layers[li], target.writeIndex, writeCel),
+        );
+        anyChanged = true;
       }
+      if (anyChanged) commit(nextProject);
     },
 
     updateStrokeClip: (strokeId, clip) => {
@@ -658,7 +1300,14 @@ export const useProject = create<ProjectState>((set, get) => {
           const strokes = cel.strokes.map((s) => {
             if (s.id !== strokeId) return s;
             found = true;
-            return { ...s, clip: { ...clip } };
+            return {
+              ...s,
+              clip: {
+                ...s.clip,
+                ...clip,
+                easing: clip.easing ?? s.clip?.easing,
+              },
+            };
           });
           return strokes === cel.strokes ? cel : { ...cel, strokes };
         });
@@ -690,6 +1339,209 @@ export const useProject = create<ProjectState>((set, get) => {
       });
       set({ clipEasing: nextEasing });
       if (touched) commit(ensureAnimatronLength({ ...project, layers }));
+    },
+
+    addMotionPath: (layerId, path) => {
+      const { project } = get();
+      const li = project.layers.findIndex((l) => l.id === layerId);
+      if (li < 0) return;
+      const layer = project.layers[li]!;
+      const synced = syncMotionPathPoints(path);
+      commit(
+        replaceLayer(project, li, {
+          ...layer,
+          motionPaths: [...(layer.motionPaths ?? []), synced],
+        }),
+      );
+    },
+
+    updateMotionPath: (layerId, path) => {
+      const { project } = get();
+      const li = project.layers.findIndex((l) => l.id === layerId);
+      if (li < 0) return;
+      const layer = project.layers[li]!;
+      const paths = layer.motionPaths ?? [];
+      if (!paths.some((p) => p.id === path.id)) return;
+      const synced = syncMotionPathPoints(path);
+      commit(
+        replaceLayer(project, li, {
+          ...layer,
+          motionPaths: paths.map((p) => (p.id === path.id ? synced : p)),
+        }),
+      );
+    },
+
+    /** Live node drag — updates bezierNodes only (no flatten / no undo). */
+    updateMotionPathLive: (layerId, path) => {
+      const { project } = get();
+      const li = project.layers.findIndex((l) => l.id === layerId);
+      if (li < 0) return;
+      const layer = project.layers[li]!;
+      const paths = layer.motionPaths ?? [];
+      if (!paths.some((p) => p.id === path.id)) return;
+      set({
+        project: replaceLayer(project, li, {
+          ...layer,
+          motionPaths: paths.map((p) =>
+            p.id === path.id
+              ? {
+                  ...p,
+                  bezierNodes: path.bezierNodes.map((n) => ({
+                    ...n,
+                    handleIn: n.handleIn ? { ...n.handleIn } : undefined,
+                    handleOut: n.handleOut ? { ...n.handleOut } : undefined,
+                  })),
+                }
+              : p,
+          ),
+        }),
+      });
+    },
+
+    removeMotionPath: (layerId, pathId) => {
+      const { project } = get();
+      const li = project.layers.findIndex((l) => l.id === layerId);
+      if (li < 0) return;
+      const layer = project.layers[li]!;
+      commit(
+        replaceLayer(project, li, {
+          ...layer,
+          motionPaths: (layer.motionPaths ?? []).filter((p) => p.id !== pathId),
+          motionAssignments: (layer.motionAssignments ?? []).filter(
+            (a) => a.pathId !== pathId,
+          ),
+        }),
+      );
+    },
+
+    addMotionAssignment: (layerId, assignment) => {
+      const { project } = get();
+      const li = project.layers.findIndex((l) => l.id === layerId);
+      if (li < 0) return;
+      const layer = project.layers[li]!;
+      let next = replaceLayer(project, li, {
+        ...layer,
+        motionAssignments: [...(layer.motionAssignments ?? []), { ...assignment }],
+      });
+      next = ensureAnimatronLength(next);
+      // Also grow frameCount for stop-motion endFrame
+      if (assignment.endFrame != null) {
+        next = {
+          ...next,
+          frameCount: Math.max(next.frameCount, assignment.endFrame + 1),
+        };
+      }
+      commit(next);
+    },
+
+    updateMotionAssignment: (layerId, assignmentId, patch) => {
+      const { project } = get();
+      const li = project.layers.findIndex((l) => l.id === layerId);
+      if (li < 0) return;
+      const layer = project.layers[li]!;
+      const list = layer.motionAssignments ?? [];
+      if (!list.some((a) => a.id === assignmentId)) return;
+      const nextList = list.map((a) =>
+        a.id === assignmentId ? { ...a, ...patch } : a,
+      );
+      let next = replaceLayer(project, li, {
+        ...layer,
+        motionAssignments: nextList,
+      });
+      next = ensureAnimatronLength(next);
+      const maxEnd = nextList.reduce(
+        (m, a) => Math.max(m, a.endFrame ?? 0),
+        0,
+      );
+      if (maxEnd > 0) {
+        next = { ...next, frameCount: Math.max(next.frameCount, maxEnd + 1) };
+      }
+      commit(next);
+    },
+
+    removeMotionAssignment: (layerId, assignmentId) => {
+      const { project } = get();
+      const li = project.layers.findIndex((l) => l.id === layerId);
+      if (li < 0) return;
+      const layer = project.layers[li]!;
+      commit(
+        replaceLayer(project, li, {
+          ...layer,
+          motionAssignments: (layer.motionAssignments ?? []).filter(
+            (a) => a.id !== assignmentId,
+          ),
+        }),
+      );
+    },
+
+    addMorphClip: (clip) => {
+      const { project } = get();
+      let next: Project = {
+        ...project,
+        morphs: [...(project.morphs ?? []), { ...clip }],
+      };
+      next = ensureAnimatronLength(next);
+      // Morph end also extends timeline
+      const endMs = clip.startMs + clip.durationMs;
+      const need = Math.ceil((endMs / 1000) * next.fps) + 1;
+      if (need > next.frameCount) next = { ...next, frameCount: need };
+      commit(next);
+    },
+
+    updateMorphClip: (clipId, patch) => {
+      const { project } = get();
+      const morphs = project.morphs ?? [];
+      if (!morphs.some((m) => m.id === clipId)) return;
+      const nextMorphs = morphs.map((m) =>
+        m.id === clipId ? { ...m, ...patch } : m,
+      );
+      let next: Project = { ...project, morphs: nextMorphs };
+      next = ensureAnimatronLength(next);
+      const endMs = nextMorphs.reduce(
+        (m, c) => Math.max(m, c.startMs + c.durationMs),
+        0,
+      );
+      const need = Math.ceil((endMs / 1000) * next.fps) + 1;
+      if (need > next.frameCount) next = { ...next, frameCount: need };
+      commit(next);
+    },
+
+    removeMorphClip: (clipId) => {
+      const { project } = get();
+      commit({
+        ...project,
+        morphs: (project.morphs ?? []).filter((m) => m.id !== clipId),
+      });
+    },
+
+    generateInbetweens: (fromFrame, toFrame, count) => {
+      const { project, layerIndex } = get();
+      const layer = project.layers[layerIndex];
+      if (!layer || layer.isStatic) return;
+      if (fromFrame < 0 || toFrame <= fromFrame) return;
+      const celA = layer.frames[fromFrame];
+      const celB = layer.frames[toFrame];
+      if (!celA || !celB) return;
+      const mids = generateInbetweenFrames(celA, celB, count);
+      if (!mids.length) return;
+
+      const frames = layer.frames.slice();
+      const rebuilt: (Frame | null)[] = [];
+      for (let i = 0; i <= fromFrame; i++) {
+        rebuilt.push(frames[i] ?? null);
+      }
+      for (const mid of mids) rebuilt.push(mid);
+      for (let i = toFrame; i < frames.length; i++) {
+        rebuilt.push(frames[i] ?? null);
+      }
+      const added = mids.length;
+      const nextCount = Math.max(project.frameCount + added, rebuilt.length);
+      while (rebuilt.length < nextCount) rebuilt.push(null);
+
+      commit({
+        ...replaceLayer(project, layerIndex, { ...layer, frames: rebuilt }),
+        frameCount: nextCount,
+      });
     },
 
     addKeyframe: () => {
@@ -815,6 +1667,34 @@ export const useProject = create<ProjectState>((set, get) => {
       });
     },
 
+    deleteLayers: (indices) => {
+      const { project, layerIndex } = get();
+      if (project.layers.length <= 1) return;
+      const toRemove = new Set(
+        indices.filter((i) => i >= 0 && i < project.layers.length),
+      );
+      if (toRemove.size === 0) return;
+      if (toRemove.size >= project.layers.length) {
+        const keep = Math.min(layerIndex, project.layers.length - 1);
+        toRemove.delete(keep);
+      }
+      if (toRemove.size === 0) return;
+
+      const layers = project.layers.filter((_, i) => !toRemove.has(i));
+      let removedBefore = 0;
+      for (let i = 0; i < layerIndex; i++) {
+        if (toRemove.has(i)) removedBefore++;
+      }
+      let nextLayerIndex = layerIndex - removedBefore;
+      if (toRemove.has(layerIndex)) {
+        nextLayerIndex = Math.max(0, Math.min(nextLayerIndex, layers.length - 1));
+      }
+      commit({ ...project, layers });
+      set({
+        layerIndex: Math.max(0, Math.min(nextLayerIndex, layers.length - 1)),
+      });
+    },
+
     reorderLayer: (from, to) => {
       const { project } = get();
       if (from === to || from < 0 || to < 0 || from >= project.layers.length || to >= project.layers.length)
@@ -834,6 +1714,7 @@ export const useProject = create<ProjectState>((set, get) => {
     },
 
     loadProject: (project) => {
+      clearBrushDraftCache();
       set({
         project: migrateLegacyVanishingClips(project),
         layerIndex: 0,
@@ -841,7 +1722,7 @@ export const useProject = create<ProjectState>((set, get) => {
         undoStack: [],
         redoStack: [],
       });
-      usePlayback.getState().setWorkflow(project.workflow ?? "stopmotion");
+      usePlayback.getState().setWorkflow(project.workflow ?? "animatron");
     },
 
     undo: () =>

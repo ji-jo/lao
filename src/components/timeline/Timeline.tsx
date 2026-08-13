@@ -1,15 +1,22 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
+import { Layers2 } from "reicon-react";
 import { useProject } from "@/state/project";
 import { usePlayback } from "@/state/playback";
 import { useTools } from "@/state/tools";
+import { useSelection } from "@/state/selection";
 import { playerRef } from "@/state/playerRef";
+import {
+  allProjectClipItems,
+  projectClipEndMs,
+} from "@/engine/strokeProgress";
 import { ClipTimeline, BASE_PX_PER_MS } from "@/components/timeline/ClipTimeline";
 import { Tooltip } from "@/components/motion/tooltip";
 import { AnimationPanel } from "@/components/panels/AnimationPanel";
 import { OnionPanel } from "@/components/panels/OnionPanel";
 import { SettingsDocks } from "@/components/chrome/SettingsDocks";
 import { PAPER } from "@/components/chrome/paper-tokens";
+import { GooeySurfaceMorph } from "@/components/motion/gooey-surface-morph";
 import {
   SkipStartIcon,
   PrevIcon,
@@ -177,6 +184,7 @@ export function Timeline() {
   const setLayerIndex = useProject((s) => s.setLayerIndex);
   const stepFrame = useProject((s) => s.stepFrame);
   const addKeyframe = useProject((s) => s.addKeyframe);
+  const generateInbetweens = useProject((s) => s.generateInbetweens);
   const addLayer = useProject((s) => s.addLayer);
   const deleteLayer = useProject((s) => s.deleteLayer);
   const reorderLayer = useProject((s) => s.reorderLayer);
@@ -185,17 +193,38 @@ export function Timeline() {
   const toggleOnionPanel = usePlayback((s) => s.toggleOnionPanel);
   const animationPanelOpen = usePlayback((s) => s.animationPanelOpen);
   const toggleAnimationPanel = usePlayback((s) => s.toggleAnimationPanel);
+  const showFullStrokes = usePlayback((s) => s.showFullStrokes);
+  const toggleShowFullStrokes = usePlayback((s) => s.toggleShowFullStrokes);
+  const selectedLayerIndices = useSelection((s) => s.layerIndices);
+  const setLayerIndices = useSelection((s) => s.setLayerIndices);
   const autoKey = useTools((s) => s.autoKey);
   const toggleAutoKey = useTools((s) => s.toggleAutoKey);
   const isAnimatron = workflow === "animatron";
   const [collapsed, setCollapsed] = useState(false);
+  /** Free-float after drag; null = docked in App’s bottom flex slot. */
+  const [floatPos, setFloatPos] = useState<{ left: number; top: number } | null>(
+    null,
+  );
+  /** Bumps gooey settle morph when re-docking to the bottom. */
+  const [settleTick, setSettleTick] = useState(0);
   /** "collapse layers" — hides the entire layer-row stack (timing bar stays) */
   const [layersCollapsed, setLayersCollapsed] = useState(false);
   const [openMenuIndex, setOpenMenuIndex] = useState<number | null>(null);
   const shellRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const rowsVpRef = useRef<HTMLDivElement>(null);
   const stampTrackRef = useRef<HTMLDivElement>(null);
-  const dragCollapseRef = useRef<{ startY: number; collapsed: boolean } | null>(null);
+  const dragCollapseRef = useRef<{
+    startY: number;
+    startX: number;
+    collapsed: boolean;
+    originLeft: number;
+    originTop: number;
+    moving: boolean;
+    pointerId: number;
+    lastLeft: number;
+    lastTop: number;
+  } | null>(null);
   const [cellZoom, setCellZoom] = useState(1);
   const cellWidth = Math.round(BASE_CELL_WIDTH * cellZoom);
   const cellsInset = layersCollapsed
@@ -212,9 +241,13 @@ export function Timeline() {
     Math.round((1000 / Math.max(1, project.fps)) * pxPerMs - CELL_GAP),
   );
   const timingCellWidth = isAnimatron ? animCellWidth : cellWidth;
+  const clipEndMs = isAnimatron
+    ? projectClipEndMs(allProjectClipItems(project.layers))
+    : 0;
   const animTotalMs = Math.max(
     4000,
-    (project.frameCount / Math.max(project.fps, 1)) * 1000,
+    clipEndMs,
+    (project.frameCount / Math.max(1, project.fps)) * 1000,
   );
 
   /** one shared X offset — mirrored from the rows' nano ScrollArea */
@@ -278,6 +311,10 @@ export function Timeline() {
   }, [maxScrollX]);
 
   const layerCount = project.layers.length;
+  const rowsNaturalH =
+    layerCount * LAYER_ROW_H + Math.max(0, layerCount - 1) * LAYER_ROW_GAP;
+  const rowsViewportH = Math.min(ROWS_MAX_H, rowsNaturalH);
+
   const dropIndex = layerDrag
     ? Math.max(
         0,
@@ -455,30 +492,129 @@ export function Timeline() {
   }, [stepFrame]);
 
   /**
-   * Collapse handle (Paper 9JI-0 / 8NJ-0): drag down past ~24px and the track
-   * drops away, leaving the 58px handle+transport peek. Drag back up (or click)
-   * restores it.
+   * Collapse / move handle (Paper 9JI-0):
+   * - mostly vertical flick → collapse / expand (gooey size morph)
+   * - drag past move threshold → free-float the panel; release near bottom
+   *   re-docks with organic settle morph
    */
   function onCollapsePointerDown(e: React.PointerEvent) {
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    dragCollapseRef.current = { startY: e.clientY, collapsed };
+    const panel = panelRef.current ?? shellRef.current;
+    if (!panel) return;
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      /* synthetic */
+    }
+    const rect = panel.getBoundingClientRect();
+    dragCollapseRef.current = {
+      startY: e.clientY,
+      startX: e.clientX,
+      collapsed,
+      originLeft: rect.left,
+      originTop: rect.top,
+      moving: false,
+      pointerId: e.pointerId,
+      lastLeft: rect.left,
+      lastTop: rect.top,
+    };
   }
   function onCollapsePointerMove(e: React.PointerEvent) {
     const drag = dragCollapseRef.current;
-    if (!drag) return;
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    const dx = e.clientX - drag.startX;
     const dy = e.clientY - drag.startY;
-    if (dy > 24) setCollapsed(true);
-    else if (dy < -24) setCollapsed(false);
+
+    if (!drag.moving) {
+      // Prefer free-move once the gesture leaves a narrow vertical corridor.
+      if (Math.abs(dx) > 16 || Math.hypot(dx, dy) > 40) {
+        drag.moving = true;
+        const next = {
+          left: drag.originLeft + dx,
+          top: drag.originTop + dy,
+        };
+        drag.lastLeft = next.left;
+        drag.lastTop = next.top;
+        setFloatPos(next);
+        return;
+      }
+      if (dy > 24) setCollapsed(true);
+      else if (dy < -24) setCollapsed(false);
+      return;
+    }
+
+    const panel = panelRef.current;
+    const w = panel?.offsetWidth ?? PAPER.timelineWidth;
+    const h = panel?.offsetHeight ?? 152;
+    const pad = 8;
+    // Leave room for the setting dock band at the bottom so a floated
+    // timeline can't sit on top of brush/canvas chips.
+    const settingsBand = 56 + PAPER.settingGap;
+    const maxTop = Math.max(
+      pad,
+      window.innerHeight - PAPER.insetBottom - settingsBand - h - pad,
+    );
+    const left = Math.max(
+      pad,
+      Math.min(window.innerWidth - w - pad, drag.originLeft + dx),
+    );
+    const top = Math.max(
+      pad,
+      Math.min(maxTop, drag.originTop + dy),
+    );
+    drag.lastLeft = left;
+    drag.lastTop = top;
+    setFloatPos({ left, top });
   }
   function onCollapsePointerUp(e: React.PointerEvent) {
     const drag = dragCollapseRef.current;
     dragCollapseRef.current = null;
-    // a tap (no meaningful travel) toggles
-    if (drag && Math.abs(e.clientY - drag.startY) <= 4) setCollapsed(!drag.collapsed);
+    if (!drag || e.pointerId !== drag.pointerId) return;
+
+    if (drag.moving) {
+      const panel = panelRef.current;
+      const h = panel?.offsetHeight ?? 152;
+      const bottom = drag.lastTop + h;
+      const dockLine = window.innerHeight - PAPER.insetBottom;
+      // Re-dock when the panel sits near the bottom chrome band.
+      if (bottom >= dockLine - 80) {
+        setFloatPos(null);
+        setSettleTick((t) => t + 1);
+      }
+      return;
+    }
+
+    // Tap toggles collapse.
+    if (Math.abs(e.clientY - drag.startY) <= 4 && Math.abs(e.clientX - drag.startX) <= 4) {
+      setCollapsed(!drag.collapsed);
+    }
   }
 
+  const morphKey = `${collapsed ? "c" : "e"}-${settleTick}`;
+
+  // If the viewport shrinks while floated, re-dock when the panel would cover
+  // the bottom setting dock — keeps settings above the timeline.
+  useEffect(() => {
+    if (!floatPos) return;
+    function onResize() {
+      const panel = panelRef.current;
+      const h = panel?.offsetHeight ?? 152;
+      const bottom = floatPos!.top + h;
+      const dockLine = window.innerHeight - PAPER.insetBottom;
+      if (bottom >= dockLine - 80) {
+        setFloatPos(null);
+        setSettleTick((t) => t + 1);
+      }
+    }
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [floatPos]);
+
   return (
-    <div ref={shellRef} className="relative flex w-full flex-col items-center">
+    <div
+      ref={shellRef}
+      className="relative flex min-h-0 w-full flex-col items-center overflow-visible"
+      style={{ gap: PAPER.settingGap }}
+    >
       {/* Above the whole column (settings + dock). Inline bottom — class bottom-full
           was a no-op here and left the panel in static flow, shooting downward. */}
       {(animationPanelOpen || onionPanelOpen) && (
@@ -491,18 +627,42 @@ export function Timeline() {
         </div>
       )}
       {stage === "draw" && (
-        <div className="pointer-events-auto relative z-20" style={{ marginBottom: PAPER.settingGap }}>
+        <div className="pointer-events-auto relative z-[40] w-max max-w-full shrink-0 overflow-visible">
           <SettingsDocks />
         </div>
       )}
       {/*
         Paper 5S8-0: 704 wide, 6px top / 12px bottom / 16px side padding,
         handle → transport 12px, transport → track 16px.
+        GooeySurfaceMorph: collapse size melt + bottom re-dock settle pulse.
       */}
+      <GooeySurfaceMorph
+        morphKey={morphKey}
+        surface={PAPER.surface}
+        borderRadius={19}
+        transparentVar="--timeline-surface-bg"
+        className={cn(
+          "relative z-0 min-h-0 w-full",
+          // Floated panel stays under the setting dock (z-40) so resize/drag
+          // never stacks the timeline on top of brush/canvas chips.
+          floatPos && "pointer-events-auto !fixed z-[25]",
+        )}
+        style={
+          floatPos
+            ? {
+                left: floatPos.left,
+                top: floatPos.top,
+                width: PAPER.timelineWidth,
+                maxWidth: "calc(100vw - 124px)",
+              }
+            : undefined
+        }
+      >
       <div
+        ref={panelRef}
         className="pointer-events-auto relative w-full overflow-hidden rounded-[19px] antialiased"
         style={{
-          backgroundColor: PAPER.surface,
+          backgroundColor: "var(--timeline-surface-bg, " + PAPER.surface + ")",
           outline: `0.4px solid ${PAPER.outlineSubtle}`,
           paddingTop: 7,
           paddingBottom: 14,
@@ -510,12 +670,13 @@ export function Timeline() {
           paddingRight: 19,
         }}
       >
-      {/* collapse handle — Paper 9JI-0 */}
+      {/* collapse / move handle — Paper 9JI-0 */}
       <div
         className="mx-auto -mt-[5px] mb-[10px] flex cursor-grab touch-none items-center justify-center py-[5px] active:cursor-grabbing"
         onPointerDown={onCollapsePointerDown}
         onPointerMove={onCollapsePointerMove}
         onPointerUp={onCollapsePointerUp}
+        onPointerCancel={onCollapsePointerUp}
         role="button"
         tabIndex={0}
         aria-expanded={!collapsed}
@@ -525,7 +686,11 @@ export function Timeline() {
             setCollapsed((c) => !c);
           }
         }}
-        title={collapsed ? "Drag up to expand timeline" : "Drag down to collapse timeline"}
+        title={
+          collapsed
+            ? "Drag up to expand · drag sideways to move"
+            : "Drag down to collapse · drag sideways to move"
+        }
       >
         <span
           className="h-[5px] w-[41px] shrink-0 rounded-full"
@@ -560,12 +725,40 @@ export function Timeline() {
           <ClearFrameIcon />
         </DockBtn>
 
+        {workflow === "stopmotion" ? (
+          <DockBtn
+            label="Tween — generate in-betweens between previous and current keyframe"
+            onClick={() => {
+              const { project, layerIndex, frameIndex } = useProject.getState();
+              const layer = project.layers[layerIndex];
+              if (!layer || !layer.frames[frameIndex]) return;
+              let prev = -1;
+              for (let i = frameIndex - 1; i >= 0; i--) {
+                if (layer.frames[i]) {
+                  prev = i;
+                  break;
+                }
+              }
+              if (prev < 0) return;
+              const raw = window.prompt("Number of in-between frames", "3");
+              if (raw == null) return;
+              const n = Math.max(1, Math.min(48, Math.floor(Number(raw)) || 3));
+              generateInbetweens(prev, frameIndex, n);
+            }}
+          >
+            <span className="text-[10px] font-medium leading-none">Tw</span>
+          </DockBtn>
+        ) : null}
+
         <div className="flex items-center gap-3">
           <span
-            className="text-[12px] leading-[14px] text-white opacity-50 tabular-nums"
+            className="inline-flex w-[9ch] shrink-0 items-center justify-center gap-0 text-[12px] leading-[14px] text-white opacity-50 tabular-nums"
             style={{ fontFamily: PAPER.fontMono }}
+            title="Current frame / total frames"
           >
-            {String(frameIndex + 1).padStart(2, "0")} / {project.frameCount}
+            <span className="inline-block w-[3ch] text-right">{frameIndex + 1}</span>
+            <span aria-hidden> / </span>
+            <span className="inline-block w-[3ch] text-left">{project.frameCount}</span>
           </span>
           <StepperBox
             value={project.fps}
@@ -591,6 +784,16 @@ export function Timeline() {
         </div>
 
         <DockSep />
+
+        {isAnimatron ? (
+          <SquareBtn
+            label="Show complete drawing on canvas"
+            onClick={toggleShowFullStrokes}
+            active={showFullStrokes}
+          >
+            {(_bg, color) => <Layers2 size={20} color={color} weight="Outline" />}
+          </SquareBtn>
+        ) : null}
 
         <div className="flex items-center gap-[14px]">
           <SquareBtn
@@ -717,13 +920,7 @@ export function Timeline() {
             <div
               ref={rowsVpRef}
               className="relative w-full"
-              style={{
-                height: Math.min(
-                  ROWS_MAX_H,
-                  project.layers.length * LAYER_ROW_H +
-                    Math.max(0, project.layers.length - 1) * LAYER_ROW_GAP,
-                ),
-              }}
+              style={{ height: rowsViewportH }}
             >
               <ScrollArea
                 orientation="both"
@@ -745,13 +942,17 @@ export function Timeline() {
                         key={layer.id}
                         layer={layer}
                         active={li === layerIndex}
+                        selected={selectedLayerIndices.includes(li)}
                         frameCount={project.frameCount}
                         frameIndex={frameIndex}
                         cellWidth={cellWidth}
                         canDelete={project.layers.length > 1}
                         menuOpen={openMenuIndex === li}
                         onMenuOpenChange={(open) => setOpenMenuIndex(open ? li : null)}
-                        onSelectLayer={() => setLayerIndex(li)}
+                        onSelectLayer={() => {
+                          setLayerIndex(li);
+                          setLayerIndices([li]);
+                        }}
                         onToggleVisible={() => toggleLayerVisible(li)}
                         onSelectCell={(fi) => {
                           setLayerIndex(li);
@@ -777,6 +978,7 @@ export function Timeline() {
         </div>
       )}
       </div>
+      </GooeySurfaceMorph>
     </div>
   );
 }

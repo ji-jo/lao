@@ -151,7 +151,7 @@ export interface PopoverProps {
   sideOffset?: number;
   /** Corner radius of the open panel, in px. Default 16. */
   panelRadius?: number;
-  /** Blur radius feeding the goo filter — higher melts more. Default 8. */
+  /** Blur radius feeding the goo filter — higher melts more. Default 10 (SmoothUI). */
   gooStrength?: number;
   className?: string;
 }
@@ -166,7 +166,7 @@ export function Popover({
   align = "center",
   sideOffset = 14,
   panelRadius = 16,
-  gooStrength = 8,
+  gooStrength = 10,
   className,
 }: PopoverProps) {
   const reduce = useReducedMotion() ?? false;
@@ -462,7 +462,7 @@ export function PopoverContent({ children, className }: PopoverContentProps) {
             <feColorMatrix
               in="blur"
               mode="matrix"
-              values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -10"
+              values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 24 -10"
               result="goo"
             />
             <feComposite in="SourceGraphic" in2="goo" operator="atop" />

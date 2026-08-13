@@ -10,6 +10,8 @@ import {
 import {
   cloneElement,
   isValidElement,
+  type FocusEvent,
+  type MouseEvent,
   type ReactElement,
   type ReactNode,
   useCallback,
@@ -189,13 +191,33 @@ export function Tooltip({
 
   if (!isValidElement(children)) return children;
 
+  const childProps = (children as ReactElement<Record<string, unknown>>)
+    .props as {
+    onMouseEnter?: (e: MouseEvent) => void;
+    onMouseLeave?: (e: MouseEvent) => void;
+    onFocus?: (e: FocusEvent) => void;
+    onBlur?: (e: FocusEvent) => void;
+  };
+
   const trigger = cloneElement(
     children as ReactElement<Record<string, unknown>>,
     {
-      onMouseEnter: show,
-      onMouseLeave: hide,
-      onFocus: show,
-      onBlur: hide,
+      onMouseEnter: (e: MouseEvent) => {
+        childProps.onMouseEnter?.(e);
+        show();
+      },
+      onMouseLeave: (e: MouseEvent) => {
+        childProps.onMouseLeave?.(e);
+        hide();
+      },
+      onFocus: (e: FocusEvent) => {
+        childProps.onFocus?.(e);
+        show();
+      },
+      onBlur: (e: FocusEvent) => {
+        childProps.onBlur?.(e);
+        hide();
+      },
       "aria-describedby": id,
     },
   );

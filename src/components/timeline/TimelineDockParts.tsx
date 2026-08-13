@@ -481,10 +481,11 @@ export function DockBtn({
 }
 
 /**
- * 29×29 square button (easing / onion) — Paper 5QE-0 scaled +20%. Idle
- * `#161717`, hover `#313131`, active `#40608E`. `children` is called with the
- * resolved background (for knocked-out glyphs like the onion rings) and the
- * resolved icon color (`#DADADA` idle, white on hover/active).
+ * 29×29 square button (easing / onion / full-strokes) — Paper 5QE-0 scaled +20%.
+ * Idle is transparent on the `#131212` timeline surface; hover `#313131`, active
+ * `#40608E`. `children` is called with the resolved background (for knocked-out
+ * glyphs like the onion rings) and the resolved icon color (`#DADADA` idle,
+ * white on hover/active).
  */
 export function SquareBtn({
   label,
@@ -498,10 +499,18 @@ export function SquareBtn({
   children: ReactNode | ((bg: string, color: string) => ReactNode);
 }) {
   const [hover, setHover] = useState(false);
-  const bg = active ? PAPER.frameActive : hover ? PAPER.squareHover : PAPER.squareBg;
+  const bg = active
+    ? PAPER.frameActive
+    : hover
+      ? PAPER.squareHover
+      : "transparent";
   const color = active || hover ? "#FFFFFF" : ICON;
   return (
-    <Tooltip content={label}>
+    <Tooltip
+      content={label}
+      side="top"
+      className="border-[#2D2E2E] bg-[#131212] text-[#DEDEDE] shadow-lg"
+    >
       <button
         type="button"
         onClick={onClick}

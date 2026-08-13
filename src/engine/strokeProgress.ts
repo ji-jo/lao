@@ -1,10 +1,85 @@
-import type { Bezier4, Stroke, StrokePoint } from "@/model/types";
+import type { Bezier4, Stroke, StrokeClip, StrokePoint, TextElement } from "@/model/types";
 
-/** Last recorded `t` on a stroke, or 0. */
-export function strokeDurationMs(stroke: Stroke): number {
-  const pts = stroke.points;
-  if (!pts.length) return 0;
+/** Last recorded `t` on a stroke (or bare point list), or 0. */
+export function strokeDurationMs(strokeOrPoints: Stroke | StrokePoint[]): number {
+  const pts = Array.isArray(strokeOrPoints)
+    ? strokeOrPoints
+    : strokeOrPoints?.points;
+  if (!pts?.length) return 0;
   return Math.max(0, pts[pts.length - 1]?.t ?? 0);
+}
+
+/**
+ * Assign monotonic draw-on `t` (ms) along a polyline by arc length.
+ * Used when bezier flattening or path edits replace `points` without timing.
+ */
+export function retimeStrokePoints(
+  points: StrokePoint[],
+  durationMs?: number,
+): StrokePoint[] {
+  if (!points.length) return points;
+  if (points.length === 1) {
+    return [{ ...points[0], t: 0 }];
+  }
+
+  const prior = strokeDurationMs({ ...dummyStroke(), points });
+  const ms =
+    durationMs ??
+    (prior > 0 ? prior : Math.max(80, Math.round(points.length * 8)));
+
+  let totalLen = 0;
+  const cum: number[] = [0];
+  for (let i = 1; i < points.length; i++) {
+    totalLen += Math.hypot(
+      points[i].x - points[i - 1].x,
+      points[i].y - points[i - 1].y,
+    );
+    cum.push(totalLen);
+  }
+
+  if (totalLen <= 1e-9) {
+    return points.map((p, i) => ({
+      ...p,
+      t: (i / (points.length - 1)) * ms,
+    }));
+  }
+
+  return points.map((p, i) => ({
+    ...p,
+    t: (cum[i] / totalLen) * ms,
+  }));
+}
+
+/** Type stub for strokeDurationMs on bare point arrays. */
+function dummyStroke(): Stroke {
+  return {
+    id: "",
+    brush: "ink",
+    color: "#000",
+    size: 1,
+    points: [],
+    seed: 0,
+    jitter: false,
+  };
+}
+
+/**
+ * Apply clip-truncated points for paint. Drops `bezierNodes` while the stroke
+ * is still drawing on so the renderer follows the partial polyline, not the
+ * full cubic path.
+ */
+export function strokeWithClipPoints(stroke: Stroke, pts: StrokePoint[]): Stroke {
+  if (pts === stroke.points) return stroke;
+  const fullEnd = stroke.points[stroke.points.length - 1]?.t ?? 0;
+  const clipEnd = pts[pts.length - 1]?.t ?? 0;
+  const partial =
+    pts.length < stroke.points.length ||
+    (fullEnd > 0 && clipEnd < fullEnd - 0.5);
+  return {
+    ...stroke,
+    points: pts,
+    bezierNodes: partial && stroke.bezierNodes ? undefined : stroke.bezierNodes,
+  };
 }
 
 /**
@@ -68,13 +143,15 @@ export function strokeAtTime(
   return truncateStrokePoints(stroke.points, targetT);
 }
 
-/** Fade opacity for a clipped stroke at timeMs (1 = fully opaque). */
+type ClipBearer = { clip?: StrokeClip };
+
+/** Fade opacity for a clipped stroke/text at timeMs (1 = fully opaque). */
 export function clipFadeOpacity(
-  stroke: Stroke,
+  item: ClipBearer,
   timeMs: number,
   fps: number,
 ): number {
-  const clip = stroke.clip;
+  const clip = item.clip;
   if (!clip?.easing) return 1;
   const { fadeInFrames, fadeOutFrames } = clip.easing;
   const fadeInMs = (fadeInFrames / Math.max(fps, 1)) * 1000;
@@ -91,10 +168,83 @@ export function clipFadeOpacity(
   return 1;
 }
 
-/** End time of the latest clip across all layers (ms). */
-export function projectClipEndMs(strokes: Stroke[]): number {
+/**
+ * Draw-on progress for text at composition timeMs.
+ * null = hidden (before clip). 0..1 during clip. 1 after (held).
+ * Prefer `textContentAtTime` for painting — this stays for legacy callers/tests.
+ */
+export function textProgressAtTime(
+  text: TextElement,
+  timeMs: number,
+): number | null {
+  const clip = text.clip;
+  if (!clip) return 1;
+  if (timeMs < clip.startMs) return null;
+  const localT = timeMs - clip.startMs;
+  if (localT >= clip.durationMs) return 1;
+  const speed = text.typewriterSpeed;
+  if (speed === 0) return 1;
+  if (speed != null && speed > 0) {
+    const chars = Array.from(text.text);
+    if (!chars.length) return 1;
+    return Math.min(1, (localT / 1000) * speed / chars.length);
+  }
+  const rawProgress = clip.durationMs > 0 ? localT / clip.durationMs : 1;
+  return clip.easing
+    ? sampleBezierY(rawProgress, clip.easing.bezier)
+    : rawProgress;
+}
+
+/** Reveal the first `progress` fraction of grapheme clusters. */
+export function truncateTextByProgress(text: string, progress: number): string {
+  if (progress >= 1) return text;
+  if (progress <= 0) return "";
+  const chars = Array.from(text);
+  if (!chars.length) return "";
+  const n = Math.max(1, Math.ceil(chars.length * progress));
+  return chars.slice(0, n).join("");
+}
+
+/** Clip duration needed to type `text` at `cps` characters per second. */
+export function typewriterDurationMs(text: string, cps: number): number {
+  const n = Array.from(text).length;
+  if (cps <= 0 || n === 0) return 80;
+  return Math.max(80, Math.ceil((n / cps) * 1000));
+}
+
+/**
+ * Visible text string at composition timeMs.
+ * null = hidden (before clip). Matches paintProjectFrame / StageCanvas / export.
+ */
+export function textContentAtTime(
+  text: TextElement,
+  timeMs: number,
+): string | null {
+  const clip = text.clip;
+  if (!clip) return text.text;
+  if (timeMs < clip.startMs) return null;
+  const localT = timeMs - clip.startMs;
+  if (localT >= clip.durationMs) return text.text;
+
+  const speed = text.typewriterSpeed;
+  if (speed === 0) return text.text;
+  if (speed != null && speed > 0) {
+    const chars = Array.from(text.text);
+    if (!chars.length) return "";
+    const n = Math.min(chars.length, Math.ceil((localT / 1000) * speed));
+    return chars.slice(0, n).join("");
+  }
+
+  const progress = textProgressAtTime(text, timeMs);
+  if (progress == null) return null;
+  if (progress >= 1) return text.text;
+  return truncateTextByProgress(text.text, progress);
+}
+
+/** End time of the latest clip across items (ms). */
+export function projectClipEndMs(items: ClipBearer[]): number {
   let end = 0;
-  for (const s of strokes) {
+  for (const s of items) {
     if (!s.clip) continue;
     end = Math.max(end, s.clip.startMs + s.clip.durationMs);
   }
@@ -109,6 +259,30 @@ export function allProjectStrokes(
   for (const layer of layers) {
     const cel = layer.frames.find((f) => f) ?? null;
     if (cel) out.push(...cel.strokes);
+  }
+  return out;
+}
+
+/** Strokes + texts + images that can carry Animatron clips. */
+export function allProjectClipItems(
+  layers: {
+    frames: (
+      | {
+          strokes: Stroke[];
+          texts?: TextElement[];
+          images?: import("@/model/types").ImageElement[];
+        }
+      | null
+    )[];
+  }[],
+): ClipBearer[] {
+  const out: ClipBearer[] = [];
+  for (const layer of layers) {
+    const cel = layer.frames.find((f) => f) ?? null;
+    if (!cel) continue;
+    out.push(...cel.strokes);
+    if (cel.texts) out.push(...cel.texts);
+    if (cel.images) out.push(...cel.images);
   }
   return out;
 }

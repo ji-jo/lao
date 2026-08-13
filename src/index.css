@@ -2,9 +2,13 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/inter";
+@import "@fontsource-variable/inter/wght-italic.css";
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
 @import "@fontsource/redaction-35";
+
+/* Include sibling-consumer builds (for example Demo's Vite shell). */
+@source "./";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -281,6 +285,23 @@
   /* both axes — nano hides the native bars and draws its own thumbs */
   overflow: auto;
 }
+/*
+ * Cap mode — host has max-height (e.g. brush pack). Percentage height:100%
+ * does not resolve against max-height alone, so the list blew past the cap.
+ * Inherit the host max-height onto the scrollport and size to content.
+ */
+.lao-nano-fade-host.lao-nano-cap {
+  overflow: hidden;
+}
+.lao-nano-fade-host.lao-nano-cap > .lao-nano-scroll {
+  height: auto;
+  max-height: inherit;
+  flex: 0 1 auto;
+}
+.lao-nano-fade-host.lao-nano-cap > .lao-nano-scroll > .react-nano-scrollbar-content {
+  height: auto;
+  max-height: inherit;
+}
 /* @ncdai/scroll-fade-effect on every nano scrollport */
 .lao-nano-scroll.lao-nano-fade-y > .react-nano-scrollbar-content {
   @apply scroll-fade-effect-y;
@@ -507,4 +528,89 @@
   color: rgb(255 255 255 / 0.6) !important;
   text-shadow: none !important;
   pointer-events: none !important;
+}
+/* Leafer TextEditor DOM overlay (@leafer-in/text-editor) */
+.leafer-text-editor {
+  z-index: 9999 !important;
+  outline: none !important;
+  caret-color: #ffffff;
+  background: transparent !important;
+  margin: 0 !important;
+  border: none !important;
+  overflow: visible !important;
+}
+.leafer-text-editor:empty::before {
+  content: "Type…";
+  color: rgb(255 255 255 / 0.35);
+  pointer-events: none;
+}
+
+/*
+ * App shell is select-none so canvas drags near timeline/settings don't
+ * highlight chrome labels. Re-enable selection for real text entry + dialogs.
+ */
+.lao-app input,
+.lao-app textarea,
+.lao-app select,
+.lao-app [contenteditable="true"],
+.lao-app [contenteditable=""],
+.lao-app [role="dialog"],
+.leafer-text-editor {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Bucket tool — droplet fills empty → full (clip rises from the tip). */
+.lao-bucket-drop {
+  transition: fill-opacity 0.2s ease;
+}
+.lao-bucket-drop--active {
+  /* Navy preview @ 15% is set via fill/#40608E + fillOpacity on the path. */
+  animation: lao-bucket-fill 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.lao-bucket-drop--pour {
+  fill-opacity: 1;
+  animation: lao-bucket-fill 0.48s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes lao-bucket-fill {
+  from {
+    clip-path: inset(100% 0 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+/* sonner — Paper tokens (surface #131212, text #DEDEDE, accent #40608E) */
+[data-sonner-toaster] [data-sonner-toast] {
+  --normal-bg: #131212;
+  --normal-border: #363636;
+  --normal-text: #dedede;
+  --success-bg: #131212;
+  --success-border: #304263;
+  --success-text: #dedede;
+  --error-bg: #160e0c;
+  --error-border: #22110f;
+  --error-text: #dedede;
+}
+
+.lao-toast-description {
+  color: #dadada !important;
+  opacity: 0.75;
+  font-family: "Geist Variable", "Inter Variable", sans-serif !important;
+  font-size: 12px !important;
+}
+
+.lao-toast-close {
+  background: #252525 !important;
+  border: 1px solid #363636 !important;
+  color: #dedede !important;
+}
+
+.lao-toast-success [data-icon] {
+  color: #40608e;
+}
+
+.lao-toast-error [data-icon] {
+  color: #f96d57;
 }

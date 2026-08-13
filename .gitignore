@@ -27,3 +27,15 @@ dist-ssr
 *.sw?
 
 .vercel
+
+# Local scratch / agent dumps
+.tmp-*
+tsc-out.txt
+onion_test*.png
+test_frames.cjs
+test_frames2.cjs
+test_onion.cjs
+test_render.png
+test_text.cjs
+test_text.ts
+test_warp.cjs

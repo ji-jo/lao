@@ -188,7 +188,7 @@ Wire to the actual export name from the fluid registry after install (do not lea
 
 From `AGENTS.md` unless this doc exceptions them:
 
-- Installs: `npm install` (exFAT). Run: `bun run dev` / `bun test`. Dev URL `http://localhost:5173`.
+- Installs: `npm install` (repo on **X:**, keep `package-lock.json`). Run: `bun run dev` / `bun test`. Dev URL `http://localhost:5173`.
 - UI/icons default sources: fluid + beui + itshover + reicon — **except** D’s explicit MVP 1 exceptions in §C.5–C.6 (`react-best-gradient-color-picker`, `neumorphism-react`) and §C.3 (fluid slider URL above).
 - No ffmpeg.wasm; export via mediabunny + gifenc (+ APNG path already present).
 - Boil stays deterministic (seeded).

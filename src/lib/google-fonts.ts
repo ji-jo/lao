@@ -11,12 +11,18 @@ export type TextFont = {
 export const LOCAL_TEXT_FONTS: TextFont[] = [
   {
     id: "Geist",
-    stack: "Geist, 'Geist Variable', system-ui, sans-serif",
+    // fontsource registers as 'Geist Variable' (no separate italic face)
+    stack: "'Geist Variable', 'Inter Variable', system-ui, sans-serif",
     source: "local",
   },
   {
     id: "Geist Mono",
-    stack: "'Geist Mono', 'Geist Mono Variable', ui-monospace, monospace",
+    stack: "'Geist Mono Variable', ui-monospace, monospace",
+    source: "local",
+  },
+  {
+    id: "Inter",
+    stack: "'Inter Variable', system-ui, sans-serif",
     source: "local",
   },
 ];
@@ -26,7 +32,6 @@ const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Curated fallback when the API key is missing or the request fails. */
 const FALLBACK_GOOGLE: string[] = [
-  "Inter",
   "Space Grotesk",
   "Playfair Display",
   "IBM Plex Mono",
@@ -76,7 +81,7 @@ export function ensureFontLoaded(family: string): void {
   const link = document.createElement("link");
   link.id = id;
   link.rel = "stylesheet";
-  link.href = `https://fonts.googleapis.com/css2?family=${familyParam}:wght@400;500;600;700&display=swap`;
+  link.href = `https://fonts.googleapis.com/css2?family=${familyParam}:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&display=swap`;
   document.head.appendChild(link);
 }
 

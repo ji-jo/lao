@@ -39,7 +39,7 @@ export const PAPER = {
   modeActiveGradient:
     "linear-gradient(in oklab 180deg, oklab(66.8% 0 0) 0%, oklab(19% 0 0) 100%)",
   modeActiveOutline: "#C9C9C980",
-  /** hover fill for the workflow-bar pills — Paper 103-0 */
+  /** hover fill for pills / nested chrome — Paper 103-0. Dock shells use `surface`. */
   pillHover: "#252525",
   /** Animatron clip playhead — Paper 63D-0: time badge + the line under it */
   clipPlayheadBadge: "#6E231B",
@@ -66,8 +66,8 @@ export const PAPER = {
   insetTop: 24,
   insetBottom: 48,
   settingGap: 12,
-  /** +20% over Paper's 704 — D's explicit override for the timeline scale. */
-  timelineWidth: 845,
+  /** +20% over Paper's 704 was 845; +49 (≈24.5px/side) for transport breathing room. */
+  timelineWidth: 894,
   barHeight: 36,
   fontSans: "'Geist', 'Inter Variable', system-ui, sans-serif",
   fontMono: "'Geist Mono', ui-monospace, monospace",

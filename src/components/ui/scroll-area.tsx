@@ -30,6 +30,11 @@ export type ScrollAreaProps = NanoScrollAreaProps & {
    * Defaults to `true`. Set `false` for proxy bars / non-content strips.
    */
   fade?: boolean;
+  /**
+   * Host is sized by max-height (not a filled parent). Makes the nano
+   * scrollport inherit that cap so tall lists scroll instead of growing.
+   */
+  cap?: boolean;
 };
 
 const FADE_IN = { duration: 0.22, ease: [0.22, 1, 0.36, 1] as const };
@@ -149,6 +154,7 @@ export function ScrollArea({
   autohide: _autohide,
   viewportClassName: _viewportClassName,
   fade = true,
+  cap = false,
   horizontal,
   ...rest
 }: ScrollAreaProps) {
@@ -174,6 +180,7 @@ export function ScrollArea({
       ref={wrapRef}
       className={cn(
         "lao-nano-fade-host relative flex min-h-0 min-w-0 flex-col",
+        cap && "lao-nano-cap",
         className,
       )}
     >

@@ -13,12 +13,23 @@ import {
 } from "@/components/timeline/TimelineLayerRow";
 import {
   animateClipPayload,
+  animateTextClipPayload,
   isStaticLine,
+  isStaticText,
   layerIsStaticLine,
+  layerIsStaticText,
+  layerTextsOf,
   lineStrokesOf,
   rememberClipStart,
+  rememberTextClipStart,
   staticClipPayload,
 } from "@/components/timeline/lineTiming";
+import { PATH_MAKER_ENABLED } from "@/lib/mvpFlags";
+import {
+  allProjectClipItems,
+  projectClipEndMs,
+} from "@/engine/strokeProgress";
+import { useSelection } from "@/state/selection";
 
 /** Default px/ms at zoom=1 — TimingBar zoom multiplies this. */
 export const BASE_PX_PER_MS = 0.08;
@@ -52,6 +63,12 @@ export function ClipTimeline({
   const deleteLayer = useProject((s) => s.deleteLayer);
   const reorderLayer = useProject((s) => s.reorderLayer);
   const updateStrokeClip = useProject((s) => s.updateStrokeClip);
+  const updateImageElement = useProject((s) => s.updateImageElement);
+  const updateTextElement = useProject((s) => s.updateTextElement);
+  const updateMotionAssignment = useProject((s) => s.updateMotionAssignment);
+  const updateMorphClip = useProject((s) => s.updateMorphClip);
+  const selectedLayerIndices = useSelection((s) => s.layerIndices);
+  const setLayerIndices = useSelection((s) => s.setLayerIndices);
 
   const [openMenuIndex, setOpenMenuIndex] = useState<number | null>(null);
   const [layerDrag, setLayerDrag] = useState<{ from: number; dy: number } | null>(null);
@@ -59,6 +76,7 @@ export function ClipTimeline({
 
   const totalMs = Math.max(
     MIN_TRACK_MS,
+    projectClipEndMs(allProjectClipItems(project.layers)),
     (project.frameCount / Math.max(project.fps, 1)) * 1000,
   );
   const trackW = totalMs * pxPerMs;
@@ -67,13 +85,33 @@ export function ClipTimeline({
     10 + (showLabels ? LABEL_COL_W_ANIMATRON + 10 : 0) + trackW;
 
   const dragRef = useRef<{
-    strokeId: string;
+    kind: "stroke" | "motion" | "morph" | "image" | "text";
+    strokeId?: string;
+    imageId?: string;
+    textId?: string;
+    layerId?: string;
+    assignmentId?: string;
+    morphId?: string;
     mode: "move" | "start" | "end";
     originX: number;
     startMs: number;
     durationMs: number;
   } | null>(null);
-  const [, force] = useState(0);
+  /** Live preview while dragging — avoids store commits (which remount DOM and kill capture). */
+  const [clipDragLive, setClipDragLive] = useState<{
+    kind: "stroke" | "motion" | "morph" | "image" | "text";
+    strokeId?: string;
+    imageId?: string;
+    textId?: string;
+    layerId?: string;
+    assignmentId?: string;
+    morphId?: string;
+    startMs: number;
+    durationMs: number;
+  } | null>(null);
+  const [clipDragging, setClipDragging] = useState(false);
+  const pxPerMsRef = useRef(pxPerMs);
+  pxPerMsRef.current = pxPerMs;
 
   const layerCount = project.layers.length;
   const dropIndex = layerDrag
@@ -121,6 +159,115 @@ export function ClipTimeline({
     };
   }, [layerDrag, layerCount, reorderLayer]);
 
+  // Clip bar drag — window listeners so ScrollArea / re-renders can't steal the gesture.
+  useEffect(() => {
+    if (!clipDragging) return;
+
+    function applyDelta(clientX: number) {
+      const d = dragRef.current;
+      if (!d) return null;
+      const deltaMs = (clientX - d.originX) / pxPerMsRef.current;
+      let startMs = d.startMs;
+      let durationMs = d.durationMs;
+      if (d.mode === "move") {
+        startMs = Math.max(0, d.startMs + deltaMs);
+      } else if (d.mode === "start") {
+        const end = d.startMs + d.durationMs;
+        startMs = Math.max(0, Math.min(end - 40, d.startMs + deltaMs));
+        durationMs = end - startMs;
+      } else {
+        durationMs = Math.max(40, d.durationMs + deltaMs);
+      }
+      return { startMs, durationMs };
+    }
+
+    function onMove(e: PointerEvent) {
+      const d = dragRef.current;
+      if (!d) return;
+      e.preventDefault();
+      const next = applyDelta(e.clientX);
+      if (!next) return;
+      setClipDragLive({
+        kind: d.kind,
+        strokeId: d.strokeId,
+        imageId: d.imageId,
+        textId: d.textId,
+        layerId: d.layerId,
+        assignmentId: d.assignmentId,
+        morphId: d.morphId,
+        startMs: next.startMs,
+        durationMs: next.durationMs,
+      });
+    }
+
+    function onUp(e: PointerEvent) {
+      const d = dragRef.current;
+      const next = d ? applyDelta(e.clientX) : null;
+      dragRef.current = null;
+      setClipDragging(false);
+      setClipDragLive(null);
+      if (!d || !next) return;
+      if (d.kind === "stroke" && d.strokeId) {
+        updateStrokeClip(d.strokeId, {
+          startMs: next.startMs,
+          durationMs: next.durationMs,
+        });
+      } else if (d.kind === "image" && d.imageId) {
+        const layer = useProject.getState().project.layers.find((l) =>
+          l.frames.some((f) => f?.images?.some((im) => im.id === d.imageId)),
+        );
+        const cel = layer?.frames.find((f) => f) ?? null;
+        const im = cel?.images?.find((i) => i.id === d.imageId);
+        updateImageElement(d.imageId, {
+          clip: {
+            startMs: next.startMs,
+            durationMs: next.durationMs,
+            easing: im?.clip?.easing ?? useProject.getState().clipEasing,
+          },
+        });
+      } else if (d.kind === "text" && d.textId) {
+        const layer = useProject.getState().project.layers.find((l) =>
+          l.frames.some((f) => f?.texts?.some((t) => t.id === d.textId)),
+        );
+        const cel = layer?.frames.find((f) => f) ?? null;
+        const tx = cel?.texts?.find((t) => t.id === d.textId);
+        updateTextElement(d.textId, {
+          clip: {
+            startMs: next.startMs,
+            durationMs: next.durationMs,
+            easing: tx?.clip?.easing ?? useProject.getState().clipEasing,
+          },
+        });
+      } else if (d.kind === "motion" && d.layerId && d.assignmentId) {
+        updateMotionAssignment(d.layerId, d.assignmentId, {
+          startMs: next.startMs,
+          durationMs: next.durationMs,
+        });
+      } else if (d.kind === "morph" && d.morphId) {
+        updateMorphClip(d.morphId, {
+          startMs: next.startMs,
+          durationMs: next.durationMs,
+        });
+      }
+    }
+
+    window.addEventListener("pointermove", onMove, { passive: false });
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [
+    clipDragging,
+    updateStrokeClip,
+    updateImageElement,
+    updateTextElement,
+    updateMotionAssignment,
+    updateMorphClip,
+  ]);
+
   function msFromClientX(clientX: number, trackEl: HTMLElement) {
     const rect = trackEl.getBoundingClientRect();
     const x = clientX - rect.left;
@@ -146,55 +293,162 @@ export function ClipTimeline({
   ) {
     e.stopPropagation();
     e.preventDefault();
-    try {
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    } catch {
-      // synthetic events throw here — harmless
-    }
-    dragRef.current = { strokeId, mode, originX: e.clientX, startMs, durationMs };
+    dragRef.current = {
+      kind: "stroke",
+      strokeId,
+      mode,
+      originX: e.clientX,
+      startMs,
+      durationMs,
+    };
+    setClipDragLive({
+      kind: "stroke",
+      strokeId,
+      startMs,
+      durationMs,
+    });
+    setClipDragging(true);
   }
 
-  function onClipPointerMove(e: React.PointerEvent) {
-    const d = dragRef.current;
-    if (!d) return;
-    const deltaMs = (e.clientX - d.originX) / pxPerMs;
-    let startMs = d.startMs;
-    let durationMs = d.durationMs;
-    if (d.mode === "move") {
-      startMs = Math.max(0, d.startMs + deltaMs);
-    } else if (d.mode === "start") {
-      const end = d.startMs + d.durationMs;
-      startMs = Math.max(0, Math.min(end - 40, d.startMs + deltaMs));
-      durationMs = end - startMs;
-    } else {
-      durationMs = Math.max(40, d.durationMs + deltaMs);
-    }
-    updateStrokeClip(d.strokeId, { startMs, durationMs });
-    force((n) => n + 1);
+  function beginMotionDrag(
+    e: React.PointerEvent,
+    layerId: string,
+    assignmentId: string,
+    mode: "move" | "start" | "end",
+    startMs: number,
+    durationMs: number,
+  ) {
+    e.stopPropagation();
+    e.preventDefault();
+    dragRef.current = {
+      kind: "motion",
+      layerId,
+      assignmentId,
+      mode,
+      originX: e.clientX,
+      startMs,
+      durationMs,
+    };
+    setClipDragLive({
+      kind: "motion",
+      layerId,
+      assignmentId,
+      startMs,
+      durationMs,
+    });
+    setClipDragging(true);
   }
 
-  function onClipPointerUp(e: React.PointerEvent) {
-    if (!dragRef.current) return;
-    try {
-      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-    } catch {
-      // best-effort
-    }
-    dragRef.current = null;
+  function beginMorphDrag(
+    e: React.PointerEvent,
+    morphId: string,
+    mode: "move" | "start" | "end",
+    startMs: number,
+    durationMs: number,
+  ) {
+    e.stopPropagation();
+    e.preventDefault();
+    dragRef.current = {
+      kind: "morph",
+      morphId,
+      mode,
+      originX: e.clientX,
+      startMs,
+      durationMs,
+    };
+    setClipDragLive({
+      kind: "morph",
+      morphId,
+      startMs,
+      durationMs,
+    });
+    setClipDragging(true);
+  }
+
+  function beginImageDrag(
+    e: React.PointerEvent,
+    imageId: string,
+    mode: "move" | "start" | "end",
+    startMs: number,
+    durationMs: number,
+  ) {
+    e.stopPropagation();
+    e.preventDefault();
+    dragRef.current = {
+      kind: "image",
+      imageId,
+      mode,
+      originX: e.clientX,
+      startMs,
+      durationMs,
+    };
+    setClipDragLive({
+      kind: "image",
+      imageId,
+      startMs,
+      durationMs,
+    });
+    setClipDragging(true);
+  }
+
+  function beginTextDrag(
+    e: React.PointerEvent,
+    textId: string,
+    mode: "move" | "start" | "end",
+    startMs: number,
+    durationMs: number,
+  ) {
+    e.stopPropagation();
+    e.preventDefault();
+    dragRef.current = {
+      kind: "text",
+      textId,
+      mode,
+      originX: e.clientX,
+      startMs,
+      durationMs,
+    };
+    setClipDragLive({
+      kind: "text",
+      textId,
+      startMs,
+      durationMs,
+    });
+    setClipDragging(true);
   }
 
   function toggleLayerStatic(layerId: string) {
     const layer = project.layers.find((l) => l.id === layerId);
     if (!layer) return;
     const strokes = lineStrokesOf(layer);
-    if (strokes.length === 0) return;
-    const makeStatic = !layerIsStaticLine(layer);
-    for (const stroke of strokes) {
+    const texts = layerTextsOf(layer);
+    if (strokes.length > 0) {
+      const makeStatic = !layerIsStaticLine(layer);
+      for (const stroke of strokes) {
+        if (makeStatic) {
+          rememberClipStart(stroke);
+          updateStrokeClip(stroke.id, staticClipPayload(stroke.clip?.easing ?? clipEasing));
+        } else {
+          updateStrokeClip(stroke.id, animateClipPayload(stroke, stroke.clip?.easing ?? clipEasing));
+        }
+      }
+      return;
+    }
+    if (texts.length === 0) return;
+    const makeStatic = !layerIsStaticText(layer);
+    for (const text of texts) {
       if (makeStatic) {
-        rememberClipStart(stroke);
-        updateStrokeClip(stroke.id, staticClipPayload(stroke.clip?.easing ?? clipEasing));
+        rememberTextClipStart(text);
+        updateTextElement(text.id, {
+          typewriterSpeed: 0,
+          clip: staticClipPayload(text.clip?.easing ?? clipEasing),
+        });
       } else {
-        updateStrokeClip(stroke.id, animateClipPayload(stroke, stroke.clip?.easing ?? clipEasing));
+        const next = animateTextClipPayload(
+          text,
+          text.clip?.easing ?? clipEasing,
+        );
+        updateTextElement(text.id, next);
       }
     }
   }
@@ -205,26 +459,36 @@ export function ClipTimeline({
         {project.layers.map((layer, li) => {
           const cel = layer.frames.find((f) => f) ?? null;
           const stroke = cel?.strokes[0];
+          const image = cel?.images?.[0];
+          const text = cel?.texts?.[0];
           const clip = stroke?.clip;
+          const imageClip = image?.clip;
+          const textClip = text?.clip;
           const staticLine = stroke ? isStaticLine(stroke) : false;
+          const staticText = text ? isStaticText(text) : false;
           const hasLine = !!stroke;
+          const hasText = !!text;
           return (
             <TimelineRowShell
               key={layer.id}
               layer={layer}
               active={li === layerIndex}
+              selected={selectedLayerIndices.includes(li)}
               canDelete={layerCount > 1}
               menuOpen={openMenuIndex === li}
               onMenuOpenChange={(open) => setOpenMenuIndex(open ? li : null)}
-              onSelectLayer={() => setLayerIndex(li)}
+              onSelectLayer={() => {
+                setLayerIndex(li);
+                setLayerIndices([li]);
+              }}
               onToggleVisible={() => toggleLayerVisible(li)}
               showLabels={showLabels}
               labelColW={LABEL_COL_W_ANIMATRON}
               className="w-full max-w-none"
               afterEye={
-                hasLine ? (
+                hasLine || hasText ? (
                   <LineAnimateToggle
-                    staticLine={staticLine}
+                    staticLine={hasLine ? staticLine : staticText}
                     onToggle={() => toggleLayerStatic(layer.id)}
                   />
                 ) : undefined
@@ -269,54 +533,374 @@ export function ClipTimeline({
                       </div>
                     </div>
                   )}
-                  {clip && stroke && !staticLine && (
+                  {clip && stroke && !staticLine && (() => {
+                    const live =
+                      clipDragLive?.kind === "stroke" &&
+                      clipDragLive.strokeId === stroke.id
+                        ? clipDragLive
+                        : null;
+                    const startMs = live?.startMs ?? clip.startMs;
+                    const durationMs = live?.durationMs ?? clip.durationMs;
+                    return (
+                      <div
+                        data-clip
+                        className={cn(
+                          "absolute top-0 flex touch-none items-stretch overflow-clip rounded-[8px]",
+                          li === layerIndex && "ring-1 ring-white/20",
+                          clipDragging && live ? "cursor-grabbing" : "cursor-grab",
+                        )}
+                        style={{
+                          left: startMs * pxPerMs,
+                          width: Math.max(12, durationMs * pxPerMs),
+                          height: CELL_H,
+                          backgroundColor: PAPER.frameActive,
+                          border: `0.4px solid ${PAPER.frameActiveBorder}`,
+                        }}
+                        onPointerDown={(e) =>
+                          beginClipDrag(e, stroke.id, "move", clip.startMs, clip.durationMs)
+                        }
+                      >
+                        <button
+                          type="button"
+                          className="w-[5px] shrink-0 cursor-ew-resize touch-none bg-white/20"
+                          onPointerDown={(e) =>
+                            beginClipDrag(e, stroke.id, "start", clip.startMs, clip.durationMs)
+                          }
+                          aria-label="Resize clip start"
+                        />
+                        <div
+                          className="min-w-0 flex-1 truncate px-1 text-[10px] text-white/90"
+                          style={{ fontFamily: PAPER.fontMono, lineHeight: `${CELL_H}px` }}
+                        >
+                          {layer.name}
+                        </div>
+                        <button
+                          type="button"
+                          className="w-[5px] shrink-0 cursor-ew-resize touch-none bg-white/20"
+                          onPointerDown={(e) =>
+                            beginClipDrag(e, stroke.id, "end", clip.startMs, clip.durationMs)
+                          }
+                          aria-label="Resize clip end"
+                        />
+                      </div>
+                    );
+                  })()}
+                  {image && imageClip && (() => {
+                    const live =
+                      clipDragLive?.kind === "image" &&
+                      clipDragLive.imageId === image.id
+                        ? clipDragLive
+                        : null;
+                    const startMs = live?.startMs ?? imageClip.startMs;
+                    const durationMs = live?.durationMs ?? imageClip.durationMs;
+                    return (
+                      <div
+                        data-clip
+                        className={cn(
+                          "absolute top-0 flex touch-none items-stretch overflow-clip rounded-[8px]",
+                          li === layerIndex && "ring-1 ring-white/20",
+                          clipDragging && live ? "cursor-grabbing" : "cursor-grab",
+                        )}
+                        style={{
+                          left: startMs * pxPerMs,
+                          width: Math.max(12, durationMs * pxPerMs),
+                          height: CELL_H,
+                          backgroundColor: PAPER.frameActive,
+                          border: `0.4px solid ${PAPER.frameActiveBorder}`,
+                        }}
+                        onPointerDown={(e) =>
+                          beginImageDrag(
+                            e,
+                            image.id,
+                            "move",
+                            imageClip.startMs,
+                            imageClip.durationMs,
+                          )
+                        }
+                      >
+                        <button
+                          type="button"
+                          className="w-[5px] shrink-0 cursor-ew-resize touch-none bg-white/20"
+                          onPointerDown={(e) =>
+                            beginImageDrag(
+                              e,
+                              image.id,
+                              "start",
+                              imageClip.startMs,
+                              imageClip.durationMs,
+                            )
+                          }
+                          aria-label="Resize image clip start"
+                        />
+                        <div
+                          className="min-w-0 flex-1 truncate px-1 text-[10px] text-white/90"
+                          style={{ fontFamily: PAPER.fontMono, lineHeight: `${CELL_H}px` }}
+                        >
+                          {layer.name}
+                        </div>
+                        <button
+                          type="button"
+                          className="w-[5px] shrink-0 cursor-ew-resize touch-none bg-white/20"
+                          onPointerDown={(e) =>
+                            beginImageDrag(
+                              e,
+                              image.id,
+                              "end",
+                              imageClip.startMs,
+                              imageClip.durationMs,
+                            )
+                          }
+                          aria-label="Resize image clip end"
+                        />
+                      </div>
+                    );
+                  })()}
+                  {/* Image without clip yet (legacy) — full-span bar so the row isn't empty */}
+                  {image && !imageClip && !stroke && !text && (
                     <div
                       data-clip
                       className={cn(
-                        "absolute top-0 flex items-stretch overflow-clip rounded-[8px]",
-                        li === layerIndex && "ring-1 ring-white/20",
+                        "absolute top-0 overflow-clip rounded-[8px]",
+                        li === layerIndex && "ring-1 ring-white/15",
                       )}
                       style={{
-                        left: clip.startMs * pxPerMs,
-                        width: Math.max(12, clip.durationMs * pxPerMs),
+                        left: 0,
+                        width: trackW,
                         height: CELL_H,
                         backgroundColor: PAPER.frameActive,
                         border: `0.4px solid ${PAPER.frameActiveBorder}`,
                       }}
-                      onPointerDown={(e) =>
-                        beginClipDrag(e, stroke.id, "move", clip.startMs, clip.durationMs)
-                      }
-                      onPointerMove={onClipPointerMove}
-                      onPointerUp={onClipPointerUp}
+                      aria-label={`${layer.name} — image`}
                     >
-                      <button
-                        type="button"
-                        className="w-[5px] shrink-0 cursor-ew-resize bg-white/20"
-                        onPointerDown={(e) =>
-                          beginClipDrag(e, stroke.id, "start", clip.startMs, clip.durationMs)
-                        }
-                        onPointerMove={onClipPointerMove}
-                        onPointerUp={onClipPointerUp}
-                        aria-label="Resize clip start"
-                      />
                       <div
-                        className="min-w-0 flex-1 truncate px-1 text-[10px] text-white/90"
+                        className="truncate px-1.5 text-[10px] text-white/90"
                         style={{ fontFamily: PAPER.fontMono, lineHeight: `${CELL_H}px` }}
                       >
                         {layer.name}
                       </div>
-                      <button
-                        type="button"
-                        className="w-[5px] shrink-0 cursor-ew-resize bg-white/20"
-                        onPointerDown={(e) =>
-                          beginClipDrag(e, stroke.id, "end", clip.startMs, clip.durationMs)
-                        }
-                        onPointerMove={onClipPointerMove}
-                        onPointerUp={onClipPointerUp}
-                        aria-label="Resize clip end"
-                      />
                     </div>
                   )}
+                  {text && staticText && !stroke && (
+                    <div
+                      data-clip
+                      className={cn(
+                        "absolute top-0 overflow-clip rounded-[8px]",
+                        li === layerIndex && "ring-1 ring-white/15",
+                      )}
+                      style={{
+                        left: 0,
+                        width: trackW,
+                        height: CELL_H,
+                        backgroundColor: PAPER.frameActive,
+                        border: `0.4px solid ${PAPER.frameActiveBorder}`,
+                      }}
+                      aria-label={`${layer.name} — static text`}
+                    >
+                      <div
+                        className="truncate px-1.5 text-[10px] text-white/90"
+                        style={{ fontFamily: PAPER.fontMono, lineHeight: `${CELL_H}px` }}
+                      >
+                        {layer.name} · text · static
+                      </div>
+                    </div>
+                  )}
+                  {text && textClip && !staticText && !stroke && (() => {
+                    const live =
+                      clipDragLive?.kind === "text" &&
+                      clipDragLive.textId === text.id
+                        ? clipDragLive
+                        : null;
+                    const startMs = live?.startMs ?? textClip.startMs;
+                    const durationMs = live?.durationMs ?? textClip.durationMs;
+                    return (
+                      <div
+                        data-clip
+                        className={cn(
+                          "absolute top-0 flex touch-none items-stretch overflow-clip rounded-[8px]",
+                          li === layerIndex && "ring-1 ring-white/20",
+                          clipDragging && live ? "cursor-grabbing" : "cursor-grab",
+                        )}
+                        style={{
+                          left: startMs * pxPerMs,
+                          width: Math.max(12, durationMs * pxPerMs),
+                          height: CELL_H,
+                          backgroundColor: PAPER.frameActive,
+                          border: `0.4px solid ${PAPER.frameActiveBorder}`,
+                        }}
+                        onPointerDown={(e) =>
+                          beginTextDrag(
+                            e,
+                            text.id,
+                            "move",
+                            textClip.startMs,
+                            textClip.durationMs,
+                          )
+                        }
+                      >
+                        <button
+                          type="button"
+                          className="w-[5px] shrink-0 cursor-ew-resize touch-none bg-white/20"
+                          onPointerDown={(e) =>
+                            beginTextDrag(
+                              e,
+                              text.id,
+                              "start",
+                              textClip.startMs,
+                              textClip.durationMs,
+                            )
+                          }
+                          aria-label="Resize text clip start"
+                        />
+                        <div
+                          className="min-w-0 flex-1 truncate px-1 text-[10px] text-white/90"
+                          style={{ fontFamily: PAPER.fontMono, lineHeight: `${CELL_H}px` }}
+                        >
+                          {layer.name} · text
+                        </div>
+                        <button
+                          type="button"
+                          className="w-[5px] shrink-0 cursor-ew-resize touch-none bg-white/20"
+                          onPointerDown={(e) =>
+                            beginTextDrag(
+                              e,
+                              text.id,
+                              "end",
+                              textClip.startMs,
+                              textClip.durationMs,
+                            )
+                          }
+                          aria-label="Resize text clip end"
+                        />
+                      </div>
+                    );
+                  })()}
+                  {/* Text without clip yet — full-span bar so the row isn't empty */}
+                  {text && !textClip && !stroke && !image && (
+                    <div
+                      data-clip
+                      className={cn(
+                        "absolute top-0 overflow-clip rounded-[8px]",
+                        li === layerIndex && "ring-1 ring-white/15",
+                      )}
+                      style={{
+                        left: 0,
+                        width: trackW,
+                        height: CELL_H,
+                        backgroundColor: PAPER.frameActive,
+                        border: `0.4px solid ${PAPER.frameActiveBorder}`,
+                      }}
+                      aria-label={`${layer.name} — text`}
+                    >
+                      <div
+                        className="truncate px-1.5 text-[10px] text-white/90"
+                        style={{ fontFamily: PAPER.fontMono, lineHeight: `${CELL_H}px` }}
+                      >
+                        {layer.name} · text
+                      </div>
+                    </div>
+                  )}
+                  {PATH_MAKER_ENABLED &&
+                    (layer.motionAssignments ?? []).map((a) => {
+                      const live =
+                        clipDragLive?.kind === "motion" &&
+                        clipDragLive.assignmentId === a.id
+                          ? clipDragLive
+                          : null;
+                      const startMs = live?.startMs ?? a.startMs;
+                      const durationMs = live?.durationMs ?? a.durationMs;
+                      return (
+                        <div
+                          key={a.id}
+                          data-clip
+                          className="absolute top-0 flex touch-none cursor-grab items-stretch overflow-clip rounded-[8px] active:cursor-grabbing"
+                          style={{
+                            left: startMs * pxPerMs,
+                            width: Math.max(12, durationMs * pxPerMs),
+                            height: CELL_H,
+                            backgroundColor: "rgba(107, 151, 255, 0.55)",
+                            border: "0.4px solid rgba(107, 151, 255, 0.9)",
+                          }}
+                          onPointerDown={(e) =>
+                            beginMotionDrag(e, layer.id, a.id, "move", a.startMs, a.durationMs)
+                          }
+                        >
+                          <button
+                            type="button"
+                            className="w-[5px] shrink-0 cursor-ew-resize touch-none bg-white/25"
+                            onPointerDown={(e) =>
+                              beginMotionDrag(e, layer.id, a.id, "start", a.startMs, a.durationMs)
+                            }
+                            aria-label="Resize motion start"
+                          />
+                          <div
+                            className="min-w-0 flex-1 truncate px-1 text-[10px] text-white/90"
+                            style={{ fontFamily: PAPER.fontMono, lineHeight: `${CELL_H}px` }}
+                          >
+                            path
+                          </div>
+                          <button
+                            type="button"
+                            className="w-[5px] shrink-0 cursor-ew-resize touch-none bg-white/25"
+                            onPointerDown={(e) =>
+                              beginMotionDrag(e, layer.id, a.id, "end", a.startMs, a.durationMs)
+                            }
+                            aria-label="Resize motion end"
+                          />
+                        </div>
+                      );
+                    })}
+                  {PATH_MAKER_ENABLED &&
+                    (project.morphs ?? [])
+                      .filter((m) => m.fromLayerId === layer.id)
+                      .map((m) => {
+                        const live =
+                          clipDragLive?.kind === "morph" &&
+                          clipDragLive.morphId === m.id
+                            ? clipDragLive
+                            : null;
+                        const startMs = live?.startMs ?? m.startMs;
+                        const durationMs = live?.durationMs ?? m.durationMs;
+                        return (
+                          <div
+                            key={m.id}
+                            data-clip
+                            className="absolute top-0 flex touch-none cursor-grab items-stretch overflow-clip rounded-[8px] active:cursor-grabbing"
+                            style={{
+                              left: startMs * pxPerMs,
+                              width: Math.max(12, durationMs * pxPerMs),
+                              height: CELL_H,
+                              backgroundColor: "rgba(180, 120, 255, 0.5)",
+                              border: "0.4px solid rgba(180, 120, 255, 0.9)",
+                            }}
+                            onPointerDown={(e) =>
+                              beginMorphDrag(e, m.id, "move", m.startMs, m.durationMs)
+                            }
+                          >
+                            <button
+                              type="button"
+                              className="w-[5px] shrink-0 cursor-ew-resize touch-none bg-white/25"
+                              onPointerDown={(e) =>
+                                beginMorphDrag(e, m.id, "start", m.startMs, m.durationMs)
+                              }
+                              aria-label="Resize morph start"
+                            />
+                            <div
+                              className="min-w-0 flex-1 truncate px-1 text-[10px] text-white/90"
+                              style={{ fontFamily: PAPER.fontMono, lineHeight: `${CELL_H}px` }}
+                            >
+                              morph
+                            </div>
+                            <button
+                              type="button"
+                              className="w-[5px] shrink-0 cursor-ew-resize touch-none bg-white/25"
+                              onPointerDown={(e) =>
+                                beginMorphDrag(e, m.id, "end", m.startMs, m.durationMs)
+                              }
+                              aria-label="Resize morph end"
+                            />
+                          </div>
+                        );
+                      })}
                 </div>
               </div>
             </TimelineRowShell>

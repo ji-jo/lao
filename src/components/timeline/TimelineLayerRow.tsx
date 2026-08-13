@@ -67,6 +67,7 @@ const CELL_MS = 130;
 export function TimelineRowShell({
   layer,
   active,
+  selected = false,
   canDelete,
   menuOpen,
   dragging,
@@ -85,6 +86,8 @@ export function TimelineRowShell({
 }: {
   layer: Layer;
   active: boolean;
+  /** included in a timeline multi-select (Ctrl+Shift+A) */
+  selected?: boolean;
   canDelete: boolean;
   menuOpen: boolean;
   dragging: boolean;
@@ -114,7 +117,7 @@ export function TimelineRowShell({
    * exceptions are deliberate: a row keeps its delete affordance while the
    * confirm flyout is open, and a lifted row stays lit if the pointer slips off.
    */
-  const lit = hovered || menuOpen || dragging;
+  const lit = hovered || menuOpen || dragging || selected;
 
   const swapTransition = reduce
     ? { duration: 0 }
@@ -150,6 +153,7 @@ export function TimelineRowShell({
       onPointerLeave={() => setHovered(false)}
       onClick={onSelectLayer}
       aria-current={active ? "true" : undefined}
+      aria-selected={selected ? true : undefined}
     >
       {/* label lane — sticky so it stays pinned while the track scrolls */}
       {showLabels && (

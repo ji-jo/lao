@@ -8,7 +8,7 @@ with IndexedDB autosave recovery.
 ## Run
 
 ```bash
-npm install   # NOT bun install — this drive is exFAT, bun's lockfile write fails
+npm install   # NOT bun install — keep package-lock.json (repo is on X:)
 bun run dev   # dev server (vite)
 bun test      # unit tests
 npx tsc -b    # type-check

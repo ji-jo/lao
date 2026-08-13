@@ -122,9 +122,13 @@ export function MarkerToolIcon(p: Props) {
   );
 }
 
-export function BucketToolIcon(p: Props) {
+export function BucketToolIcon({
+  active = false,
+  filling = false,
+  ...p
+}: Props & { active?: boolean; filling?: boolean }) {
   return (
-    <ToolSvg {...p}>
+    <ToolSvg {...p} className={p.className}>
       <path
         d="M2.165 5.323L1.046 4.204C0.675 3.833 0.675 3.458 1.046 3.085L2.911 1.22 4.963 3.271C5.065 3.374 5.065 3.54 4.963 3.643L3.284 5.323C2.911 5.693 2.536 5.693 2.165 5.323Z"
         fill="none"
@@ -152,9 +156,18 @@ export function BucketToolIcon(p: Props) {
         strokeLinejoin="round"
         strokeMiterlimit={10}
       />
+      {/* Droplet — navy @ 15% preview when active; pour anim fills solid. */}
       <path
         d="M5.469 4.484C5.469 4.484 4.951 5.045 4.951 5.39 4.951 5.675 5.183 5.908 5.469 5.908 5.753 5.908 5.986 5.675 5.986 5.39 5.983 5.045 5.469 4.484 5.469 4.484Z"
-        fill="none"
+        className={
+          filling
+            ? "lao-bucket-drop lao-bucket-drop--pour"
+            : active
+              ? "lao-bucket-drop lao-bucket-drop--active"
+              : "lao-bucket-drop"
+        }
+        fill={filling ? "currentColor" : active ? "#40608E" : "currentColor"}
+        fillOpacity={filling ? undefined : active ? 0.15 : 0}
         stroke="currentColor"
         strokeWidth="0.6"
         strokeLinecap="round"

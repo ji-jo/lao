@@ -1,7 +1,16 @@
 "use client";
 
-import { motion, useReducedMotion } from "motion/react";
+/**
+ * Dock ↔ supporting panel melt using SmoothUI gooey-popover technique
+ * (GSAP dual-layer morph + SmoothUI filter constants).
+ *
+ * Critical: the goo filter only wraps a chip-sized blob + morphing panel
+ * shapes — never the whole dock bar (that melts the timeline into the panel).
+ */
+
+import gsap from "gsap";
 import {
+  useEffect,
   useId,
   useLayoutEffect,
   useMemo,
@@ -12,20 +21,11 @@ import {
 } from "react";
 import { GooeyFilter } from "@/components/motion/gooey-filter";
 import { isGooUnsupported } from "@/components/motion/is-goo-unsupported";
-import { EASE_DRAWER } from "@/lib/ease";
 import { cn } from "@/lib/utils";
 
-/**
- * Supporting dock stays mounted — open/close is pure motion variants.
- *
- * Dual-layer: empty solid blobs sit under the SVG goo filter (panel + neck +
- * dock, and optional side panel + horizontal neck) so the melt reads; crisp UI
- * renders above with no filter so thin chrome isn't dissolved by blur.
- * Blobs are measured silhouettes — never cloned React trees.
- *
- * Pass `anchorRef` to sit the panel centered above a dock trigger (neck under
- * that control). Omit for classic centered-over-dock placement.
- */
+const SPEED = 0.28;
+const PANEL_RADIUS = 16;
+
 export function GooeyConjoined({
   open,
   panel,
@@ -42,27 +42,29 @@ export function GooeyConjoined({
   panelClassName,
   sidePanelClassName,
   surface = "#131212",
+  panelOffset,
 }: {
   open: boolean;
   panel: ReactNode;
   panelKey?: string;
-  /** Optional supporting panel to the right of `panel`, top-aligned. */
   sideOpen?: boolean;
   sidePanel?: ReactNode;
   sidePanelKey?: string;
-  /** Dock control to align the panel / neck to. */
   anchorRef?: RefObject<HTMLElement | null>;
   children: ReactNode;
   side?: "top" | "bottom";
   gap?: number;
-  /** Gap between main panel and side panel. */
   sideGap?: number;
   className?: string;
   panelClassName?: string;
   sidePanelClassName?: string;
   surface?: string;
+  /** Free-drag offset for the supporting panel (viewport px). */
+  panelOffset?: { x: number; y: number };
 }) {
-  const reduce = useReducedMotion() ?? false;
+  const reduce =
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const unsupported = useMemo(() => isGooUnsupported(), []);
   const noGoo = reduce || unsupported;
   const gooId = `goo-${useId().replace(/:/g, "")}`;
@@ -71,14 +73,29 @@ export function GooeyConjoined({
   const dockRef = useRef<HTMLDivElement>(null);
   const panelMeasureRef = useRef<HTMLDivElement>(null);
   const sideMeasureRef = useRef<HTMLDivElement>(null);
-  const [dockSize, setDockSize] = useState({ w: 0, h: 0 });
+  const filteredPanelRef = useRef<HTMLDivElement>(null);
+  const unfilteredPanelRef = useRef<HTMLDivElement>(null);
+  const innerPanelRef = useRef<HTMLDivElement>(null);
+  const filteredSideRef = useRef<HTMLDivElement>(null);
+  const unfilteredSideRef = useRef<HTMLDivElement>(null);
+  const timelineRef = useRef<gsap.core.Timeline | null>(null);
+  const sideTimelineRef = useRef<gsap.core.Timeline | null>(null);
+
   const [panelSize, setPanelSize] = useState({ w: 0, h: 0 });
   const [sideSize, setSideSize] = useState({ w: 0, h: 0 });
-  /** Panel left + neck X (px from root). Null = centered over dock. */
+  const [anchorSize, setAnchorSize] = useState({ w: 36, h: 36 });
   const [placement, setPlacement] = useState<{
     panelLeft: number;
-    neckX: number;
+    anchorLeft: number;
+    anchorTop: number;
+    /** Viewport coords — fixed panel escapes bottom-chrome overflow clipping. */
+    fixedLeft: number;
+    fixedTop: number;
   } | null>(null);
+  const [visible, setVisible] = useState(false);
+  const [sideVisible, setSideVisible] = useState(false);
+  /** Chip blob only during morph — keeping it while open melts the dock bar. */
+  const [bridging, setBridging] = useState(false);
 
   const latch = useRef({ panel, panelKey });
   if (open && panel != null) {
@@ -93,21 +110,16 @@ export function GooeyConjoined({
   const { panel: shownSide, key: shownSideKey } = sideLatch.current;
 
   useLayoutEffect(() => {
-    const dock = dockRef.current;
-    if (!dock) return;
-    const measure = () =>
-      setDockSize({ w: dock.offsetWidth, h: dock.offsetHeight });
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(dock);
-    return () => ro.disconnect();
-  }, []);
-
-  useLayoutEffect(() => {
     const el = panelMeasureRef.current;
     if (!el) return;
-    const measure = () =>
-      setPanelSize({ w: el.offsetWidth, h: el.offsetHeight });
+    const measure = () => {
+      // Layout box only — scrollHeight includes overflow inside ScrollAreas
+      // (e.g. brush list) and inflates the gooey shell to full content height.
+      const rect = el.getBoundingClientRect();
+      const w = Math.max(el.offsetWidth, Math.round(rect.width));
+      const h = Math.max(el.offsetHeight, Math.round(rect.height));
+      if (w > 0 && h > 0) setPanelSize({ w, h });
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
@@ -117,34 +129,59 @@ export function GooeyConjoined({
   useLayoutEffect(() => {
     const el = sideMeasureRef.current;
     if (!el) return;
-    const measure = () =>
-      setSideSize({ w: el.offsetWidth, h: el.offsetHeight });
+    const measure = () => {
+      const rect = el.getBoundingClientRect();
+      const w = Math.max(el.offsetWidth, Math.round(rect.width));
+      const h = Math.max(el.offsetHeight, Math.round(rect.height));
+      if (w > 0 && h > 0) setSideSize({ w, h });
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
   }, [shownSideKey, sideOpen]);
 
-  // Sit the panel centered above the dock trigger; neck under its midpoint.
   useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root) return;
 
     const measure = () => {
       const anchor = anchorRef?.current;
+      const rootRect = root.getBoundingClientRect();
       if (!anchor) {
         setPlacement(null);
+        setAnchorSize({ w: 36, h: 36 });
         return;
       }
-      const rootRect = root.getBoundingClientRect();
       const a = anchor.getBoundingClientRect();
+      setAnchorSize({ w: a.width, h: a.height });
+      const w =
+        panelSize.w || panelMeasureRef.current?.offsetWidth || 0;
+      const h =
+        panelSize.h || panelMeasureRef.current?.offsetHeight || 0;
       const anchorCenter = a.left + a.width / 2 - rootRect.left;
-      const w = panelMeasureRef.current?.offsetWidth || panelSize.w;
-      // Prefer centered over the chip so wide panels sit "on top" of it.
-      const panelLeft =
-        w > 0 ? anchorCenter - w / 2 : a.left - rootRect.left;
-      const neckX = anchorCenter - panelLeft;
-      setPlacement({ panelLeft, neckX });
+      const panelLeft = w > 0 ? anchorCenter - w / 2 : a.left - rootRect.left;
+      const dock = dockRef.current?.getBoundingClientRect();
+      const anchorTop = dock
+        ? a.top - dock.top
+        : a.top - rootRect.top;
+      const fixedLeft = w > 0 ? a.left + a.width / 2 - w / 2 : a.left;
+      // Park unmeasured panels off-screen. With h=0, `top = anchor - gap` plus
+      // height:auto grows downward over the dock and steals chip clicks —
+      // especially when the timeline is collapsed and the dock sits lower.
+      const fixedTop =
+        h > 0
+          ? side === "top"
+            ? a.top - gap - h
+            : a.bottom + gap
+          : -9999;
+      setPlacement({
+        panelLeft,
+        anchorLeft: a.left - rootRect.left,
+        anchorTop,
+        fixedLeft,
+        fixedTop,
+      });
     };
 
     measure();
@@ -155,174 +192,275 @@ export function GooeyConjoined({
     const panelEl = panelMeasureRef.current;
     if (panelEl) ro.observe(panelEl);
     window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
     return () => {
       ro.disconnect();
       window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", measure, true);
     };
-  }, [anchorRef, open, shownKey, panelSize.w]);
+  }, [anchorRef, open, shownKey, panelSize.w, panelSize.h, side, gap]);
 
-  const panelMotion = reduce
-    ? {
-        open: { opacity: 1 },
-        closed: { opacity: 0 },
-      }
-    : {
-        open: {
-          scaleY: 1,
-          scaleX: 1,
-          opacity: 1,
-          transition: {
-            type: "spring" as const,
-            stiffness: 400,
-            damping: 30,
-            mass: 0.65,
-          },
-        },
-        closed: {
-          scaleY: 0,
-          scaleX: 0.9,
-          opacity: 0,
-          transition: {
-            scaleY: { duration: 0.3, ease: EASE_DRAWER },
-            scaleX: { duration: 0.3, ease: EASE_DRAWER },
-            opacity: { duration: 0.12, delay: 0.18, ease: "linear" as const },
-          },
-        },
-      };
+  const ox = panelOffset?.x ?? 0;
+  const oy = panelOffset?.y ?? 0;
+  const panelDragTransform =
+    ox !== 0 || oy !== 0
+      ? `translate3d(${ox}px, ${oy}px, 0)`
+      : undefined;
 
-  const sideMotion = reduce
-    ? {
-        open: { opacity: 1 },
-        closed: { opacity: 0 },
-      }
-    : {
-        open: {
-          scaleX: 1,
-          scaleY: 1,
-          opacity: 1,
-          transition: {
-            type: "spring" as const,
-            stiffness: 400,
-            damping: 30,
-            mass: 0.65,
-          },
-        },
-        closed: {
-          scaleX: 0,
-          scaleY: 0.92,
-          opacity: 0,
-          transition: {
-            scaleX: { duration: 0.28, ease: EASE_DRAWER },
-            scaleY: { duration: 0.28, ease: EASE_DRAWER },
-            opacity: { duration: 0.12, delay: 0.16, ease: "linear" as const },
-          },
-        },
-      };
-
-  const neckX =
-    placement?.neckX ?? (panelSize.w > 0 ? panelSize.w / 2 : undefined);
-  const transformOrigin =
-    side === "top"
-      ? neckX != null
-        ? `bottom ${neckX}px`
-        : "bottom center"
-      : neckX != null
-        ? `top ${neckX}px`
-        : "top center";
-
-  const panelPlacement = placement
-    ? {
-        left: placement.panelLeft,
-        right: "auto" as const,
-        marginLeft: 0,
-        marginRight: 0,
-        width: "max-content" as const,
-        transformOrigin,
-        pointerEvents: (open ? "auto" : "none") as "auto" | "none",
-        ...(side === "top"
-          ? { bottom: "100%", marginBottom: gap }
-          : { top: "100%", marginTop: gap }),
-      }
-    : {
-        left: 0,
-        right: 0,
-        marginLeft: "auto" as const,
-        marginRight: "auto" as const,
-        width: "max-content" as const,
-        transformOrigin,
-        pointerEvents: (open ? "auto" : "none") as "auto" | "none",
-        ...(side === "top"
-          ? { bottom: "100%", marginBottom: gap }
-          : { top: "100%", marginTop: gap }),
-      };
-
-  const dockNeck = (
-    <div
-      aria-hidden
-      className="pointer-events-none absolute -translate-x-1/2 rounded-full"
-      style={{
-        width: 52,
-        height: gap + 14,
-        backgroundColor: surface,
-        left: neckX ?? "50%",
-        ...(side === "top"
-          ? { top: "100%", marginTop: -7 }
-          : { bottom: "100%", marginBottom: -7 }),
-      }}
-    />
-  );
-
-  const sideNeckW = sideGap + 14;
-  const sideNeckH = 52;
-
-  const sideNeck = (
-    <div
-      aria-hidden
-      className="pointer-events-none absolute top-8 -translate-y-1/2 rounded-full"
-      style={{
-        width: sideNeckW,
-        height: sideNeckH,
-        backgroundColor: surface,
-        left: -sideNeckW / 2 + 2,
-      }}
-    />
-  );
-
-  const sideBoxStyle = {
-    position: "absolute" as const,
-    top: 0,
-    left: "100%" as const,
-    marginLeft: sideGap,
-    transformOrigin: "left center",
+  // Morph origin: chip-sized blob at the anchor, relative to panel slot top-left
+  const chipStart = {
+    width: anchorSize.w,
+    height: anchorSize.h,
+    borderRadius: Math.min(anchorSize.w, anchorSize.h) / 2,
+    x:
+      (placement
+        ? placement.anchorLeft + anchorSize.w / 2 - placement.panelLeft
+        : (panelSize.w || 0) / 2) -
+      anchorSize.w / 2,
+    y: side === "top" ? panelSize.h + gap : -(gap + anchorSize.h),
   };
 
-  const blobPanelStyle = placement
+  /** Only (re)play the open melt when open flips on or the panel kind changes —
+   *  not on every anchor/size nudge (fullscreen resize / chip label thrash). */
+  const morphGenRef = useRef({ open: false, key: shownKey });
+
+  useEffect(() => {
+    if (noGoo) {
+      setVisible(open);
+      morphGenRef.current = { open, key: shownKey };
+      return;
+    }
+    if (panelSize.w === 0 || panelSize.h === 0) {
+      if (open) {
+        setVisible(true);
+        // Keep crisp panel readable while size is still measuring.
+        const unfiltered = unfilteredPanelRef.current;
+        const inner = innerPanelRef.current;
+        if (unfiltered) gsap.set(unfiltered, { opacity: 1 });
+        if (inner) gsap.set(inner, { opacity: 1, y: 0 });
+      }
+      return;
+    }
+
+    const filtered = filteredPanelRef.current;
+    const unfiltered = unfilteredPanelRef.current;
+    const inner = innerPanelRef.current;
+    if (!unfiltered || !inner) return;
+
+    if (open) {
+      const shouldMorph =
+        !morphGenRef.current.open || morphGenRef.current.key !== shownKey;
+      morphGenRef.current = { open: true, key: shownKey };
+
+      if (!shouldMorph) {
+        // Already open — snap shell to latest measured size; do not replay melt.
+        if (timelineRef.current) timelineRef.current.kill();
+        timelineRef.current = null;
+        setVisible(true);
+        setBridging(false);
+        const settled = {
+          width: panelSize.w,
+          height: panelSize.h,
+          borderRadius: PANEL_RADIUS,
+          x: 0,
+          y: 0,
+          opacity: 1,
+        };
+        if (filtered) gsap.set(filtered, { ...settled, borderRadius: 0 });
+        gsap.set(unfiltered, settled);
+        gsap.set(inner, { opacity: 1, y: 0 });
+        return;
+      }
+
+      if (timelineRef.current) timelineRef.current.kill();
+      setVisible(true);
+      setBridging(true);
+      const start = {
+        width: chipStart.width,
+        height: chipStart.height,
+        borderRadius: chipStart.borderRadius,
+        x: chipStart.x,
+        y: chipStart.y,
+        opacity: 1,
+      };
+      if (filtered) gsap.set(filtered, start);
+      gsap.set(unfiltered, start);
+      gsap.set(inner, { opacity: 0, y: side === "top" ? 12 : -12 });
+
+      const tl = gsap.timeline({
+        onComplete: () => {
+          setBridging(false);
+          // Belt-and-suspenders: never leave the pack invisible after melt.
+          gsap.set(unfiltered, { opacity: 1, x: 0, y: 0 });
+          gsap.set(inner, { opacity: 1, y: 0 });
+        },
+      });
+      if (filtered) {
+        tl.to(
+          filtered,
+          {
+            width: panelSize.w,
+            height: panelSize.h,
+            borderRadius: 0,
+            x: 0,
+            y: 0,
+            duration: SPEED,
+            ease: "power1.in",
+          },
+          0,
+        );
+      }
+      tl.to(
+        unfiltered,
+        {
+          width: panelSize.w,
+          height: panelSize.h,
+          borderRadius: PANEL_RADIUS,
+          x: 0,
+          y: 0,
+          duration: SPEED,
+          ease: "power1.in",
+        },
+        0,
+      );
+      tl.to(
+        inner,
+        {
+          opacity: 1,
+          y: 0,
+          duration: SPEED * 0.75,
+          ease: "power1.out",
+        },
+        SPEED * 0.5,
+      );
+      timelineRef.current = tl;
+    } else if (visible) {
+      morphGenRef.current = { open: false, key: shownKey };
+      if (timelineRef.current) timelineRef.current.kill();
+      setBridging(true);
+      const tl = gsap.timeline({
+        onComplete: () => {
+          setVisible(false);
+          setBridging(false);
+        },
+      });
+      tl.to(inner, {
+        opacity: 0,
+        y: side === "top" ? 8 : -8,
+        duration: SPEED * 0.35,
+        ease: "power1.in",
+      });
+      const targets = [filtered, unfiltered].filter(Boolean);
+      tl.to(
+        targets,
+        {
+          width: chipStart.width,
+          height: chipStart.height,
+          borderRadius: chipStart.borderRadius,
+          x: chipStart.x,
+          y: chipStart.y,
+          duration: SPEED,
+          ease: "power1.in",
+        },
+        SPEED * 0.15,
+      );
+      tl.to(
+        targets,
+        {
+          opacity: 0,
+          duration: SPEED * 0.25,
+          ease: "power1.in",
+        },
+        `-=${SPEED * 0.25}`,
+      );
+      timelineRef.current = tl;
+    } else {
+      morphGenRef.current = { open: false, key: shownKey };
+    }
+    // chipStart used only when starting a morph; layout nudges use the snap path.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    open,
+    noGoo,
+    panelSize.w,
+    panelSize.h,
+    visible,
+    side,
+    shownKey,
+  ]);
+
+  useEffect(() => {
+    if (noGoo) {
+      setSideVisible(sideOpen);
+      return;
+    }
+    if (sideTimelineRef.current) sideTimelineRef.current.kill();
+    const filtered = filteredSideRef.current;
+    const unfiltered = unfilteredSideRef.current;
+    if (!sideOpen) {
+      if (!sideVisible) return;
+      const tl = gsap.timeline({ onComplete: () => setSideVisible(false) });
+      const targets = [filtered, unfiltered].filter(Boolean);
+      tl.to(targets, {
+        opacity: 0,
+        scaleX: 0.85,
+        duration: SPEED * 0.45,
+        ease: "power1.in",
+      });
+      sideTimelineRef.current = tl;
+      return;
+    }
+    if (sideSize.w === 0) {
+      setSideVisible(true);
+      return;
+    }
+    setSideVisible(true);
+    const targets = [filtered, unfiltered].filter(Boolean);
+    gsap.set(targets, {
+      opacity: 0,
+      scaleX: 0.85,
+      transformOrigin: "left center",
+    });
+    const tl = gsap.timeline();
+    tl.to(targets, {
+      opacity: 1,
+      scaleX: 1,
+      duration: SPEED,
+      ease: "power1.out",
+    });
+    sideTimelineRef.current = tl;
+    return () => {
+      sideTimelineRef.current?.kill();
+    };
+  }, [sideOpen, sideSize.w, sideSize.h, noGoo, sideVisible]);
+
+  // Fixed to the viewport so bottom-chrome max-height / flex clipping can't
+  // swallow panels that open upward from the setting dock (brush pack, etc.).
+  const panelSlotStyle = placement
     ? {
-        left: placement.panelLeft,
+        position: "fixed" as const,
+        left: placement.fixedLeft,
+        top: placement.fixedTop,
         right: "auto" as const,
-        marginLeft: 0,
-        marginRight: 0,
-        transformOrigin,
-        pointerEvents: "none" as const,
-        width: panelSize.w || undefined,
-        height: panelSize.h || undefined,
-        ...(side === "top"
-          ? { bottom: "100%", marginBottom: gap }
-          : { top: "100%", marginTop: gap }),
+        bottom: "auto" as const,
+        marginBottom: 0,
+        marginTop: 0,
+        zIndex: 80,
       }
     : {
+        position: "absolute" as const,
         left: 0,
         right: 0,
         marginLeft: "auto" as const,
         marginRight: "auto" as const,
-        transformOrigin,
-        pointerEvents: "none" as const,
-        width: panelSize.w || undefined,
-        height: panelSize.h || undefined,
         ...(side === "top"
           ? { bottom: "100%", marginBottom: gap }
           : { top: "100%", marginTop: gap }),
       };
+
+  const showPanel = open || visible;
+  const showSide = sideOpen || sideVisible;
+  const chipRadius = Math.min(anchorSize.w, anchorSize.h) / 2;
 
   return (
     <div
@@ -335,107 +473,174 @@ export function GooeyConjoined({
     >
       {!noGoo ? <GooeyFilter id={gooId} /> : null}
 
-      {!noGoo ? (
+      {/*
+        Goo layer only while morphing (bridging) or side-panel open.
+        Never silhouette the whole dock — that melts the timeline into the bar.
+      */}
+      {!noGoo && showPanel && (bridging || showSide) ? (
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-0 z-0 overflow-visible"
-          style={{ filter: `url(#${gooId})` }}
+          className="pointer-events-none absolute z-0 overflow-visible"
+          style={{
+            ...panelSlotStyle,
+            width: panelSize.w || anchorSize.w,
+            height: panelSize.h || anchorSize.h,
+            filter: `url(#${gooId})`,
+            transform: panelDragTransform,
+          }}
         >
-          <motion.div
-            initial={false}
-            animate={open ? "open" : "closed"}
-            variants={panelMotion}
-            style={blobPanelStyle}
-            className="absolute z-0 overflow-visible will-change-transform"
-          >
+          {/* Stationary chip blob — only while morphing, else it melts the dock */}
+          {bridging ? (
             <div
-              className="relative"
-              style={{ width: panelSize.w, height: panelSize.h }}
-            >
-              <div
-                className="absolute left-0 top-0 rounded-xl"
-                style={{
-                  backgroundColor: surface,
-                  width: panelSize.w,
-                  height: panelSize.h,
-                }}
-              />
-              <motion.div
-                initial={false}
-                animate={sideOpen ? "open" : "closed"}
-                variants={sideMotion}
-                style={{
-                  ...sideBoxStyle,
-                  width: sideSize.w || undefined,
-                  height: sideSize.h || undefined,
-                }}
-                className="overflow-visible will-change-transform"
-              >
-                <div
-                  className="rounded-xl"
-                  style={{
-                    backgroundColor: surface,
-                    width: sideSize.w,
-                    height: sideSize.h,
-                  }}
-                />
-                {sideNeck}
-              </motion.div>
-            </div>
-            {dockNeck}
-          </motion.div>
+              className="absolute"
+              style={{
+                backgroundColor: surface,
+                width: anchorSize.w,
+                height: anchorSize.h,
+                borderRadius: chipRadius,
+                left: chipStart.x,
+                top: chipStart.y,
+              }}
+            />
+          ) : null}
 
+          {/* Morphing panel shape — hide after settle; crisp layer owns the open panel */}
           <div
-            className="absolute bottom-0 left-0 rounded-full"
+            ref={filteredPanelRef}
+            className="absolute left-0 top-0"
             style={{
               backgroundColor: surface,
-              width: dockSize.w || "100%",
-              height: dockSize.h || "100%",
+              width: anchorSize.w,
+              height: anchorSize.h,
+              borderRadius: chipRadius,
+              opacity: 0,
+              visibility: bridging ? "visible" : "hidden",
             }}
           />
+
+          {showSide ? (
+            <>
+              <div
+                ref={filteredSideRef}
+                className="absolute top-0 rounded-xl"
+                style={{
+                  backgroundColor: surface,
+                  width: sideSize.w || 120,
+                  height: sideSize.h || 80,
+                  left: (panelSize.w || 0) + sideGap,
+                  opacity: 0,
+                }}
+              />
+              {/* Thin horizontal neck chip→side only */}
+              <div
+                className="absolute rounded-full"
+                style={{
+                  backgroundColor: surface,
+                  width: sideGap + 8,
+                  height: Math.min(36, anchorSize.h),
+                  left: (panelSize.w || 0) - 4,
+                  top: 12,
+                }}
+              />
+            </>
+          ) : null}
         </div>
       ) : null}
 
+      {/* Crisp UI layer — dock stays outside any SVG filter */}
       <div className="relative z-[1] inline-flex items-center justify-center overflow-visible">
-        <motion.div
-          initial={false}
-          animate={open ? "open" : "closed"}
-          variants={panelMotion}
-          style={panelPlacement}
-          className="absolute z-50 overflow-visible will-change-transform"
-          aria-hidden={!open}
-        >
-          <div className="relative overflow-visible">
+        {!showPanel ? (
+          <div
+            className="pointer-events-none absolute"
+            style={{ left: -9999, top: -9999, visibility: "hidden" }}
+            aria-hidden
+          >
+            <div ref={panelMeasureRef} className="w-max">
+              {shownPanel}
+            </div>
+            <div ref={sideMeasureRef} className="w-max">
+              {shownSide}
+            </div>
+          </div>
+        ) : null}
+
+        {showPanel ? (
+          <div
+            className="absolute z-50 overflow-visible"
+            style={{
+              ...panelSlotStyle,
+              width: panelSize.w || "max-content",
+              height: panelSize.h || "auto",
+              // Only accept hits once sized — otherwise the auto-height shell
+              // covers the dock chips and the open melt looks "dead".
+              pointerEvents:
+                open && panelSize.w > 0 && panelSize.h > 0 ? "auto" : "none",
+              visibility:
+                panelSize.w > 0 && panelSize.h > 0 ? "visible" : "hidden",
+              transform: panelDragTransform,
+            }}
+            aria-hidden={!open}
+          >
             <div
-              style={{ backgroundColor: noGoo ? surface : "transparent" }}
-              className={cn(panelClassName)}
+              ref={unfilteredPanelRef}
+              className={cn("overflow-hidden", panelClassName)}
+              style={{
+                backgroundColor: surface,
+                borderRadius: PANEL_RADIUS,
+                ...(noGoo
+                  ? {
+                      width: panelSize.w || undefined,
+                      height: panelSize.h || undefined,
+                      opacity: open ? 1 : 0,
+                    }
+                  : {}),
+              }}
             >
-              <div ref={panelMeasureRef}>{shownPanel}</div>
+              <div ref={innerPanelRef}>
+                <div ref={panelMeasureRef} className="w-max">
+                  {shownPanel}
+                </div>
+              </div>
             </div>
 
-            <motion.div
-              initial={false}
-              animate={sideOpen ? "open" : "closed"}
-              variants={sideMotion}
-              style={{
-                ...sideBoxStyle,
-                pointerEvents: sideOpen ? "auto" : "none",
-                width: "max-content",
-              }}
-              className="z-[1] overflow-visible will-change-transform"
-              aria-hidden={!sideOpen}
-            >
+            {showSide ? (
               <div
-                style={{ backgroundColor: noGoo ? surface : "transparent" }}
-                className={cn("rounded-xl", sidePanelClassName)}
+                className={cn(
+                  "absolute top-0 z-[1] overflow-visible",
+                  sidePanelClassName,
+                )}
+                style={{
+                  left: "100%",
+                  marginLeft: sideGap,
+                  pointerEvents: sideOpen ? "auto" : "none",
+                }}
+                aria-hidden={!sideOpen}
               >
-                <div ref={sideMeasureRef}>{shownSide}</div>
+                <div
+                  ref={unfilteredSideRef}
+                  className="overflow-hidden rounded-xl"
+                  style={{
+                    backgroundColor: surface,
+                    ...(noGoo
+                      ? {
+                          width: sideSize.w || undefined,
+                          height: sideSize.h || undefined,
+                          opacity: sideOpen ? 1 : 0,
+                        }
+                      : {
+                          width: sideSize.w || undefined,
+                          height: sideSize.h || undefined,
+                        }),
+                  }}
+                >
+                  <div ref={sideMeasureRef} className="w-max">
+                    {shownSide}
+                  </div>
+                </div>
               </div>
-              {noGoo ? sideNeck : null}
-            </motion.div>
+            ) : null}
           </div>
-          {noGoo ? dockNeck : null}
-        </motion.div>
+        ) : null}
 
         <div ref={dockRef} className="relative z-[1] shrink-0">
           {children}

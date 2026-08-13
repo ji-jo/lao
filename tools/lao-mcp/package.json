@@ -1,0 +1,13 @@
+{
+  "name": "lao-mcp",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "lao-mcp": "./index.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.2",
+    "playwright": "^1.62.0"
+  }
+}

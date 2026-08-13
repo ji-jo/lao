@@ -13,21 +13,23 @@ disagree (Paper wins). Check it before "restoring" a surface that was deliberate
 
 ## Environment — read first, this bites
 
-- **This drive (E:) is exFAT.** `bun install` / `bun add` FAIL here with a lockfile EINVAL.
-  **Installs: `npm install`. Running & tests: `bun run dev`, `bun test`.** Never switch the
-  installer to bun; never commit a `bun.lock`.
-- Git on exFAT: new clones/repos need
-  `git config --global --add safe.directory '<path>'`. This repo uses a **repo-local**
-  identity (user "D") — don't set a global one.
+- **Repo lives on X:** (`X:\Line Animations\lao`). The volume is **NTFS** (not the old
+  E: exFAT drive). `bun install` is no longer blocked by lockfile EINVAL.
+  **Still use `npm install` / `npm add`** — the lockfile is `package-lock.json`. Running
+  & tests: `bun run dev`, `bun test`. Never switch the installer to bun; never commit a
+  `bun.lock`.
+- Git: this clone needs
+  `git config --global --add safe.directory 'X:/Line Animations/lao'` if Git marks it
+  dubious. This repo uses a **repo-local** identity (user "D") — don't set a global one.
 - Port 5173 is often taken by another of D's servers; `vite.config.ts` honors `$PORT`
-  (see `.claude/launch.json` in the parent folder — `autoPort: true`).
+  (see `.claude/launch.json` — `autoPort: true`).
 - Windows + Git Bash. Line endings: repo-local `core.autocrlf false`; commit with
   `-c core.safecrlf=false` to silence CRLF warnings.
 
 ## Commands
 
 ```bash
-npm install          # deps (exFAT-safe)
+npm install          # deps (keep package-lock.json; do not bun install)
 bun run dev          # vite dev server → http://localhost:5173
 bun test             # unit tests (src/**/*.test.ts, excluded from app tsconfig)
 npx tsc -b           # type-check (must stay clean)
@@ -70,6 +72,9 @@ by hand with Tailwind + the existing tokens — do not reach for a new dependenc
    (top-left Stop-motion/Animatron + File), `@beui/expandable-action-bar`.
 6. **No 3D** (no .obj, no three.js). **No ffmpeg.wasm** — export is mediabunny (WebCodecs)
    + gifenc. **No fabric/p5/two.js/paper.js as engines** (evaluated & rejected; steal ideas only).
+   **Exception — Leafer UI (`leafer-ui` + `@leafer-in/editor` / `text-editor`):** allowed **only as a
+   browser edit overlay** for text/shape interaction. Never replace `paintProjectFrame` / boil /
+   export with Leafer; never use `@leafer-ui/node` in the client. Chrome stays fluid/beui.
 7. Boil/jitter must stay **deterministic** (seeded) so preview === export. Tests enforce it.
 8. Keep `npx tsc -b` clean and `bun test` green before every commit.
 
@@ -131,7 +136,10 @@ Re-verify a token against Paper before trusting it; prefer `get_tokens` where it
 
 ## Keyboard map (implemented)
 
-V/B/P/M/E tools · A / Ctrl+A select all · D deselect · Del/Backspace delete selection ·
+V/B/P/M/E tools · A / Ctrl+A select all on canvas · Ctrl+Shift+A select all timeline
+layers · Ctrl+Shift+A then V or A selects every layer’s art for move / path edit ·
+D deselect · Del/Backspace delete selection (layers first when timeline layers are
+selected, then nodes, then strokes) ·
 Ctrl+C / Ctrl+V copy/paste strokes across frames (same coordinates) ·
 Ctrl+Z / Ctrl+Shift+Z undo/redo · Ctrl+S / Ctrl+O save/open .lao ·
 Shift+drag = straight line · ←/→ or , / . step frames · Enter play/pause.

@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
+  arrowHeadCorners,
   buildShapePoints,
+  bakeShapeGeometry,
   constrainLineEnd,
   isClosedShape,
   resolveShapeFrame,
@@ -53,10 +55,38 @@ describe("shapeGeometry", () => {
     expect(points.length).toBeGreaterThan(30);
   });
 
-  test("arrow has a tip near the end point", () => {
-    const { points } = buildShapePoints("arrow", 0, 0, 100, 0);
-    const tip = points.reduce((best, p) => (p.x > best.x ? p : best), points[0]);
+  test("arrow is an open shaft with tip at the end point", () => {
+    const { points, closed } = buildShapePoints("arrow", 0, 0, 100, 0);
+    expect(closed).toBe(false);
+    const tip = points[points.length - 1]!;
     expect(tip.x).toBeCloseTo(100, 0);
+    expect(tip.y).toBeCloseTo(0, 5);
+    expect(tip.t).toBeGreaterThan(500);
+  });
+
+  test("arrow head corners form a tip triangle", () => {
+    const head = arrowHeadCorners(0, 0, 100, 0, 4);
+    expect(head).not.toBeNull();
+    expect(head![0]!.x).toBeCloseTo(100, 5);
+    expect(head![1]!.x).toBeLessThan(100);
+    expect(head![2]!.x).toBeLessThan(100);
+  });
+
+  test("diagonal line bake keeps both axes", () => {
+    const baked = bakeShapeGeometry("line", {
+      x: 10,
+      y: 20,
+      w: 0,
+      h: 0,
+      dx: 40,
+      dy: 30,
+      rotationDeg: 0,
+    });
+    expect(baked.shapeBox.w).toBeCloseTo(40, 5);
+    expect(baked.shapeBox.h).toBeCloseTo(30, 5);
+    const last = baked.points[baked.points.length - 1]!;
+    expect(last.x).toBeCloseTo(50, 0);
+    expect(last.y).toBeCloseTo(50, 0);
   });
 
   test("drag significance threshold", () => {

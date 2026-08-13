@@ -6,6 +6,7 @@ import { saveLaoFile } from "@/file/laoFile";
 import { PAPER } from "@/components/chrome/paper-tokens";
 import { SaveFirstDialog } from "@/components/panels/SaveFirstDialog";
 import { EASE_OUT } from "@/lib/ease";
+import { toastError, toastSaved } from "@/lib/laoToast";
 import EllipsisIcon from "@/components/ui/ellipsis-icon";
 import EllipsisCloseIcon from "@/components/ui/ellipsis-close-icon";
 
@@ -84,6 +85,7 @@ export function WorkflowBar({
     <>
     <div
       ref={barRef}
+      data-lao-workflow-bar=""
       className="pointer-events-auto relative flex h-9 items-center gap-3 overflow-clip rounded-full py-1 pl-3 pr-1.5 antialiased"
       style={{
         backgroundColor: PAPER.surface,
@@ -157,11 +159,18 @@ export function WorkflowBar({
         setPendingWorkflow(null);
       }}
       onConfirm={async () => {
-        const ok = await saveLaoFile(useProject.getState().project);
-        if (!ok) return false;
-        if (pendingWorkflow) applySwitch(pendingWorkflow);
-        setPendingWorkflow(null);
-        return true;
+        try {
+          const project = useProject.getState().project;
+          const ok = await saveLaoFile(project);
+          if (!ok) return false;
+          toastSaved(project.name || "untitled");
+          if (pendingWorkflow) applySwitch(pendingWorkflow);
+          setPendingWorkflow(null);
+          return true;
+        } catch (err) {
+          toastError("Couldn’t save file", err);
+          return false;
+        }
       }}
     />
     </>

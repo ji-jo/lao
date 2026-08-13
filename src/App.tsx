@@ -7,10 +7,13 @@ import { SaveFirstDialog } from "@/components/panels/SaveFirstDialog";
 import { saveLaoFile, openLaoFile, parseLao } from "@/file/laoFile";
 import { startAutosave, readAutosave, clearAutosave } from "@/file/autosave";
 import { createEmptyProject, type Project } from "@/model/types";
+import { createImageElementFromFile } from "@/engine/canvasImage";
 import { StageCanvas } from "@/components/StageCanvas";
 import { PreviewStage } from "@/components/PreviewStage";
-import { ToolDock, ReferenceBox } from "@/components/chrome/ToolDock";
+import { ToolDock } from "@/components/chrome/ToolDock";
+import { ReferencePanel } from "@/components/chrome/ReferencePanel";
 import { ZoomDock } from "@/components/chrome/ZoomDock";
+import { ZoomHud } from "@/components/chrome/ZoomHud";
 import { FeedbackDock } from "@/components/chrome/FeedbackDock";
 import { PAPER } from "@/components/chrome/paper-tokens";
 import { Timeline } from "@/components/timeline/Timeline";
@@ -32,6 +35,14 @@ import { paintProjectFrame } from "@/engine/paintFrame";
 import { copyArtboardToClipboard } from "@/export/clipboardShot";
 import { getShaderSnapshotCanvas } from "@/components/ShaderBackground";
 import { hasImageFilter } from "@/lib/image-filters";
+import { LaoToaster } from "@/components/chrome/LaoToaster";
+import {
+  toastCopied,
+  toastError,
+  toastOpened,
+  toastSaved,
+  toastSuccess,
+} from "@/lib/laoToast";
 
 const SHORTCUTS: Record<string, ToolId> = {
   v: "select",
@@ -43,7 +54,6 @@ const SHORTCUTS: Record<string, ToolId> = {
   e: "eraser",
   t: "text",
   h: "hand",
-  s: "shapes",
   r: "rect",
   o: "circle",
   l: "line",
@@ -65,11 +75,25 @@ export default function App() {
   const [newFilePromptOpen, setNewFilePromptOpen] = useState(false);
 
   async function handleSave() {
-    return saveLaoFile(useProject.getState().project);
+    try {
+      const project = useProject.getState().project;
+      const ok = await saveLaoFile(project);
+      if (ok) toastSaved(project.name || "untitled");
+      return ok;
+    } catch (err) {
+      toastError("Couldn’t save file", err);
+      return false;
+    }
   }
   async function handleOpen() {
-    const project = await openLaoFile();
-    if (project) useProject.getState().loadProject(project);
+    try {
+      const project = await openLaoFile();
+      if (!project) return;
+      useProject.getState().loadProject(project);
+      toastOpened(project.name || "untitled.lao");
+    } catch (err) {
+      toastError("Couldn’t open file", err);
+    }
   }
   function handleNew() {
     const hasArt = useProject.getState().project.layers.some((l) =>
@@ -80,10 +104,12 @@ export default function App() {
       return;
     }
     useProject.getState().loadProject(createEmptyProject());
+    toastSuccess("New file created");
   }
 
   function startNewFile() {
     useProject.getState().loadProject(createEmptyProject());
+    toastSuccess("New file created");
   }
 
   useEffect(() => {
@@ -118,6 +144,25 @@ export default function App() {
       }
 
       if (e.ctrlKey || e.metaKey) {
+        if (e.key === "[" || e.code === "BracketLeft") {
+          // Send active layer to bottom (back)
+          e.preventDefault();
+          const { layerIndex, project, reorderLayer } = useProject.getState();
+          if (project.layers.length > 1 && layerIndex > 0) {
+            reorderLayer(layerIndex, 0);
+          }
+          return;
+        }
+        if (e.key === "]" || e.code === "BracketRight") {
+          // Bring active layer to top (front)
+          e.preventDefault();
+          const { layerIndex, project, reorderLayer } = useProject.getState();
+          const last = project.layers.length - 1;
+          if (project.layers.length > 1 && layerIndex < last) {
+            reorderLayer(layerIndex, last);
+          }
+          return;
+        }
         if (e.key === "+" || e.key === "=") {
           e.preventDefault();
           useViewport.getState().zoomIn();
@@ -141,17 +186,22 @@ export default function App() {
         }
         if (e.key.toLowerCase() === "s") {
           e.preventDefault();
-          void saveLaoFile(useProject.getState().project);
+          void handleSave();
           return;
         }
         if (e.key.toLowerCase() === "o") {
           e.preventDefault();
-          void openLaoFile().then((p) => p && useProject.getState().loadProject(p));
+          void handleOpen();
           return;
         }
         if (e.key.toLowerCase() === "n") {
           e.preventDefault();
           handleNew();
+          return;
+        }
+        if (e.shiftKey && e.key.toLowerCase() === "a") {
+          e.preventDefault();
+          useSelection.getState().selectAllLayers();
           return;
         }
         if (e.key.toLowerCase() === "a") {
@@ -187,7 +237,9 @@ export default function App() {
               ctx.fillRect(0, 0, ps.width, ps.height);
             }
             paintProjectFrame(ctx, ps, useProject.getState().frameIndex, { clear: false });
-          }).catch(() => undefined);
+          })
+            .then(() => toastCopied("Artboard copied"))
+            .catch((err) => toastError("Couldn’t copy artboard", err));
           return;
         }
         if (e.key.toLowerCase() === "v") {
@@ -205,10 +257,32 @@ export default function App() {
 
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 
+      if (e.key === "[" || e.code === "BracketLeft") {
+        // Move active layer one step back
+        e.preventDefault();
+        const { layerIndex, reorderLayer } = useProject.getState();
+        if (layerIndex > 0) reorderLayer(layerIndex, layerIndex - 1);
+        return;
+      }
+      if (e.key === "]" || e.code === "BracketRight") {
+        // Move active layer one step forward
+        e.preventDefault();
+        const { layerIndex, project, reorderLayer } = useProject.getState();
+        if (layerIndex < project.layers.length - 1) {
+          reorderLayer(layerIndex, layerIndex + 1);
+        }
+        return;
+      }
+
       if (e.key === "Delete" || e.key === "Backspace") {
+        const layerIndices = useSelection.getState().layerIndices;
         const ids = useSelection.getState().ids;
         const nodeIds = useSelection.getState().nodeIds;
-        if (nodeIds.length > 0) {
+        if (layerIndices.length > 0) {
+          e.preventDefault();
+          useProject.getState().deleteLayers(layerIndices);
+          useSelection.getState().clearLayers();
+        } else if (nodeIds.length > 0) {
           e.preventDefault();
           useProject.getState().deleteNodes(nodeIds);
           useSelection.getState().clearNodes();
@@ -221,11 +295,13 @@ export default function App() {
       }
 
       if (e.key === "1") {
-        setReferenceOpen(true);
+        // Picture / Reference — place image on canvas
+        imageInputRef.current?.click();
         return;
       }
       if (e.key === "2") {
-        imageInputRef.current?.click();
+        // Camera — reference overlay panel
+        setReferenceOpen(true);
         return;
       }
 
@@ -242,13 +318,22 @@ export default function App() {
       const k = e.key.toLowerCase();
       if (k === "d") {
         useSelection.getState().clear();
+        useSelection.getState().clearLayers();
+        return;
+      }
+      if (k === "v" || k === "a") {
+        const layerIndices = useSelection.getState().layerIndices;
+        if (layerIndices.length > 0) {
+          useSelection.getState().selectAllInLayers(layerIndices);
+        }
+        setTool(SHORTCUTS[k]);
         return;
       }
       const t = SHORTCUTS[k];
       if (t) setTool(t);
     }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [setTool, undo, redo, setStage]);
 
   /**
@@ -268,20 +353,46 @@ export default function App() {
     return () => document.removeEventListener("wheel", onWheel);
   }, []);
 
+  /**
+   * Drawing near the timeline / settings dock can drag-select chrome labels
+   * ("background", "Path 1", fps…). Block native selection everywhere except
+   * real text fields and dialogs (Help / Export copy).
+   */
+  useEffect(() => {
+    function allowNativeSelect(t: EventTarget | null) {
+      if (!(t instanceof Element)) return false;
+      return !!t.closest(
+        'input, textarea, select, [contenteditable="true"], [contenteditable=""], [role="dialog"]',
+      );
+    }
+    function onSelectStart(e: Event) {
+      if (allowNativeSelect(e.target)) return;
+      e.preventDefault();
+    }
+    document.addEventListener("selectstart", onSelectStart);
+    return () => document.removeEventListener("selectstart", onSelectStart);
+  }, []);
+
   return (
     <div
-      className="relative h-dvh w-dvw overflow-hidden text-foreground antialiased"
+      className="lao-app relative h-dvh w-dvw overflow-hidden text-foreground antialiased select-none"
       style={{ backgroundColor: PAPER.bg }}
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault();
         const file = e.dataTransfer.files?.[0];
         if (!file || !file.name.endsWith(".lao")) return;
-        void file.text().then((text) => {
-          useProject.getState().loadProject(parseLao(text));
-        });
+        void file
+          .text()
+          .then((text) => {
+            useProject.getState().loadProject(parseLao(text));
+            toastOpened(file.name);
+          })
+          .catch((err) => toastError("Couldn’t open file", err));
       }}
     >
+      <LaoToaster />
+      <ZoomHud />
       {stage === "draw" ? <StageCanvas /> : <PreviewStage />}
 
       {background?.kind === "shader" && (
@@ -320,7 +431,9 @@ export default function App() {
         </div>
       )}
 
-      <ReferenceBox open={referenceOpen} onClose={() => setReferenceOpen(false)} />
+      {stage === "preview" && (
+        <ReferencePanel open={referenceOpen} onClose={() => setReferenceOpen(false)} />
+      )}
 
       <input
         ref={fileInputRef}
@@ -339,30 +452,53 @@ export default function App() {
         accept="image/*"
         className="hidden"
         onChange={(e) => {
-          // MVP: open as reference for now; canvas image layers land next
           const file = e.target.files?.[0];
-          if (file) {
-            useReference.getState().setReference(file);
-            setReferenceOpen(true);
+          if (!file) {
+            e.target.value = "";
+            return;
           }
+          void (async () => {
+            try {
+              const ps = useProject.getState();
+              const image = await createImageElementFromFile(
+                file,
+                ps.project.width,
+                ps.project.height,
+              );
+              ps.addImageElement(image);
+              useSelection.getState().set([image.id]);
+              useTools.getState().setTool("select");
+            } catch (err) {
+              console.error("Failed to add canvas image", err);
+            }
+          })();
           e.target.value = "";
         }}
       />
 
       {stage === "draw" && (
         <ToolDock
-          onReference={() => setReferenceOpen(true)}
-          onAddImage={() => imageInputRef.current?.click()}
+          onReference={() => imageInputRef.current?.click()}
+          referenceOpen={referenceOpen}
+          onReferenceOpenChange={setReferenceOpen}
         />
       )}
 
       <div
-        className="pointer-events-none absolute inset-x-0 z-20 flex flex-col items-center"
-        style={{ bottom: PAPER.insetBottom }}
+        className="pointer-events-none absolute inset-x-0 z-30 flex flex-col items-center overflow-visible"
+        style={{
+          bottom: PAPER.insetBottom,
+          // Keep settings+timeline stacked in the bottom band — never grow so
+          // tall that the timeline climbs over the setting dock on short viewports.
+          maxHeight: `calc(100dvh - ${PAPER.insetBottom}px - ${PAPER.insetTop}px)`,
+        }}
       >
         <div
-          className="pointer-events-auto"
-          style={{ width: PAPER.timelineWidth, maxWidth: "calc(100vw - 124px)" }}
+          className="pointer-events-auto flex min-h-0 w-full flex-col overflow-visible"
+          style={{
+            width: PAPER.timelineWidth,
+            maxWidth: "calc(100vw - 124px)",
+          }}
         >
           <Timeline />
         </div>

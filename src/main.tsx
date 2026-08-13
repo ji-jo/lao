@@ -8,6 +8,10 @@ import { usePlayback } from '@/state/playback'
 import { useTools } from '@/state/tools'
 import { useSelection } from '@/state/selection'
 import { useViewport } from '@/state/viewport'
+import { emitProjectSvg } from '@/export/code/emitSvg'
+import { emitProjectReact } from '@/export/code/emitReact'
+import { emitProjectSceneJson } from '@/export/code/sceneJson'
+import { analyzeProjectExport } from '@/export/code/capabilities'
 
 if (import.meta.env.DEV) {
   // dev console handle: window.__lao.project.getState() etc.
@@ -18,6 +22,12 @@ if (import.meta.env.DEV) {
       tools: useTools,
       selection: useSelection,
       viewport: useViewport,
+    },
+    __laoExport: {
+      emitProjectSvg,
+      emitProjectReact,
+      emitProjectSceneJson,
+      describeProject: analyzeProjectExport,
     },
   })
 }

@@ -71,9 +71,20 @@ export function isLegacyVanishingEasing(easing: ClipEasing): boolean {
 export interface Stroke {
   id: string;
   brush: BrushKind;
+  /**
+   * Brush-pack preset (smooth, calligraphy, spray, chalk, …).
+   * Painted procedurally via brushStyles; legacy ids (HB, watercolor, wave, …) coerce at paint time.
+   */
+  p5Brush?: import("@/engine/p5BrushPresets").P5BrushId;
   color: string;
   /** base size in project px */
   size: number;
+  /** Wave / dash / stipple period in project px (default 12). */
+  brushWavelength?: number;
+  /** Corner softness 0–100 (default 100). */
+  brushCorners?: number;
+  /** Path smoothing 0–20 scale (default 9). */
+  brushSmoothing?: number;
   points: StrokePoint[];
   /** seed for deterministic boil/jitter */
   seed: number;
@@ -89,6 +100,52 @@ export interface Stroke {
   closed?: boolean;
   /** Optional solid fill for closed shapes (stroke uses `color`) */
   fillColor?: string;
+  /**
+   * Set when created by a shape tool — lets the Leafer overlay remount a
+   * semantic Rect/Ellipse/Polygon/Line for edit instead of the StageCanvas bbox.
+   */
+  shapeKind?: "rect" | "diamond" | "circle" | "arrow" | "line";
+  /**
+   * Local frame for Leafer remount (project px). Closed shapes: AABB.
+   * Line/arrow: origin + delta (`w`/`h` = end − start). `rotation` in radians.
+   */
+  shapeBox?: { x: number; y: number; w: number; h: number; rotation?: number };
+  /** Corner radius for rect shapes (project px). Ignored when 0 / unset. */
+  cornerRadius?: number;
+  /** iOS-style continuous corner (squircle) when true — pairs with cornerSmoothing. */
+  squircle?: boolean;
+  /** Corner smoothing 0–1 when squircle is on (0 = circular, 1 = continuous). */
+  cornerSmoothing?: number;
+}
+
+export type TextAlign = "left" | "center" | "right";
+export type TextCase = "none" | "upper" | "lower" | "title";
+export type TextPathShape = "none" | "circle" | "arch" | "wave" | "scurve";
+export type TextPathPosition = "top" | "center" | "bottom";
+export type TextPathDirection = "cw" | "ccw";
+export type TextBlendMode =
+  | "normal"
+  | "multiply"
+  | "screen"
+  | "overlay"
+  | "darken"
+  | "lighten";
+
+export interface TextShadow {
+  color: string;
+  blur: number;
+  offsetX: number;
+  offsetY: number;
+}
+
+export interface TextPathSettings {
+  shape: TextPathShape;
+  /** Horizontal alignment along the path */
+  align: TextAlign;
+  position: TextPathPosition;
+  direction: TextPathDirection;
+  /** Offset along the path, −100…100 */
+  offset: number;
 }
 
 export interface TextElement {
@@ -99,11 +156,57 @@ export interface TextElement {
   fontFamily: string;
   size: number;
   color: string;
+  bold?: boolean;
+  italic?: boolean;
+  align?: TextAlign;
   letterSpacing?: number;
+  underline?: boolean;
+  strikethrough?: boolean;
+  textCase?: TextCase;
+  /** 0–100; default 100 */
+  opacity?: number;
+  /** Solid fill behind the text box; omit / null = none */
+  backgroundColor?: string | null;
+  shadow?: TextShadow | null;
+  blendMode?: TextBlendMode;
+  path?: TextPathSettings | null;
   /** Fixed box width in project px — text soft-wraps to fit when set */
   boxWidth?: number;
   /** Rotation in radians (around the box center) */
   rotation?: number;
+  /** Animatron clip timing (ignored in stop-motion paint) */
+  clip?: StrokeClip;
+  /**
+   * Typewriter reveal rate (characters / second) while the clip runs.
+   * - omit — legacy: reveal by eased clip progress (fraction of duration)
+   * - `0` — show full text as soon as the clip starts
+   * - `>0` — reveal by elapsed time × speed (preview === export)
+   */
+  typewriterSpeed?: number;
+}
+
+/**
+ * Placed image on the artboard (Camera / Add image). Persisted in .lao.
+ * Transform is Figma-like: free scale (squeeze/extend), rotate, lock, aspect lock.
+ */
+export interface ImageElement {
+  id: string;
+  /** data URL (or blob URL during session before save) */
+  src: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** radians, around box center */
+  rotation?: number;
+  /** 0–1, default 1 */
+  opacity?: number;
+  /** prevent transform / dock edits */
+  locked?: boolean;
+  /** keep w/h ratio while scaling from dock / Shift */
+  lockAspect?: boolean;
+  naturalWidth: number;
+  naturalHeight: number;
   /** Animatron clip timing (ignored in stop-motion paint) */
   clip?: StrokeClip;
 }
@@ -112,6 +215,57 @@ export interface Frame {
   id: string;
   strokes: Stroke[];
   texts?: TextElement[];
+  images?: ImageElement[];
+}
+
+/**
+ * A motion guide: a pen-authored path that art rides along. Guides live on the
+ * Draw stage only — never painted in Preview/export.
+ */
+export interface MotionPath {
+  id: string;
+  /** editable pen anchor nodes (authoring) */
+  bezierNodes: BezierNode[];
+  /** flattened polyline — arc-length sampled at animation time */
+  points: StrokePoint[];
+}
+
+/**
+ * Binds a group of elements (strokes / texts / images by id) to a MotionPath.
+ * The group's `anchor` point is pinned to the path: progress 0 puts the anchor
+ * at the path's A end, progress 1 at the B end (swapped by `reverse`).
+ * Animatron times in ms (startMs/durationMs); stop-motion in frames
+ * (startFrame/endFrame). Deterministic: pose is a pure function of time.
+ */
+export interface MotionAssignment {
+  id: string;
+  pathId: string;
+  targetIds: string[];
+  /** group point pinned to the path, in project px */
+  anchor: { x: number; y: number };
+  startMs: number;
+  durationMs: number;
+  /** stop-motion timing (frames); used when workflow is stopmotion */
+  startFrame?: number;
+  endFrame?: number;
+  easing?: ClipEasing;
+  /** travel B→A instead of A→B */
+  reverse?: boolean;
+  /** rotate the group to follow the path tangent */
+  orient?: boolean;
+}
+
+/**
+ * Animatron live morph: tween layer A's drawing into layer B's over the clip
+ * window. A holds before startMs, interpolates during, B takes over after.
+ */
+export interface MorphClip {
+  id: string;
+  fromLayerId: string;
+  toLayerId: string;
+  startMs: number;
+  durationMs: number;
+  easing?: ClipEasing;
 }
 
 export interface Layer {
@@ -122,6 +276,10 @@ export interface Layer {
   isStatic: boolean;
   /** exposure sheet: frames[i] is the cel shown at timeline frame i; null = hold previous */
   frames: (Frame | null)[];
+  /** motion guides authored on this layer (Path Maker) */
+  motionPaths?: MotionPath[];
+  /** bindings of this layer's elements to motion guides */
+  motionAssignments?: MotionAssignment[];
 }
 
 export type BackgroundFit = "fill" | "cover" | "contain" | "crop";
@@ -223,10 +381,12 @@ export interface Project {
   frameCount: number;
   layers: Layer[];
   background?: Background;
-  /** which editor workflow owns this document; default stopmotion when missing */
+  /** which editor workflow owns this document; default animatron when missing on new projects */
   workflow?: ProjectWorkflow;
   /** Line-boil look (preview === export). */
   boil?: BoilSettings;
+  /** Animatron live morph clips (layer A → layer B). */
+  morphs?: MorphClip[];
 }
 
 /**
@@ -255,6 +415,7 @@ export function createEmptyProject(): Project {
     height: 1080,
     fps: 12,
     frameCount: 24,
+    workflow: "animatron",
     layers: [
       {
         id: crypto.randomUUID(),

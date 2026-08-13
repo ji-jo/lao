@@ -3,7 +3,9 @@
 @AGENTS.md
 
 Also read `docs/ARCHITECTURE.md` before engine/store changes and `docs/ROADMAP.md` for
-parked features. Never use bun for installs on this drive (exFAT) — npm installs, bun runs.
+parked features. Repo is on **X:** (`X:\Line Animations\lao`, NTFS). Installs stay
+`npm install` (package-lock.json) — never bun install / never commit a `bun.lock`.
+Running & tests: `bun run dev`, `bun test`.
 
 Non-negotiable (full detail in AGENTS.md §"Hard product constraints"):
 - Dev server is **http://localhost:5173**.

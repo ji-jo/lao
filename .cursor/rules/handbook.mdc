@@ -9,7 +9,8 @@ workflow), `docs/ARCHITECTURE.md` (data model, stores, engine), and `docs/ROADMA
 
 Critical, non-negotiable:
 
-- This drive is exFAT — use `npm install` for dependencies (bun install fails), but
+- Repo is on **X:** (`X:\Line Animations\lao`, NTFS). Use `npm install` for
+  dependencies (lockfile is `package-lock.json`; do not bun install), but
   `bun run dev` / `bun test` for running. Dev server is **http://localhost:5173**.
 - UI + icons come from **exactly four sources, nothing else**:
   1. **fluid functionalism** — UI components (`@fluid/<name>` via shadcn).

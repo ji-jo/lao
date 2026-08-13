@@ -60,30 +60,76 @@ export async function saveLaoFile(project: Project): Promise<boolean> {
   return true;
 }
 
-export async function openLaoFile(): Promise<Project | null> {
-  if ("showOpenFilePicker" in window) {
-    try {
-      const [handle] = await window.showOpenFilePicker({ types: PICKER_TYPES });
-      const file = await handle.getFile();
-      return parseLao(await file.text());
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return null;
-      throw err;
-    }
-  }
+/**
+ * Open via `<input type="file">`.
+ *
+ * Prefer this over `showOpenFilePicker` + `getFile()`: several embeddings
+ * (Cursor Simple Browser, some Electron webviews, strict Edge) expose the
+ * picker API but reject `getFile()` with NotAllowedError ("not allowed by
+ * the user agent or the platform in the current context").
+ */
+function openLaoViaInput(): Promise<Project | null> {
   return new Promise((resolve, reject) => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".lao";
+    input.accept = ".lao,application/json";
+    let settled = false;
+    const finish = (result: Project | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    input.addEventListener("cancel", () => finish(null));
     input.onchange = async () => {
       const file = input.files?.[0];
-      if (!file) return resolve(null);
+      if (!file) return finish(null);
       try {
-        resolve(parseLao(await file.text()));
+        finish(parseLao(await file.text()));
       } catch (err) {
+        settled = true;
         reject(err);
       }
     };
     input.click();
   });
+}
+
+export async function openLaoFile(): Promise<Project | null> {
+  if ("showOpenFilePicker" in window) {
+    try {
+      const [handle] = await window.showOpenFilePicker({
+        types: PICKER_TYPES,
+        multiple: false,
+      });
+      // Re-prompt read permission when the handle exists but access was revoked
+      // (or never granted in this context).
+      const permissive = handle as FileSystemFileHandle & {
+        queryPermission?: (opts?: { mode?: "read" | "readwrite" }) => Promise<PermissionState>;
+        requestPermission?: (opts?: { mode?: "read" | "readwrite" }) => Promise<PermissionState>;
+      };
+      if (typeof permissive.queryPermission === "function") {
+        let state = await permissive.queryPermission({ mode: "read" });
+        if (state !== "granted" && typeof permissive.requestPermission === "function") {
+          state = await permissive.requestPermission({ mode: "read" });
+        }
+        if (state !== "granted") return openLaoViaInput();
+      }
+      const file = await handle.getFile();
+      return parseLao(await file.text());
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return null;
+      // Restricted context: fall back to the classic file input (one more pick).
+      const name = err instanceof DOMException ? err.name : "";
+      const msg = err instanceof Error ? err.message : String(err);
+      if (
+        name === "NotAllowedError" ||
+        name === "SecurityError" ||
+        msg.includes("getFile")
+      ) {
+        return openLaoViaInput();
+      }
+      throw err;
+    }
+  }
+  return openLaoViaInput();
 }

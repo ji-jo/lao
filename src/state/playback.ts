@@ -21,6 +21,8 @@ interface PlaybackState {
   loop: boolean;
   /** Animatron timeline-conjoined easing panel */
   animationPanelOpen: boolean;
+  /** Animatron draw stage: show every layer’s complete paths on the canvas */
+  showFullStrokes: boolean;
   setMode: (mode: StageView) => void;
   setStage: (stage: StageView) => void;
   setWorkflow: (workflow: Workflow) => void;
@@ -32,12 +34,14 @@ interface PlaybackState {
   toggleLoop: () => void;
   setAnimationPanelOpen: (open: boolean) => void;
   toggleAnimationPanel: () => void;
+  toggleShowFullStrokes: () => void;
+  setShowFullStrokes: (show: boolean) => void;
 }
 
 export const usePlayback = create<PlaybackState>((set) => ({
   mode: "draw",
   stage: "draw",
-  workflow: "stopmotion",
+  workflow: "animatron",
   playing: false,
   onionSkin: true,
   onionColor: "#e0504f",
@@ -47,6 +51,7 @@ export const usePlayback = create<PlaybackState>((set) => ({
   onionPanelOpen: false,
   loop: true,
   animationPanelOpen: false,
+  showFullStrokes: false,
   setMode: (mode) => set({ mode, stage: mode, playing: false }),
   setStage: (stage) => set({ stage, mode: stage, playing: false }),
   setWorkflow: (workflow) => set({ workflow, playing: false, animationPanelOpen: false }),
@@ -59,4 +64,7 @@ export const usePlayback = create<PlaybackState>((set) => ({
   setAnimationPanelOpen: (animationPanelOpen) => set({ animationPanelOpen }),
   toggleAnimationPanel: () =>
     set((s) => ({ animationPanelOpen: !s.animationPanelOpen })),
+  toggleShowFullStrokes: () =>
+    set((s) => ({ showFullStrokes: !s.showFullStrokes })),
+  setShowFullStrokes: (showFullStrokes) => set({ showFullStrokes }),
 }));

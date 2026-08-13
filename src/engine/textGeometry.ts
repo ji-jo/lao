@@ -1,6 +1,9 @@
 import type { TextElement } from "@/model/types";
-import { textFontStack } from "@/lib/google-fonts";
 import { layoutText } from "@/engine/textLayout";
+import { textDisplayString } from "@/engine/textStyle";
+import { pathLayoutHeight } from "@/engine/textPath";
+import { textCanvasFont } from "@/engine/textFont";
+import { textFontStack } from "@/lib/google-fonts";
 
 export type TextBox = { w: number; h: number; lines: string[] };
 
@@ -59,10 +62,11 @@ export function measureTextBox(
   text: TextElement,
 ): TextBox {
   const letterSpacing = text.letterSpacing ?? 0;
-  ctx.font = `${text.size}px ${textFontStack(text.fontFamily)}`;
+  ctx.font = textCanvasFont(text);
+  const display = textDisplayString(text);
   const lines = wrapTextLines(
     ctx,
-    text.text,
+    display,
     text.fontFamily,
     text.size,
     letterSpacing,
@@ -74,7 +78,11 @@ export function measureTextBox(
     if (lw > w) w = lw;
   }
   if (text.boxWidth != null && text.boxWidth > 0) w = text.boxWidth;
-  const h = text.size * Math.max(1, lines.length);
+  const pathShape = text.path?.shape ?? "none";
+  const h =
+    pathShape !== "none"
+      ? pathLayoutHeight(text.size, pathShape, w)
+      : text.size * Math.max(1, lines.length);
   return { w, h, lines };
 }
 

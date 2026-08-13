@@ -20,10 +20,10 @@ import {
 } from "@/export/shaderExport";
 import { encodeApng } from "@/export/apng";
 
-export type ExportFormat = "mp4" | "webm" | "gif" | "apng";
+export type ExportFormat = "mp4" | "webm" | "gif" | "apng" | "png";
 
 export interface ExportOptions {
-  /** omit background — strokes only (WebM alpha / GIF / APNG transparency) */
+  /** omit background — strokes only (WebM/PNG/GIF/APNG transparency) */
   transparent?: boolean;
   /**
    * Output size in px; defaults to the project canvas size. The scene is
@@ -35,6 +35,8 @@ export interface ExportOptions {
    */
   width?: number;
   height?: number;
+  /** Still PNG: which timeline frame to composite. Defaults to 0. */
+  frame?: number;
 }
 
 const FALLBACK_BACKGROUND = "#141416";
@@ -57,7 +59,10 @@ export async function exportProject(
   const canvas = document.createElement("canvas");
   canvas.width = outW;
   canvas.height = outH;
-  const ctx = canvas.getContext("2d", { willReadFrequently: format === "gif" || format === "apng" })!;
+  const ctx = canvas.getContext("2d", {
+    alpha: true,
+    willReadFrequently: format === "gif" || format === "apng",
+  })!;
   // paint in project space, scaled once to the output box — clearRect/fillRect
   // below use project coords and still cover the full canvas through this
   ctx.scale(outW / width, outH / height);
@@ -95,6 +100,22 @@ export async function exportProject(
   }
 
   try {
+    if (format === "png") {
+      const frame = Math.min(
+        Math.max(0, Math.round(opts.frame ?? 0)),
+        Math.max(0, frameCount - 1),
+      );
+      await paint(frame);
+      onProgress?.(1);
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (b) => (b ? resolve(b) : reject(new Error("Failed to encode PNG"))),
+          "image/png",
+        );
+      });
+      return blob;
+    }
+
     if (format === "apng") {
       return encodeApng(canvas, frameCount, fps, paint, onProgress);
     }
@@ -129,12 +150,12 @@ export async function exportProject(
       format: isMp4 ? new Mp4OutputFormat() : new WebMOutputFormat(),
       target: new BufferTarget(),
     });
+    const keepAlpha = Boolean(transparent && !isMp4);
     const source = new CanvasSource(canvas, {
       codec: isMp4 ? "avc" : "vp9",
       bitrate: QUALITY_HIGH,
-      ...(transparent && !isMp4
-        ? { transform: { alpha: "keep" as const } }
-        : {}),
+      alpha: keepAlpha ? "keep" : "discard",
+      ...(keepAlpha ? { transform: { alpha: "keep" as const } } : {}),
     });
     output.addVideoTrack(source, { frameRate: fps });
     await output.start();

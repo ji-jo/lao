@@ -1,83 +1,35 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Player, type PlayerRef } from "@remotion/player";
-import { useProject } from "@/state/project";
-import { usePlayback } from "@/state/playback";
-import { useReference } from "@/state/reference";
-import { playerRef } from "@/state/playerRef";
+import { Player } from "@remotion/player";
 import { LaoComposition } from "@/remotion/LaoComposition";
+import { useProject } from "@/state/project";
+import { useReference } from "@/state/reference";
+import { X } from "reicon-react";
 import { Slider } from "@/components/ui/slider";
-import XIcon from "@/components/ui/x-icon";
+import { IMAGE_FIT_OPTIONS } from "@/lib/image-filters";
+import { cn } from "@/lib/utils";
 
-/** Full-quality playback via Remotion Player, plus the reference attachment overlay. */
 export function PreviewStage() {
   const project = useProject((s) => s.project);
   const frameIndex = useProject((s) => s.frameIndex);
   const reference = useReference();
-  const seekGuard = useRef(false);
-  const [playerReady, setPlayerReady] = useState(false);
-
-  const attachPlayer = useCallback((instance: PlayerRef | null) => {
-    playerRef.current = instance;
-    setPlayerReady(!!instance);
-  }, []);
-
-  // attach listeners whenever the Player instance is ready
-  useEffect(() => {
-    const player = playerRef.current;
-    if (!player) return;
-    const onFrame = (e: { detail: { frame: number } }) => {
-      seekGuard.current = true;
-      useProject.getState().setFrameIndex(e.detail.frame);
-      seekGuard.current = false;
-    };
-    const onPlay = () => usePlayback.getState().setPlaying(true);
-    const onPause = () => usePlayback.getState().setPlaying(false);
-    player.addEventListener("frameupdate", onFrame);
-    player.addEventListener("play", onPlay);
-    player.addEventListener("pause", onPause);
-    if (player.getCurrentFrame() !== frameIndex) {
-      player.seekTo(frameIndex);
-    }
-    return () => {
-      player.removeEventListener("frameupdate", onFrame);
-      player.removeEventListener("play", onPlay);
-      player.removeEventListener("pause", onPause);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-bind when Player mounts
-  }, [playerReady]);
-
-  // timeline scrubbing → seek the player
-  useEffect(() => {
-    const player = playerRef.current;
-    if (player && !seekGuard.current && player.getCurrentFrame() !== frameIndex) {
-      player.seekTo(frameIndex);
-    }
-  }, [frameIndex]);
 
   return (
-    <div className="absolute inset-0 bg-[#0b0b0d] p-6 pb-32">
-      {/* Remotion fit-container: absolute inset + aspect-ratio; width-only on Player */}
-      <div
-        className="absolute inset-6 bottom-32 m-auto max-h-full max-w-full overflow-hidden rounded-lg border border-border shadow-2xl"
-        style={{ aspectRatio: `${project.width} / ${project.height}` }}
-      >
+    <div className="relative flex h-full w-full items-center justify-center bg-[#0b0b0d]">
+      <div className="w-full max-w-[min(92vw,960px)] overflow-hidden rounded-2xl border border-border shadow-2xl">
         <Player
-          ref={attachPlayer}
           component={LaoComposition}
           inputProps={{ project }}
           durationInFrames={Math.max(project.frameCount, 1)}
           compositionWidth={project.width}
           compositionHeight={project.height}
           fps={project.fps}
-          initialFrame={frameIndex}
+          initialFrame={Math.min(frameIndex, Math.max(project.frameCount - 1, 0))}
           loop
           style={{ width: "100%" }}
         />
       </div>
 
-      {/* reference attachment overlay */}
       {reference.url && (
-        <div className="absolute right-4 top-16 w-64 rounded-2xl border border-border bg-card/90 p-2 shadow-2xl backdrop-blur-xl">
+        <div className="absolute right-4 top-16 w-72 rounded-2xl border border-border bg-card/90 p-2 shadow-2xl backdrop-blur-xl">
           <div className="mb-1 flex items-center justify-between px-1">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               Reference
@@ -87,34 +39,65 @@ export function PreviewStage() {
               onClick={reference.clear}
               className="text-muted-foreground hover:text-foreground"
             >
-              <XIcon size={12} />
+              <X size={12} />
             </button>
           </div>
-          {reference.kind === "video" ? (
-            <video
-              src={reference.url}
-              controls
-              loop
-              muted
-              className="w-full rounded-lg"
-              style={{ opacity: reference.opacity }}
+          <div className="relative mb-2 h-36 overflow-hidden rounded-lg bg-black/40">
+            {reference.kind === "video" ? (
+              <video
+                src={reference.url}
+                controls
+                loop
+                muted
+                className="size-full object-contain"
+                style={{ opacity: reference.opacity }}
+              />
+            ) : (
+              <img
+                src={reference.url}
+                alt="reference"
+                className="size-full object-contain"
+                style={{
+                  opacity: reference.opacity,
+                  transform: `scale(${reference.zoom})`,
+                  transformOrigin: "center",
+                }}
+              />
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1 px-1 pb-2">
+            {IMAGE_FIT_OPTIONS.map((o) => (
+              <button
+                key={o.id}
+                type="button"
+                onClick={() => reference.setFit(o.id)}
+                className={cn(
+                  "rounded-full px-2 py-0.5 text-[10px]",
+                  reference.fit === o.id
+                    ? "bg-white/15 text-white"
+                    : "bg-white/5 text-white/60 hover:bg-white/10",
+                )}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+          <div className="space-y-2 px-1 pb-1">
+            <Slider
+              label="Zoom"
+              value={Math.round(reference.zoom * 100)}
+              onChange={(v) => reference.setZoom((v as number) / 100)}
+              min={50}
+              max={300}
+              step={5}
             />
-          ) : (
-            <img
-              src={reference.url}
-              alt="reference"
-              className="w-full rounded-lg"
-              style={{ opacity: reference.opacity }}
-            />
-          )}
-          <div className="px-1 pt-2">
             <Slider
               label="Opacity"
               value={Math.round(reference.opacity * 100)}
               onChange={(v) => reference.setOpacity((v as number) / 100)}
-              min={10}
+              min={5}
               max={100}
-              step={5}
+              step={1}
             />
           </div>
         </div>

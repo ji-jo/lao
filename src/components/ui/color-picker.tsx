@@ -26,7 +26,7 @@ import { surfaceClasses } from "@/lib/surface-classes";
 import { useIcon } from "@/lib/icon-context";
 import { useProximityHover } from "@/hooks/use-proximity-hover";
 import { Elevated } from "@/lib/elevated";
-import { Slider } from "@/components/ui/slider";
+import { Slider, SliderComfortable } from "@/components/ui/slider";
 import { Tooltip } from "@/components/motion/tooltip";
 
 // ---------------------------------------------------------------------------
@@ -606,38 +606,30 @@ function HueSlider({ h, onChange }: { h: number; onChange: (h: number) => void }
 function AlphaSlider({
   a,
   solidColor,
-  solidR,
-  solidG,
-  solidB,
   onChange,
 }: {
   a: number;
   solidColor: string;
-  solidR: number;
-  solidG: number;
-  solidB: number;
   onChange: (a: number) => void;
 }) {
-  // Use color-aware transparent stop (same hue, alpha 0) so the gradient stays
-  // chromatically consistent and reaches fully opaque at 100% with no edge gap.
-  const transparentColor = `rgba(${solidR}, ${solidG}, ${solidB}, 0)`;
   return (
-    <Slider
+    <SliderComfortable
+      label="Alpha"
+      variant="scrubber"
       value={Math.round(a * 100)}
-      onChange={(v) => onChange((typeof v === "number" ? v : v[0]) / 100)}
+      onChange={(v) => onChange(v / 100)}
       min={0}
       max={100}
       step={1}
-      showValue={false}
-      hideFill
-      thumbColor={solidColor}
-      thumbBorderColor="rgba(255,255,255,0.9)"
-      trackStyle={{
-        backgroundImage: `linear-gradient(to right, ${transparentColor} 0%, ${solidColor} 98%), conic-gradient(var(--checker-a) 0 25%, var(--checker-b) 0 50%, var(--checker-a) 0 75%, var(--checker-b) 0)`,
-        backgroundSize: "100% 100%, 8px 8px",
-        borderWidth: 0,
+      fillColor={solidColor}
+      formatValue={(v) => `${Math.round(v)}%`}
+      className="!mb-2 !h-7 !w-full !rounded-full !border-0 !px-3"
+      style={{
+        // Checker behind the elastic fill so 0% reads as transparent.
+        backgroundImage:
+          "conic-gradient(var(--checker-a) 0 25%, var(--checker-b) 0 50%, var(--checker-a) 0 75%, var(--checker-b) 0)",
+        backgroundSize: "8px 8px",
       }}
-      aria-label="Alpha"
     />
   );
 }
@@ -754,7 +746,6 @@ function FormatDropdown({
   const isControlled = openProp !== undefined;
   const open = isControlled ? openProp : internalOpen;
   const actionsRef = useRef<{ unmount: () => void; close: () => void } | null>(null);
-  const shape = useShape();
   const portalContainer = useContext(ColorPickerPortalContainerContext);
   const containerRef = useRef<HTMLDivElement>(null);
   const ChevronDownIcon = useIcon("chevron-down");
@@ -822,9 +813,9 @@ function FormatDropdown({
     >
       <Menu.Trigger
         className={cn(
-          "flex items-center justify-between gap-2 h-9 px-3 text-[13px] bg-transparent hover:bg-hover hover:text-foreground transition-colors duration-80 outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--focus-ring,#6B97FF)] cursor-pointer",
-          open ? "bg-active text-foreground" : "text-muted-foreground active:bg-active",
-          shape.input
+          colorFieldShellClassName,
+          "cursor-pointer gap-2 px-3 text-[13px] outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-[color:var(--focus-ring,#6B97FF)]",
+          open ? "bg-surface-2 text-foreground" : "text-muted-foreground"
         )}
         style={{ fontVariationSettings: fontWeights.medium }}
       >
@@ -1012,6 +1003,15 @@ function FormatDropdown({
 //   replacing the old hand-rolled pointer-capture logic.
 // ---------------------------------------------------------------------------
 
+/** Field chrome — recessed fill so values read as inputs on surface-3 (no stroke). */
+const colorFieldShellClassName = cn(
+  "flex items-center h-9 select-none",
+  "rounded-lg bg-surface-1",
+  "hover:bg-surface-2 active:bg-surface-2",
+  "transition-colors duration-80",
+  "focus-within:ring-1 focus-within:ring-[color:var(--focus-ring,#6B97FF)]",
+);
+
 interface ColorInputProps {
   value: string;
   onCommit: (next: string) => void;
@@ -1057,7 +1057,6 @@ const TextColorInput = forwardRef<HTMLInputElement, ColorInputProps>(
   ) => {
     const [draft, setDraft] = useState(value);
     const interactingRef = useRef(false);
-    const shape = useShape();
 
     useEffect(() => {
       if (!interactingRef.current) setDraft(value);
@@ -1090,15 +1089,11 @@ const TextColorInput = forwardRef<HTMLInputElement, ColorInputProps>(
 
     return (
       <div
-        className={cn(
-          "flex items-center h-9 px-2 bg-transparent hover:bg-hover active:bg-active transition-colors duration-80 focus-within:ring-1 focus-within:ring-[color:var(--focus-ring,#6B97FF)] select-none",
-          shape.input,
-          className
-        )}
+        className={cn(colorFieldShellClassName, "px-2", className)}
         style={{ width }}
       >
         {prefix && (
-          <span className="text-[12px] text-muted-foreground mr-1 select-none">
+          <span className="mr-1 select-none text-[12px] text-muted-foreground">
             {prefix}
           </span>
         )}
@@ -1138,7 +1133,7 @@ const TextColorInput = forwardRef<HTMLInputElement, ColorInputProps>(
           inputMode={inputMode}
           aria-label={ariaLabel}
           className={cn(
-            "flex-1 min-w-0 bg-transparent text-foreground text-[13px] outline-none tabular-nums",
+            "min-w-0 flex-1 bg-transparent text-[13px] text-foreground outline-none tabular-nums",
             align === "center" && "text-center",
             align === "right" && "text-right",
             inputClassName
@@ -1174,7 +1169,6 @@ const ScrubColorInput = forwardRef<HTMLInputElement, ColorInputProps>(
     },
     ref
   ) => {
-    const shape = useShape();
     const inputRef = useRef<HTMLInputElement | null>(null);
     const [editing, setEditing] = useState(false);
     // Set on pointerdown inside the scrub area (capture phase, before Base UI
@@ -1265,11 +1259,7 @@ const ScrubColorInput = forwardRef<HTMLInputElement, ColorInputProps>(
         step={nudgeStep ?? 1}
         largeStep={nudgeShiftStep ?? 10}
         format={format}
-        className={cn(
-          "flex items-center h-9 bg-transparent hover:bg-hover active:bg-active transition-colors duration-80 focus-within:ring-1 focus-within:ring-[color:var(--focus-ring,#6B97FF)] select-none",
-          shape.input,
-          className
-        )}
+        className={cn(colorFieldShellClassName, className)}
         style={{ width }}
       >
         <NumberField.ScrubArea
@@ -1288,7 +1278,7 @@ const ScrubColorInput = forwardRef<HTMLInputElement, ColorInputProps>(
             inputRef.current?.select();
           }}
           className={cn(
-            "flex flex-1 min-w-0 items-center self-stretch px-2",
+            "flex min-w-0 flex-1 items-center self-stretch px-2",
             !editing && "cursor-ew-resize"
           )}
         >
@@ -1306,7 +1296,7 @@ const ScrubColorInput = forwardRef<HTMLInputElement, ColorInputProps>(
             </svg>
           </NumberField.ScrubAreaCursor>
           {prefix && (
-            <span className="text-[12px] text-muted-foreground mr-1 select-none">
+            <span className="mr-1 select-none text-[12px] text-muted-foreground">
               {prefix}
             </span>
           )}
@@ -1351,7 +1341,7 @@ const ScrubColorInput = forwardRef<HTMLInputElement, ColorInputProps>(
               }
             }}
             className={cn(
-              "flex-1 min-w-0 bg-transparent text-foreground text-[13px] outline-none tabular-nums",
+              "min-w-0 flex-1 bg-transparent text-[13px] text-foreground outline-none tabular-nums",
               align === "center" && "text-center",
               align === "right" && "text-right",
               !editing && "pointer-events-none",
@@ -1388,7 +1378,6 @@ interface EyeDropperGlobal {
 
 function EyeDropperButton({ onPick }: { onPick: (hex: string) => void }) {
   const [supported, setSupported] = useState(false);
-  const shape = useShape();
   const PipetteIcon = useIcon("pipette");
 
   useEffect(() => {
@@ -1414,8 +1403,8 @@ function EyeDropperButton({ onPick }: { onPick: (hex: string) => void }) {
       onClick={handleClick}
       aria-label="Pick color from screen"
       className={cn(
-        "flex items-center justify-center h-9 px-3 text-muted-foreground bg-transparent hover:bg-hover hover:text-foreground active:bg-active transition-colors duration-80 outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--focus-ring,#6B97FF)] cursor-pointer",
-        shape.input
+        colorFieldShellClassName,
+        "cursor-pointer justify-center px-3 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-[color:var(--focus-ring,#6B97FF)]"
       )}
     >
       <PipetteIcon size={16} strokeWidth={1.5} />
@@ -1723,9 +1712,6 @@ const ColorPicker = forwardRef<HTMLDivElement, ColorPickerProps>(
           <AlphaSlider
             a={hsv.a}
             solidColor={solidColorString}
-            solidR={solidR}
-            solidG={solidG}
-            solidB={solidB}
             onChange={(a) => updateHsv({ a })}
           />
         </div>
@@ -1899,7 +1885,9 @@ function ColorInputsRow({
 function ChannelTooltip({ label, children }: { label: string; children: ReactNode }) {
   return (
     <Tooltip content={label} delay={300}>
-      <div>{children}</div>
+      <div className="relative inline-flex w-full min-w-0 align-middle [&_>_*]:w-full">
+        {children}
+      </div>
     </Tooltip>
   );
 }

@@ -1,0 +1,12 @@
+{
+  "name": "lao-cli",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "lao": "./lao.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.62.0"
+  }
+}

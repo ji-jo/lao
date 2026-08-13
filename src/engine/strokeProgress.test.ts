@@ -4,8 +4,15 @@ import {
   clipFadeOpacity,
   strokeAtTime,
   strokeDurationMs,
+  textContentAtTime,
+  textProgressAtTime,
   truncateStrokePoints,
+  truncateTextByProgress,
+  typewriterDurationMs,
+  retimeStrokePoints,
+  strokeWithClipPoints,
 } from "@/engine/strokeProgress";
+import type { TextElement } from "@/model/types";
 
 function pts(...ts: number[]): StrokePoint[] {
   return ts.map((t, i) => ({ x: i, y: 0, pressure: 0.5, t }));
@@ -22,6 +29,31 @@ function stroke(partial: Partial<Stroke> & { points: StrokePoint[] }): Stroke {
     ...partial,
   };
 }
+
+describe("retimeStrokePoints", () => {
+  test("assigns monotonic t along length", () => {
+    const pts = [
+      { x: 0, y: 0, pressure: 1, t: 0 },
+      { x: 100, y: 0, pressure: 1, t: 0 },
+    ];
+    const out = retimeStrokePoints(pts, 200);
+    expect(out[0].t).toBe(0);
+    expect(out[1].t).toBe(200);
+  });
+});
+
+describe("strokeWithClipPoints", () => {
+  test("drops bezierNodes for partial clip slice", () => {
+    const s = stroke({
+      points: pts(0, 50, 100),
+      bezierNodes: [{ x: 0, y: 0 }, { x: 2, y: 0 }],
+    });
+    const partial = truncateStrokePoints(s.points, 50);
+    const out = strokeWithClipPoints(s, partial);
+    expect(out.bezierNodes).toBeUndefined();
+    expect(out.points).toEqual(partial);
+  });
+});
 
 describe("truncateStrokePoints", () => {
   test("keeps points up to localT", () => {
@@ -99,5 +131,55 @@ describe("clipFadeOpacity", () => {
       },
     });
     expect(clipFadeOpacity(s, 10_000, 12)).toBe(0);
+  });
+});
+
+describe("textProgressAtTime / truncateTextByProgress", () => {
+  const sample: TextElement = {
+    id: "t1",
+    text: "Hello",
+    x: 0,
+    y: 0,
+    fontFamily: "Inter",
+    size: 24,
+    color: "#fff",
+    clip: { startMs: 100, durationMs: 400 },
+  };
+
+  test("hidden before clip", () => {
+    expect(textProgressAtTime(sample, 50)).toBeNull();
+    expect(textContentAtTime(sample, 50)).toBeNull();
+  });
+
+  test("partial during clip", () => {
+    const p = textProgressAtTime(sample, 300);
+    expect(p).toBeGreaterThan(0);
+    expect(p!).toBeLessThan(1);
+    expect(truncateTextByProgress("Hello", 0.4)).toBe("He");
+    expect(textContentAtTime(sample, 300)).toBe(
+      truncateTextByProgress("Hello", p!),
+    );
+  });
+
+  test("full after clip", () => {
+    expect(textProgressAtTime(sample, 600)).toBe(1);
+    expect(textContentAtTime(sample, 600)).toBe("Hello");
+  });
+
+  test("typewriterSpeed reveals by characters per second", () => {
+    const typed: TextElement = { ...sample, typewriterSpeed: 10 };
+    // 100ms into clip → 1 char
+    expect(textContentAtTime(typed, 200)).toBe("H");
+    // 250ms → 3 chars
+    expect(textContentAtTime(typed, 350)).toBe("Hel");
+    // speed 0 → instant full
+    expect(textContentAtTime({ ...sample, typewriterSpeed: 0 }, 150)).toBe(
+      "Hello",
+    );
+  });
+
+  test("typewriterDurationMs scales with length and speed", () => {
+    expect(typewriterDurationMs("Hi", 10)).toBe(200);
+    expect(typewriterDurationMs("", 10)).toBe(80);
   });
 });

@@ -2,28 +2,39 @@ import { useEffect, useMemo, useState } from "react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabItem } from "@/components/ui/tabs";
 import { SliderComfortable } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
 import { GradientHoverButton } from "@/components/ui/gradient-hover-button";
 import { useProject } from "@/state/project";
 import { paintProjectFrame } from "@/engine/paintFrame";
 import { paintBackground } from "@/engine/background";
+import { clipFadeOpacity, strokeAtTime } from "@/engine/strokeProgress";
 import { exportProject, downloadBlob, type ExportFormat } from "@/export/exportProject";
+import { analyzeProjectExport } from "@/export/code/capabilities";
+import { emitProjectSvg, type SvgPlayMode } from "@/export/code/emitSvg";
+import { emitProjectReact, emitProjectReactFiles } from "@/export/code/emitReact";
+import { emitProjectSceneJson, buildLaoScene } from "@/export/code/sceneJson";
+import { renderSceneToSvg } from "@/export/code/sceneRender";
+import type { Project } from "@/model/types";
 import { PAPER } from "@/components/chrome/paper-tokens";
 import { cn } from "@/lib/utils";
+import { toastCopied, toastError, toastExported } from "@/lib/laoToast";
 
 /**
- * Export modal — Paper `1CQ-0`.
- *
- * Only three properties survive here, per D: **Video Type**, **Quality**, **fps**.
- * Aspect ratio, Resolution, the transparent-background switch and the APNG
- * format were removed — Paper's design has none of them, and output size now
- * derives from the canvas aspect × Quality instead.
- *
- * The fps scrubber is the same `SliderComfortable variant="scrubber"` the
- * background panel's `BgLabeledScrubber` uses (elastic drag, `#40608E` fill,
- * 24px `#252525` track), and it seeds from the canvas fps.
+ * Export modal — Paper `1CQ-0`, plus code/alpha formats (SVG, React, JSON, WebM alpha).
  */
 
 type Quality = "low" | "mid" | "high";
+type DialogExportFormat = ExportFormat | "svg" | "tsx" | "json";
+
+const ALPHA_FORMATS = new Set<DialogExportFormat>([
+  "webm",
+  "gif",
+  "apng",
+  "png",
+  "svg",
+  "tsx",
+  "json",
+]);
 
 /** long edge per quality — the short edge follows the canvas aspect */
 const QUALITY_LONG_EDGE: Record<Quality, number> = {
@@ -33,17 +44,25 @@ const QUALITY_LONG_EDGE: Record<Quality, number> = {
 };
 
 /** rough bytes-per-pixel-per-frame, used only for the "MB max" estimate */
-const BPP: Record<ExportFormat, number> = {
+const BPP: Record<DialogExportFormat, number> = {
   mp4: 0.12,
   webm: 0.08,
   gif: 1 / 18,
   apng: 0.2,
+  png: 0.4,
+  svg: 0,
+  tsx: 0,
+  json: 0,
 };
 
-const VIDEO_TYPES: { id: ExportFormat; label: string }[] = [
+const EXPORT_TYPES: { id: DialogExportFormat; label: string }[] = [
   { id: "mp4", label: "MP4" },
   { id: "webm", label: "WebM" },
   { id: "gif", label: "GIF" },
+  { id: "png", label: "PNG" },
+  { id: "svg", label: "SVG" },
+  { id: "tsx", label: "React" },
+  { id: "json", label: "JSON" },
 ];
 
 const QUALITIES: { id: Quality; label: string }[] = [
@@ -51,6 +70,47 @@ const QUALITIES: { id: Quality; label: string }[] = [
   { id: "mid", label: "Mid" },
   { id: "high", label: "High" },
 ];
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatLabel(format: DialogExportFormat, animated: boolean): string {
+  if (format === "tsx") return animated ? "React player + JSON" : "React + JSON (static)";
+  if (format === "json") return animated ? "lao-scene JSON" : "lao-scene JSON (static)";
+  return animated ? "animated SVG" : "static SVG";
+}
+
+/**
+ * Animatron at frame 0 is often blank (draw-on + fade-in). Prefer the current
+ * playhead when it already has ink; otherwise sample the end hold so the
+ * export dialog preview isn't an empty grey box.
+ */
+function previewFrameForExport(project: Project, frameIndex: number): number {
+  const last = Math.max(0, project.frameCount - 1);
+  if ((project.workflow ?? "animatron") !== "animatron") {
+    return Math.min(Math.max(0, frameIndex), last);
+  }
+  const fps = Math.max(project.fps, 1);
+  const timeMs = (frameIndex / fps) * 1000;
+  for (const layer of project.layers) {
+    if (!layer.visible) continue;
+    const cel = layer.frames.find((f) => f);
+    if (!cel) continue;
+    for (const s of cel.strokes) {
+      const pts = strokeAtTime(s, timeMs);
+      if (pts && pts.length > 2 && clipFadeOpacity(s, timeMs, fps) > 0.2) {
+        return Math.min(Math.max(0, frameIndex), last);
+      }
+    }
+    if (cel.texts?.length || cel.images?.length) {
+      return Math.min(Math.max(0, frameIndex), last);
+    }
+  }
+  return last;
+}
 
 /** Paper: 12px/16px Geist Light at 60% — the section captions. */
 function FieldLabel({ children }: { children: string }) {
@@ -129,11 +189,19 @@ export function ExportDialog({
 }) {
   const project = useProject((s) => s.project);
   const frameIndex = useProject((s) => s.frameIndex);
-  const [format, setFormat] = useState<ExportFormat>("mp4");
+  const [format, setFormat] = useState<DialogExportFormat>("mp4");
   const [quality, setQuality] = useState<Quality>("mid");
   const [fps, setFps] = useState(project.fps);
+  const [transparent, setTransparent] = useState(false);
+  const [codeAnimated, setCodeAnimated] = useState(true);
+  const [playMode, setPlayMode] = useState<SvgPlayMode>("auto");
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const isCodeExport = format === "svg" || format === "tsx" || format === "json";
+  const isStillExport = format === "png";
+  const isSequenceExport = !isCodeExport && !isStillExport;
+  const showAlphaToggle = format !== "apng";
+  const exportCaps = useMemo(() => analyzeProjectExport(project), [project]);
   /**
    * Callback ref, not `useRef`: `DialogContent` defers mounting its panel via
    * internal state, so a plain ref is still null the one time an
@@ -159,22 +227,108 @@ export function ExportDialog({
   }, [quality, project.width, project.height]);
 
   const durationSec = project.frameCount / Math.max(fps, 1);
-  const approxMb = Math.max(
-    1,
-    Math.round((dims.w * dims.h * project.frameCount * BPP[format]) / (1024 * 1024)),
+  const codeOpts = useMemo(
+    () => ({
+      transparent,
+      animated: codeAnimated,
+      frame: codeAnimated ? undefined : frameIndex,
+      playMode,
+    }),
+    [transparent, codeAnimated, frameIndex, playMode],
   );
+  const codeBytes = useMemo(() => {
+    if (!isCodeExport) return 0;
+    const scene = buildLaoScene(project, codeOpts);
+    if (format === "json") return new TextEncoder().encode(JSON.stringify(scene)).length;
+    if (format === "svg") return new TextEncoder().encode(renderSceneToSvg(scene)).length;
+    const files = emitProjectReactFiles(project, codeOpts);
+    return new TextEncoder().encode(files.tsx).length + new TextEncoder().encode(files.json).length;
+  }, [isCodeExport, format, project, codeOpts]);
+  const previewFrame = useMemo(
+    () => previewFrameForExport(project, frameIndex),
+    [project, frameIndex],
+  );
+  const approxMb = isCodeExport
+    ? 0
+    : isStillExport
+      ? Math.max(
+          1,
+          Math.round((dims.w * dims.h * BPP.png) / (1024 * 1024)),
+        )
+      : Math.max(
+          1,
+          Math.round((dims.w * dims.h * project.frameCount * BPP[format]) / (1024 * 1024)),
+        );
+
+  function handleFormat(next: DialogExportFormat) {
+    if (next === "mp4") {
+      setFormat("mp4");
+      setTransparent(false);
+      return;
+    }
+    const leavingMp4 = format === "mp4";
+    setFormat(next);
+    if (leavingMp4 && ALPHA_FORMATS.has(next)) setTransparent(true);
+  }
+
+  function handleTransparent() {
+    if (format === "mp4" && !transparent) {
+      setFormat("webm");
+      setTransparent(true);
+      return;
+    }
+    setTransparent((v) => !v);
+  }
+
+  function emitCode(): string {
+    if (format === "tsx") return emitProjectReact(project, codeOpts);
+    if (format === "json") return emitProjectSceneJson(project, codeOpts);
+    return emitProjectSvg(project, codeOpts);
+  }
+
+  async function copyCode() {
+    try {
+      if (format === "png") {
+        const blob = await exportProject(project, "png", undefined, {
+          width: dims.w,
+          height: dims.h,
+          transparent,
+          frame: previewFrame,
+        });
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+        toastCopied("PNG copied");
+        return;
+      }
+      const code = emitCode();
+      await navigator.clipboard.writeText(code);
+      toastCopied(
+        format === "tsx"
+          ? "React player copied"
+          : format === "json"
+            ? "Scene JSON copied"
+            : "SVG code copied",
+      );
+    } catch (err) {
+      toastError("Couldn’t copy", err);
+    }
+  }
 
   /** live preview of the current frame, painted with the export pipeline */
   useEffect(() => {
     if (!open || !previewEl) return;
     const ctx = previewEl.getContext("2d");
     if (!ctx) return;
+    const frame = previewFrameForExport(project, frameIndex);
     previewEl.width = project.width;
     previewEl.height = project.height;
-    ctx.clearRect(0, 0, previewEl.width, previewEl.height);
-    paintBackground(ctx, project);
-    paintProjectFrame(ctx, project, frameIndex, { clear: false });
-  }, [open, previewEl, project, frameIndex]);
+    try {
+      ctx.clearRect(0, 0, previewEl.width, previewEl.height);
+      if (!transparent) paintBackground(ctx, project);
+      paintProjectFrame(ctx, project, frame, { clear: false });
+    } catch (err) {
+      console.error("[export preview]", err);
+    }
+  }, [open, previewEl, project, frameIndex, transparent]);
 
   async function run() {
     if (progress !== null) return;
@@ -182,6 +336,38 @@ export function ExportDialog({
     setProgress(0);
     const prev = project;
     try {
+      if (isCodeExport) {
+        setProgress(0.5);
+        const name = project.name || "animation";
+        if (format === "tsx") {
+          const files = emitProjectReactFiles(project, codeOpts);
+          downloadBlob(new Blob([files.json], { type: "application/json" }), files.jsonFileName);
+          await new Promise((r) => setTimeout(r, 80));
+          downloadBlob(new Blob([files.tsx], { type: "text/plain;charset=utf-8" }), files.tsxFileName);
+          toastExported("tsx+json", name);
+        } else {
+          const code = emitCode();
+          const ext = format === "json" ? "json" : "svg";
+          const type = format === "json" ? "application/json" : "image/svg+xml;charset=utf-8";
+          downloadBlob(new Blob([code], { type }), `${name}.${ext}`);
+          toastExported(ext, name);
+        }
+        setProgress(1);
+        return;
+      }
+
+      if (format === "png") {
+        const blob = await exportProject(project, "png", setProgress, {
+          width: dims.w,
+          height: dims.h,
+          transparent,
+          frame: previewFrame,
+        });
+        downloadBlob(blob, `${project.name || "animation"}.png`);
+        toastExported("png", project.name || "animation");
+        return;
+      }
+
       // fps override only — NEVER width/height: strokes are stored in canvas
       // coordinates, so resizing the project crops the drawing (the 4:3 cat
       // bug). Output size goes through ExportOptions and is scaled uniformly.
@@ -190,11 +376,18 @@ export function ExportDialog({
         useProject.getState().project,
         format,
         setProgress,
-        { width: dims.w, height: dims.h },
+        {
+          width: dims.w,
+          height: dims.h,
+          transparent,
+        },
       );
       downloadBlob(blob, `${project.name || "animation"}.${format}`);
+      toastExported(format, project.name || "animation");
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      toastError("Export failed", err);
     } finally {
       useProject.setState({ project: prev });
       setProgress(null);
@@ -266,40 +459,101 @@ export function ExportDialog({
           </GradientHoverButton>
         </div>
 
-        {/* Video Type + Quality */}
+        {/* Export Type + Quality */}
         <div className="flex items-start gap-4 self-stretch">
           <div className="flex flex-1 flex-col items-start gap-3">
-            <FieldLabel>Video Type</FieldLabel>
+            <FieldLabel>Export Type</FieldLabel>
             <PaperTabs
-              label="Video Type"
+              label="Export Type"
               value={format}
-              options={VIDEO_TYPES}
-              onChange={setFormat}
+              options={EXPORT_TYPES}
+              onChange={handleFormat}
             />
           </div>
-          <div className="flex flex-1 flex-col items-start gap-3">
-            <FieldLabel>Quality</FieldLabel>
-            <PaperTabs
-              label="Quality"
-              value={quality}
-              options={QUALITIES}
-              onChange={setQuality}
-            />
-          </div>
+          {!isCodeExport && (
+            <div className="flex flex-1 flex-col items-start gap-3">
+              <FieldLabel>Quality</FieldLabel>
+              <PaperTabs
+                label="Quality"
+                value={quality}
+                options={QUALITIES}
+                onChange={setQuality}
+              />
+            </div>
+          )}
         </div>
 
-        {/* Video Preview — the current frame through the export pipeline */}
+        {/* Video Preview — keep above code options so it isn't clipped off-screen */}
         <div className="flex flex-col items-start gap-3 self-stretch">
-          <FieldLabel>Video Preview</FieldLabel>
+          <FieldLabel>{isStillExport ? "Frame Preview" : "Video Preview"}</FieldLabel>
           <div
-            className="h-[278px] shrink-0 self-stretch overflow-clip rounded-lg"
-            style={{ backgroundColor: PAPER.pillHover }}
+            className="relative h-[200px] shrink-0 self-stretch overflow-clip rounded-lg"
+            style={
+              transparent
+                ? {
+                    backgroundImage:
+                      "repeating-conic-gradient(#3a3a3a 0% 25%, #252525 0% 50%)",
+                    backgroundSize: "16px 16px",
+                  }
+                : { backgroundColor: PAPER.pillHover }
+            }
           >
-            <canvas ref={setPreviewEl} className="h-full w-full object-contain" />
+            <canvas
+              ref={setPreviewEl}
+              className="absolute inset-0 h-full w-full object-contain"
+              aria-label="Export preview"
+            />
           </div>
         </div>
 
-        {/* Export fps — same scrubber as the background panel, seeded from the canvas */}
+        {(showAlphaToggle || isCodeExport) && (
+          <div className="flex w-full flex-col items-stretch gap-3 self-stretch">
+            <div className="flex w-full items-center justify-between gap-3">
+              <Switch
+                label="Transparent background"
+                checked={transparent}
+                onToggle={handleTransparent}
+              />
+            </div>
+            {isCodeExport && (
+            <div className="flex w-full items-center justify-between gap-3">
+              <Switch
+                label="SVG animation"
+                checked={codeAnimated}
+                onToggle={() => setCodeAnimated((v) => !v)}
+              />
+            </div>
+            )}
+            {format === "tsx" && codeAnimated && (
+              <div className="flex flex-col items-start gap-3 self-stretch">
+                <FieldLabel>Playback</FieldLabel>
+                <PaperTabs
+                  label="Playback"
+                  value={playMode}
+                  options={[
+                    { id: "auto" as const, label: "Autoplay" },
+                    { id: "scroll" as const, label: "Scroll" },
+                  ]}
+                  onChange={setPlayMode}
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        {isCodeExport && exportCaps.warnings.length > 0 && (
+          <div
+            className="flex max-h-24 flex-col gap-1 self-stretch overflow-y-auto rounded-lg p-2 text-[10px] leading-3 text-white/70"
+            style={{ backgroundColor: PAPER.pillHover, fontFamily: PAPER.fontMono }}
+          >
+            {exportCaps.warnings.map((w) => (
+              <span key={`${w.kind}-${w.id}`}>{w.message}</span>
+            ))}
+          </div>
+        )}
+
+        {/* Export fps — sequence formats only */}
+        {isSequenceExport && (
         <div className="flex items-center gap-4 self-stretch">
           <span
             className="shrink-0 text-xs leading-4 text-white opacity-60"
@@ -321,6 +575,7 @@ export function ExportDialog({
             />
           </div>
         </div>
+        )}
 
         {/* output readout */}
         <div
@@ -336,7 +591,11 @@ export function ExportDialog({
           >
             {busy
               ? `Rendering… ${Math.round((progress ?? 0) * 100)}%`
-              : `Output: ${durationSec.toFixed(1)}s | ${project.frameCount} frames @ ${fps}fps | ${approxMb} MB max`}
+              : isCodeExport
+                ? `Output: ${formatLabel(format, codeAnimated)} · ${formatBytes(codeBytes)}`
+                : isStillExport
+                  ? `Output: composite PNG · ${dims.w}×${dims.h} · frame ${previewFrame + 1}${transparent ? " · alpha" : ""}`
+                  : `Output: ${durationSec.toFixed(1)}s | ${project.frameCount} frames @ ${fps}fps | ${approxMb} MB max${transparent ? " · alpha" : ""}`}
           </span>
         </div>
 
@@ -344,7 +603,7 @@ export function ExportDialog({
           <div className="self-stretch text-center text-xs text-red-400">{error}</div>
         )}
 
-        {/* Close / Save — hover is bg/border-gradient only, see GradientHoverButton */}
+        {/* Close / Copy / Save */}
         <div className="flex items-start gap-1 self-end">
           <GradientHoverButton
             onClick={() => onOpenChange(false)}
@@ -362,6 +621,28 @@ export function ExportDialog({
               </span>
             )}
           </GradientHoverButton>
+          {(isCodeExport || isStillExport) && (
+            <GradientHoverButton
+              disabled={busy}
+              onClick={() => void copyCode()}
+              background={PAPER.pillHover}
+              hoverBackground={PAPER.secondaryBtnHoverGradient}
+              hoverBorderColor={PAPER.outline}
+              className={cn(
+                "flex h-9 w-[120px] shrink-0 items-center justify-center rounded-full py-1.5",
+                !busy && "cursor-pointer",
+              )}
+            >
+              {(hovered) => (
+                <span
+                  className="text-sm leading-[18px] tracking-[0.02em] transition-colors"
+                  style={{ color: hovered ? "#FFFFFF" : PAPER.text, fontFamily: PAPER.fontSans }}
+                >
+                  Copy
+                </span>
+              )}
+            </GradientHoverButton>
+          )}
           <GradientHoverButton
             disabled={busy}
             onClick={() => void run()}

@@ -1,12 +1,16 @@
 import {
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
 } from "react";
+import { Check, ChevronDown, X } from "reicon-react";
 import { ColorPickerPopover } from "@/components/ui/color-picker";
+import { PATH_MAKER_ENABLED } from "@/lib/mvpFlags";
 import {
   BG_PICKER_WIDTH,
   backgroundToPickerValue,
@@ -17,29 +21,55 @@ import { SPRING_SWAP } from "@/lib/ease";
 import { SliderComfortable } from "@/components/ui/slider";
 import { Tabs, TabsList, TabItem } from "@/components/ui/tabs";
 import { PaperDockBar, PaperDockSep } from "@/components/chrome/PaperDockPrimitives";
+import { PathMakerGlyph, PathMakerPanel } from "@/components/chrome/PathMakerPanel";
 import { GooeyConjoined } from "@/components/motion/gooey-conjoined";
 import { Tooltip } from "@/components/motion/tooltip";
 import { PAPER } from "@/components/chrome/paper-tokens";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  ensureFontLoaded,
-  listGoogleFontFamilies,
-  LOCAL_TEXT_FONTS,
-  textFontStack,
-} from "@/lib/google-fonts";
-import { useTools, isShapeTool } from "@/state/tools";
+import { useTools, isShapeTool, DRAW_BRUSHES, brushesForKind, type DrawBrushKind, type P5BrushId } from "@/state/tools";
 import { useProject } from "@/state/project";
 import { useSelection } from "@/state/selection";
 import {
   resolveCel,
   type Background,
   type BoilSettings,
+  type BrushKind,
   type ImageFilterId,
   type ShaderPresetId,
   type Stroke,
+  type TextAlign,
+  type TextBlendMode,
+  type TextCase,
+  type TextPathSettings,
+  type TextShadow,
+  type StrokeClip,
 } from "@/model/types";
 import { resolveBoil } from "@/engine/boil";
+import { typewriterDurationMs } from "@/engine/strokeProgress";
+import { measureTextBox } from "@/engine/textGeometry";
+import { rebuildRectPointsFromStroke } from "@/engine/shapeGeometry";
+import { shapeBoxFromStroke } from "@/components/stage/leaferBridge";
 import { cn } from "@/lib/utils";
+import {
+  AdvancedPanel,
+  AlignPanel,
+  BackgroundPanel,
+  OpacityPanel,
+  PathPanel,
+  PositionPanel,
+  ShadowPanel,
+  SizePanel,
+  TextDockChips,
+  TextFontPanel,
+  TypewriterPanel,
+  type TextDockAnchor,
+  type TextPanelKind,
+} from "@/components/chrome/TextSettingsChrome";
+import {
+  BrushToolIcon,
+  PenToolIcon,
+  MarkerToolIcon,
+} from "@/assets/icons/tools/tool-icons";
 import { ShaderBackground } from "@/components/ShaderBackground";
 import { ImageFilterBackground } from "@/components/ImageFilterBackground";
 import { loadBackgroundImage } from "@/engine/background";
@@ -256,6 +286,97 @@ function DimGooeyNeck() {
  * Linked = three pills end-to-end with Paper gooey necks.
  * Unlinked = separate pills with an 8px gap.
  */
+function DimNumberInput({
+  label,
+  value,
+  onCommit,
+  min = 64,
+  max = 8192,
+  disabled,
+  widthClass = "w-24 shrink-0",
+  step = 1,
+  shiftStep = 10,
+}: {
+  label: string;
+  value: number;
+  onCommit: (n: number) => void;
+  min?: number;
+  max?: number;
+  disabled?: boolean;
+  widthClass?: string;
+  step?: number;
+  shiftStep?: number;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const focused = draft !== null;
+  const display = focused ? draft : String(Math.round(value));
+
+  function commit(raw: string) {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) {
+      setDraft(null);
+      return;
+    }
+    onCommit(Math.min(max, Math.max(min, Math.round(n))));
+    setDraft(null);
+  }
+
+  function nudge(dir: 1 | -1, shift: boolean) {
+    const base = shift ? shiftStep : step;
+    const cur = Number(draft ?? display);
+    const baseVal = Number.isFinite(cur) ? cur : value;
+    const next = Math.min(max, Math.max(min, Math.round(baseVal + dir * base)));
+    setDraft(String(next));
+    onCommit(next);
+  }
+
+  const fieldClass =
+    "absolute inset-0 w-full bg-transparent px-2 text-right text-sm leading-[18px] text-white outline-none disabled:opacity-40 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+
+  return (
+    <label
+      className={cn("relative h-6 overflow-clip rounded-lg", widthClass)}
+      style={{ backgroundColor: DIM_SURFACE, fontFamily: PAPER.fontMono }}
+    >
+      <span className="pointer-events-none absolute left-2 top-[3px] text-sm leading-[18px] text-white opacity-[0.23]">
+        {label}
+      </span>
+      <input
+        type="text"
+        inputMode="numeric"
+        aria-label={label}
+        value={display}
+        disabled={disabled}
+        onFocus={() => setDraft(String(Math.round(value)))}
+        onChange={(e) => {
+          // Allow empty / partial while typing — never clamp mid-keystroke.
+          const next = e.target.value.replace(/[^\d]/g, "");
+          setDraft(next);
+        }}
+        onBlur={() => {
+          if (draft === null) return;
+          commit(draft);
+        }}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === "Enter") {
+            e.preventDefault();
+            (e.currentTarget as HTMLInputElement).blur();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            setDraft(null);
+            (e.currentTarget as HTMLInputElement).blur();
+          } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+            e.preventDefault();
+            nudge(e.key === "ArrowUp" ? 1 : -1, e.shiftKey);
+          }
+        }}
+        className={fieldClass}
+      />
+    </label>
+  );
+}
+
 function GooeyLinkedDims({
   linked,
   width,
@@ -263,6 +384,9 @@ function GooeyLinkedDims({
   onWidth,
   onHeight,
   onToggleLink,
+  min = 64,
+  max = 8192,
+  fullWidth = false,
 }: {
   linked: boolean;
   width: number;
@@ -270,47 +394,33 @@ function GooeyLinkedDims({
   onWidth: (n: number) => void;
   onHeight: (n: number) => void;
   onToggleLink: () => void;
+  min?: number;
+  max?: number;
+  /** Stretch W · link · H across the parent row. */
+  fullWidth?: boolean;
 }) {
-  // Paper: 8px inset left/right on the value fields.
-  const fieldClass =
-    "absolute inset-0 w-full bg-transparent px-2 text-right text-sm leading-[18px] text-white outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+  const fieldWidth = fullWidth ? "min-w-0 flex-1" : "w-24 shrink-0";
 
   const widthField = (
-    <label
-      className="relative h-6 w-24 shrink-0 overflow-clip rounded-lg"
-      style={{ backgroundColor: DIM_SURFACE, fontFamily: PAPER.fontMono }}
-    >
-      <span className="pointer-events-none absolute left-2 top-[3px] text-sm leading-[18px] text-white opacity-[0.23]">
-        W
-      </span>
-      <input
-        type="number"
-        aria-label="Width"
-        value={width}
-        onChange={(e) => onWidth(Number(e.target.value) || 64)}
-        onKeyDown={(e) => e.stopPropagation()}
-        className={fieldClass}
-      />
-    </label>
+    <DimNumberInput
+      label="W"
+      value={width}
+      onCommit={onWidth}
+      min={min}
+      max={max}
+      widthClass={fieldWidth}
+    />
   );
 
   const heightField = (
-    <label
-      className="relative h-6 w-24 shrink-0 overflow-clip rounded-lg"
-      style={{ backgroundColor: DIM_SURFACE, fontFamily: PAPER.fontMono }}
-    >
-      <span className="pointer-events-none absolute left-2 top-[3px] text-sm leading-[18px] text-white opacity-[0.23]">
-        H
-      </span>
-      <input
-        type="number"
-        aria-label="Height"
-        value={height}
-        onChange={(e) => onHeight(Number(e.target.value) || 64)}
-        onKeyDown={(e) => e.stopPropagation()}
-        className={fieldClass}
-      />
-    </label>
+    <DimNumberInput
+      label="H"
+      value={height}
+      onCommit={onHeight}
+      min={min}
+      max={max}
+      widthClass={fieldWidth}
+    />
   );
 
   const linkBtn = (
@@ -328,7 +438,12 @@ function GooeyLinkedDims({
 
   if (linked) {
     return (
-      <div className="inline-flex items-center">
+      <div
+        className={cn(
+          "items-center",
+          fullWidth ? "flex w-full" : "inline-flex",
+        )}
+      >
         {widthField}
         <DimGooeyNeck />
         {linkBtn}
@@ -339,7 +454,12 @@ function GooeyLinkedDims({
   }
 
   return (
-    <div className="inline-flex items-center gap-2">
+    <div
+      className={cn(
+        "items-center gap-2",
+        fullWidth ? "flex w-full" : "inline-flex",
+      )}
+    >
       {widthField}
       {linkBtn}
       {heightField}
@@ -494,15 +614,30 @@ const BOIL_PROPS: {
   },
 ];
 
+const BRUSH_PACK_ICONS: Record<DrawBrushKind, ReactNode> = {
+  ink: <BrushToolIcon />,
+  pen: <PenToolIcon />,
+  marker: <MarkerToolIcon />,
+};
+
 /** Expanded brush settings — Paper 9XO-0. */
 function BrushExpandedPanel({
   color,
   size,
-  jitterByDefault,
+  wavelength,
+  corners,
+  smoothing,
+  /** Effective Boil On/Off — selection jitter, or default for new strokes. */
+  boilEnabled,
   boil,
   showColor = true,
+  brushKind,
+  onBrushKind,
   onColor,
   onSize,
+  onWavelength,
+  onCorners,
+  onSmoothing,
   onJitter,
   onBoil,
   onBoilCommit,
@@ -510,11 +645,19 @@ function BrushExpandedPanel({
 }: {
   color: string;
   size: number;
-  jitterByDefault: boolean;
+  wavelength: number;
+  corners: number;
+  smoothing: number;
+  boilEnabled: boolean;
   boil: BoilSettings;
   showColor?: boolean;
+  brushKind?: DrawBrushKind;
+  onBrushKind?: (b: DrawBrushKind) => void;
   onColor: (c: string) => void;
   onSize: (n: number) => void;
+  onWavelength: (n: number) => void;
+  onCorners: (n: number) => void;
+  onSmoothing: (n: number) => void;
   onJitter: (v: boolean) => void;
   onBoil: (patch: Partial<BoilSettings>) => void;
   onBoilCommit?: (patch: Partial<BoilSettings>) => void;
@@ -537,24 +680,52 @@ function BrushExpandedPanel({
       className="flex w-[293px] flex-col items-stretch gap-4 overflow-visible rounded-xl p-4 antialiased"
       style={{ fontFamily: PAPER.fontSans }}
     >
-      <div className="flex items-start gap-4">
+      {brushKind && onBrushKind ? (
+        <div className="flex w-full gap-1 rounded-lg bg-[#252525] p-1">
+          {DRAW_BRUSHES.map((b) => {
+            const selected = brushKind === b.id;
+            return (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => onBrushKind(b.id)}
+                className={cn(
+                  "flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md text-xs outline-none transition-colors",
+                  selected
+                    ? "bg-[#313131] text-white"
+                    : "text-white/60 hover:bg-[#2a2a2a] hover:text-white",
+                )}
+                aria-pressed={selected}
+                aria-label={b.label}
+              >
+                <span className="grid size-3.5 place-items-center opacity-80 [&_svg]:size-full">
+                  {BRUSH_PACK_ICONS[b.id]}
+                </span>
+                {b.label}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+
+      <div className="flex items-center gap-4">
         {showColor && (
-          <div className="flex items-start gap-2">
+          <div className="flex items-center gap-2">
             <ColorPickerPopover
               value={color}
               onValueChange={onColor}
               triggerShowValue={false}
-              triggerClassName="!size-6 !min-h-6 !min-w-6 !justify-center !gap-0 !rounded-lg !border-0 !bg-transparent !p-0 !outline-none"
+              triggerClassName="!size-8 !min-h-8 !min-w-8 !justify-center !gap-0 !rounded-lg !border-0 !bg-transparent !p-0 !outline-none"
             />
             <label
-              className="flex h-6 items-center gap-1 overflow-clip rounded-[7px] border-[0.4px] border-solid px-[5px] py-[3px]"
+              className="flex h-8 items-center gap-1.5 overflow-clip rounded-lg border-[0.4px] border-solid px-2 py-1"
               style={{
                 backgroundColor: PAPER.surfaceAlt,
                 borderColor: PAPER.borderHairline,
                 fontFamily: PAPER.fontMono,
               }}
             >
-              <span className="w-3 shrink-0 text-center text-[10px] leading-3 text-white opacity-20">
+              <span className="w-3.5 shrink-0 text-center text-xs leading-4 text-white opacity-20">
                 #
               </span>
               <input
@@ -569,7 +740,7 @@ function BrushExpandedPanel({
                 }}
                 spellCheck={false}
                 aria-label="Hex color"
-                className="w-11 shrink-0 bg-transparent text-[10px] leading-3 text-white outline-none"
+                className="w-14 shrink-0 bg-transparent text-xs leading-4 text-white outline-none"
               />
             </label>
           </div>
@@ -588,6 +759,39 @@ function BrushExpandedPanel({
         />
       </div>
 
+      <div className="flex w-full flex-col gap-2">
+        <BgLabeledScrubber
+          label="Wavelength"
+          value={wavelength}
+          onChange={onWavelength}
+          min={2}
+          max={48}
+          step={1}
+          formatValue={(v) => `${Math.round(v)}px`}
+          labelClassName="!w-[76px]"
+        />
+        <BgLabeledScrubber
+          label="Corners"
+          value={corners}
+          onChange={onCorners}
+          min={0}
+          max={100}
+          step={1}
+          formatValue={(v) => `${Math.round(v)}%`}
+          labelClassName="!w-[76px]"
+        />
+        <BgLabeledScrubber
+          label="Smoothing"
+          value={smoothing}
+          onChange={onSmoothing}
+          min={0}
+          max={20}
+          step={1}
+          formatValue={(v) => `${Math.round(v)}`}
+          labelClassName="!w-[76px]"
+        />
+      </div>
+
       <div
         className="flex w-full items-center justify-between gap-4 rounded-lg p-2"
         style={{ backgroundColor: "#252525" }}
@@ -603,14 +807,14 @@ function BrushExpandedPanel({
         </div>
         <OnOffTabs
           id="Boil lines"
-          checked={jitterByDefault}
+          checked={boilEnabled}
           onChange={(next) => {
-            if (next !== jitterByDefault) onJitter(next);
+            if (next !== boilEnabled) onJitter(next);
           }}
         />
       </div>
 
-      {jitterByDefault && (
+      {boilEnabled && (
         <div className="flex w-full flex-col gap-2">
           {BOIL_PROPS.map((p) => (
             <BgLabeledScrubber
@@ -632,232 +836,6 @@ function BrushExpandedPanel({
   );
 }
 
-const FONT_LIST_LIMIT = 80;
-
-/** Expanded text settings — Paper 9ZQ-0 (color + size + searchable fonts). */
-function TextExpandedPanel({
-  color,
-  size,
-  letterSpacing,
-  fontFamily,
-  onColor,
-  onSize,
-  onLetterSpacing,
-  onFontFamily,
-}: {
-  color: string;
-  size: number;
-  letterSpacing: number;
-  fontFamily: string;
-  onColor: (c: string) => void;
-  onSize: (n: number) => void;
-  onLetterSpacing: (n: number) => void;
-  onFontFamily: (f: string) => void;
-}) {
-  const [hex, setHex] = useState(() => hexDigits(color));
-  const [query, setQuery] = useState("");
-  const [googleFamilies, setGoogleFamilies] = useState<string[]>([]);
-
-  useEffect(() => {
-    setHex(hexDigits(color));
-  }, [color]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void listGoogleFontFamilies().then((families) => {
-      if (!cancelled) setGoogleFamilies(families);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    ensureFontLoaded(fontFamily);
-  }, [fontFamily]);
-
-  const fonts = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const local = LOCAL_TEXT_FONTS.map((f) => f.id);
-    const google = googleFamilies.filter((f) => !local.includes(f));
-    const all = [...local, ...google];
-    const filtered = q
-      ? all.filter((f) => f.toLowerCase().includes(q))
-      : all;
-    // Keep the active face visible even if it's past the popularity cutoff.
-    const limited = filtered.slice(0, FONT_LIST_LIMIT);
-    if (
-      fontFamily &&
-      !limited.includes(fontFamily) &&
-      all.includes(fontFamily)
-    ) {
-      return [fontFamily, ...limited.filter((f) => f !== fontFamily)];
-    }
-    return limited;
-  }, [googleFamilies, query, fontFamily]);
-
-  // Prefetch CSS for the rows currently on screen so previews paint.
-  useEffect(() => {
-    for (const id of fonts.slice(0, 24)) ensureFontLoaded(id);
-  }, [fonts]);
-
-  function commitHex(raw: string) {
-    const digits = hexDigits(raw);
-    setHex(digits);
-    if (/^[0-9A-F]{6}$/.test(digits)) onColor(`#${digits}`);
-  }
-
-  return (
-    <div
-      className="flex w-[293px] flex-col items-start gap-3 overflow-clip rounded-xl p-4 antialiased"
-      style={{ fontFamily: PAPER.fontSans }}
-    >
-      <div className="flex items-start gap-4">
-        <div className="flex items-start gap-2">
-          <ColorPickerPopover
-            value={color}
-            onValueChange={onColor}
-            triggerShowValue={false}
-            triggerClassName="!size-6 !min-h-6 !min-w-6 !justify-center !gap-0 !rounded-lg !border-0 !bg-transparent !p-0 !outline-none"
-          />
-          <label
-            className="flex h-6 items-center gap-1 overflow-clip rounded-[7px] border-[0.4px] border-solid px-[5px] py-[3px]"
-            style={{
-              backgroundColor: PAPER.surfaceAlt,
-              borderColor: PAPER.borderHairline,
-              fontFamily: PAPER.fontMono,
-            }}
-          >
-            <span className="w-3 shrink-0 text-center text-[10px] leading-3 text-white opacity-20">
-              #
-            </span>
-            <input
-              value={hex}
-              onChange={(e) =>
-                setHex(e.target.value.replace(/[^0-9a-fA-F]/g, "").slice(0, 8))
-              }
-              onBlur={() => commitHex(hex)}
-              onKeyDown={(e) => {
-                e.stopPropagation();
-                if (e.key === "Enter") commitHex(hex);
-              }}
-              spellCheck={false}
-              aria-label="Hex color"
-              className="w-11 shrink-0 bg-transparent text-[10px] leading-3 text-white outline-none"
-            />
-          </label>
-        </div>
-
-        <SliderComfortable
-          label="Size"
-          variant="scrubber"
-          value={size}
-          onChange={onSize}
-          min={1}
-          max={128}
-          step={1}
-          fillColor="#40608E"
-          className="!h-6 !w-[141px] !rounded-lg !border-0 !bg-[#252525] [&_span]:!font-mono [&_span]:!text-sm"
-        />
-
-        <SliderComfortable
-          label="Spacing"
-          variant="scrubber"
-          value={letterSpacing}
-          onChange={onLetterSpacing}
-          min={-10}
-          max={50}
-          step={1}
-          fillColor="#40608E"
-          className="!h-6 !w-[141px] !rounded-lg !border-0 !bg-[#252525] [&_span]:!font-mono [&_span]:!text-sm mt-2"
-        />
-      </div>
-
-      <div className="flex w-full flex-col gap-2 self-stretch">
-        <label
-          className="flex h-8 w-full items-center gap-2 rounded-lg bg-[#252525] px-2"
-        >
-          <FontSearchGlyph />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.stopPropagation()}
-            placeholder="Search fonts…"
-            aria-label="Search fonts"
-            spellCheck={false}
-            className="min-w-0 flex-1 bg-transparent text-sm leading-[18px] text-white outline-none placeholder:text-white/35"
-          />
-        </label>
-
-        <div
-          role="listbox"
-          aria-label="Fonts"
-          className="w-full rounded-lg bg-[#252525]"
-          onWheel={(e) => e.stopPropagation()}
-        >
-          <ScrollArea className="h-[200px] w-full">
-            <div className="flex flex-col gap-0.5 p-1">
-              {fonts.length === 0 ? (
-                <div className="px-2 py-3 text-center text-xs text-white/40">
-                  No fonts match
-                </div>
-              ) : (
-                fonts.map((id) => {
-                  const active = id === fontFamily;
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      role="option"
-                      aria-selected={active}
-                      onMouseEnter={() => ensureFontLoaded(id)}
-                      onClick={() => onFontFamily(id)}
-                      className={cn(
-                        "flex h-8 w-full shrink-0 items-center rounded-md px-2 text-left text-sm outline-none transition-colors",
-                        active
-                          ? "bg-[#313131] text-white"
-                          : "text-white/70 hover:bg-[#2a2a2a] hover:text-white",
-                      )}
-                      style={{ fontFamily: textFontStack(id) }}
-                    >
-                      <span className="min-w-0 flex-1 truncate">{id}</span>
-                      {active ? <FontCheckGlyph /> : null}
-                    </button>
-                  );
-                })
-              )}
-            </div>
-          </ScrollArea>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function FontSearchGlyph() {
-  return (
-    <svg width={14} height={14} viewBox="0 0 16 16" aria-hidden className="shrink-0 opacity-40">
-      <circle cx="6.5" cy="6.5" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.25" />
-      <path d="M10 10l3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function FontCheckGlyph() {
-  return (
-    <svg width={14} height={14} viewBox="0 0 16 16" aria-hidden className="shrink-0 opacity-80">
-      <path
-        d="M3.5 8.5l3 3 6-7"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
 function BrushSizeGlyph() {
   return (
     <svg width={18} height={18} viewBox="-0.75 -0.75 6.75 6.75" style={{ opacity: 0.7 }}>
@@ -871,20 +849,516 @@ function BrushSizeGlyph() {
   );
 }
 
-function FontChevron() {
-  return (
-    <svg width={12} height={12} viewBox="0 0 4.5 4.5" aria-hidden>
-      <g transform="scale(1.333)">
-        <polyline
-          points="2.859 1.219 1.687 2.391 0.516 1.219"
+/** Stroke ribbon preview for brush pack presets / dock trigger. */
+function BrushStrokePreview({
+  brush,
+  className,
+}: {
+  brush: P5BrushId;
+  className?: string;
+}) {
+  const softId = `lao-ab-${useId().replace(/:/g, "")}`;
+  const wave =
+    "M6 20 C24 10, 40 28, 58 16 C76 6, 92 26, 110 14 C128 4, 144 22, 154 16";
+  if (brush === "dots") {
+    return (
+      <svg viewBox="0 0 160 36" className={cn("h-6 w-full", className)} aria-hidden>
+        {Array.from({ length: 28 }, (_, i) => {
+          const col = i % 7;
+          const row = Math.floor(i / 7);
+          return (
+            <circle
+              key={i}
+              cx={16 + col * 21 + (row % 2) * 10.5}
+              cy={8 + row * 7}
+              r={2.35}
+              fill="currentColor"
+              opacity={0.8}
+            />
+          );
+        })}
+      </svg>
+    );
+  }
+  if (brush === "spray") {
+    // Conical spray-paint plume (dense core → sparse soft edges), matches reference.
+    const plume = (() => {
+      const out: { cx: number; cy: number; r: number; o: number }[] = [];
+      let s = 0x9e3779b9;
+      const rnd = () => {
+        s ^= s << 13;
+        s ^= s >>> 17;
+        s ^= s << 5;
+        return (s >>> 0) / 4294967296;
+      };
+      for (let i = 0; i < 220; i++) {
+        const depth = Math.pow(rnd(), 0.55);
+        const g = (rnd() + rnd() + rnd() + rnd() - 2) * 0.5;
+        const cone = 0.1 + depth * 0.9;
+        const across = g * 14 * cone;
+        const edge = Math.min(1, Math.abs(across) / (14 * cone + 0.01));
+        if (rnd() < edge * edge * 0.7) continue;
+        if (rnd() < depth * depth * 0.3) continue;
+        out.push({
+          cx: 8 + depth * 145,
+          cy: 18 + across,
+          r: 0.55 + rnd() * 0.85,
+          o: (0.45 + rnd() * 0.5) * (1 - edge * 0.65) * (1 - depth * 0.3),
+        });
+      }
+      return out;
+    })();
+    return (
+      <svg viewBox="0 0 160 36" className={cn("h-6 w-full", className)} aria-hidden>
+        {plume.map((p, i) => (
+          <circle
+            key={i}
+            cx={p.cx}
+            cy={p.cy}
+            r={p.r}
+            fill="currentColor"
+            opacity={p.o}
+          />
+        ))}
+      </svg>
+    );
+  }
+  if (brush === "airbrush") {
+    // Soft neon wave: bright core + wide Gaussian glow (matches pack / reference).
+    return (
+      <svg
+        viewBox="0 0 160 36"
+        className={cn("h-6 w-full overflow-visible", className)}
+        aria-hidden
+      >
+        <defs>
+          <filter
+            id={`${softId}-soft`}
+            x="-30%"
+            y="-120%"
+            width="160%"
+            height="340%"
+            colorInterpolationFilters="sRGB"
+          >
+            <feGaussianBlur stdDeviation="3.2" />
+          </filter>
+          <filter
+            id={`${softId}-halo`}
+            x="-40%"
+            y="-160%"
+            width="180%"
+            height="420%"
+            colorInterpolationFilters="sRGB"
+          >
+            <feGaussianBlur stdDeviation="5.2" />
+          </filter>
+        </defs>
+        <path
+          d={wave}
           fill="none"
-          stroke={PAPER.icon}
-          strokeWidth="0.5"
+          stroke="currentColor"
+          strokeWidth={14}
           strokeLinecap="round"
-          strokeLinejoin="round"
+          opacity={0.22}
+          filter={`url(#${softId}-halo)`}
         />
-      </g>
+        <path
+          d={wave}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={8}
+          strokeLinecap="round"
+          opacity={0.38}
+          filter={`url(#${softId}-soft)`}
+        />
+        <path
+          d={wave}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={3.6}
+          strokeLinecap="round"
+          opacity={0.7}
+          filter={`url(#${softId}-soft)`}
+        />
+        <path
+          d={wave}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.6}
+          strokeLinecap="round"
+          opacity={1}
+        />
+      </svg>
+    );
+  }
+  if (brush === "brush") {
+    return (
+      <svg viewBox="0 0 160 36" className={cn("h-6 w-full", className)} aria-hidden>
+        {[0, 1, 2, 3, 4].map((i) => (
+          <path
+            key={i}
+            d={`M8 ${10 + i * 3} C40 ${8 + i * 3}, 90 ${14 + i * 3}, 152 ${10 + i * 3}`}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2 - i * 0.2}
+            opacity={0.85 - i * 0.1}
+            strokeLinecap="round"
+          />
+        ))}
+      </svg>
+    );
+  }
+  if (brush === "stipple") {
+    // Dense irregular flecks (organic cluster — not a lattice)
+    return (
+      <svg viewBox="0 0 160 36" className={cn("h-6 w-full", className)} aria-hidden>
+        {[
+          [10, 14, 1.1], [14, 20, 0.7], [18, 12, 1.4], [22, 22, 0.9],
+          [26, 16, 1.2], [30, 10, 0.6], [34, 24, 1.0], [38, 15, 1.5],
+          [42, 21, 0.8], [46, 11, 1.1], [50, 18, 0.7], [54, 25, 1.3],
+          [58, 13, 0.9], [62, 20, 1.2], [66, 9, 0.6], [70, 23, 1.0],
+          [74, 16, 1.4], [78, 12, 0.8], [82, 24, 1.1], [86, 17, 0.7],
+          [90, 10, 1.3], [94, 21, 0.9], [98, 15, 1.2], [102, 26, 0.6],
+          [106, 12, 1.0], [110, 19, 1.4], [114, 14, 0.8], [118, 22, 1.1],
+          [122, 11, 0.7], [126, 18, 1.3], [130, 24, 0.9], [134, 13, 1.0],
+          [138, 20, 1.2], [142, 16, 0.6], [146, 23, 1.1], [150, 12, 0.8],
+          [16, 17, 0.5], [40, 18, 0.5], [64, 17, 0.55], [88, 19, 0.5],
+          [112, 16, 0.55], [136, 18, 0.5], [28, 13, 0.45], [52, 22, 0.5],
+          [76, 14, 0.45], [100, 20, 0.5], [124, 15, 0.45], [48, 14, 0.6],
+        ].map(([cx, cy, r], i) => (
+          <circle
+            key={i}
+            cx={cx}
+            cy={cy}
+            r={r}
+            fill="currentColor"
+            opacity={0.45 + (i % 5) * 0.1}
+          />
+        ))}
+      </svg>
+    );
+  }
+  if (brush === "sketchy") {
+    // Dry tapered stroke + grit — matches charcoal/sketch reference
+    return (
+      <svg viewBox="0 0 160 36" className={cn("h-6 w-full", className)} aria-hidden>
+        <path
+          d="M8 22 C28 10, 50 8, 78 16 C106 24, 130 26, 152 14 L148 20 C128 30, 106 28, 78 22 C52 16, 30 16, 12 26 Z"
+          fill="currentColor"
+          opacity={0.5}
+        />
+        <path
+          d="M10 20 C32 12, 54 10, 80 17 C108 24, 132 24, 150 15"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={3.2}
+          strokeLinecap="round"
+          opacity={0.85}
+        />
+        {[0, 1, 2].map((i) => (
+          <path
+            key={i}
+            d={`M14 ${17 + i} C40 ${11 + i}, 70 ${15 + i * 0.5}, 100 ${20 - i * 0.4} S140 ${18 + i}, 148 ${16 + i * 0.5}`}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.1 - i * 0.15}
+            opacity={0.45 - i * 0.08}
+            strokeLinecap="round"
+          />
+        ))}
+        {[
+          [20, 14], [36, 24], [52, 12], [70, 26], [88, 11], [106, 25],
+          [122, 13], [138, 22], [44, 18], [96, 20], [28, 20], [116, 18],
+        ].map(([cx, cy], i) => (
+          <circle
+            key={`d${i}`}
+            cx={cx}
+            cy={cy}
+            r={0.7 + (i % 3) * 0.35}
+            fill="currentColor"
+            opacity={0.35}
+          />
+        ))}
+      </svg>
+    );
+  }
+  if (brush === "parallel") {
+    return (
+      <svg viewBox="0 0 160 36" className={cn("h-6 w-full", className)} aria-hidden>
+        <path d="M8 13 C50 6, 100 20, 152 12" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" />
+        <path d="M8 23 C50 16, 100 30, 152 22" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (brush === "outline") {
+    return (
+      <svg viewBox="0 0 160 36" className={cn("h-6 w-full", className)} aria-hidden>
+        <path
+          d="M10 18 C40 6, 80 30, 150 14 L150 24 C80 36, 40 14, 10 26 Z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.8}
+        />
+      </svg>
+    );
+  }
+  if (brush === "dashed") {
+    return (
+      <svg viewBox="0 0 160 36" className={cn("h-6 w-full", className)} aria-hidden>
+        <path
+          d={wave}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={4}
+          strokeLinecap="butt"
+          strokeDasharray="14 10"
+        />
+      </svg>
+    );
+  }
+  if (brush === "dotted") {
+    return (
+      <svg viewBox="0 0 160 36" className={cn("h-6 w-full", className)} aria-hidden>
+        {Array.from({ length: 12 }, (_, i) => (
+          <circle key={i} cx={12 + i * 12} cy={18} r={3.2} fill="currentColor" />
+        ))}
+      </svg>
+    );
+  }
+  if (brush === "chalk") {
+    // Porous chalk band made of flecks — denser so it reads at list size
+    return (
+      <svg viewBox="0 0 160 36" className={cn("h-6 w-full", className)} aria-hidden>
+        {Array.from({ length: 220 }, (_, i) => {
+          const t = i / 219;
+          const cx = 6 + t * 148 + ((i * 17) % 7) - 3;
+          const cy =
+            18 +
+            Math.sin(t * Math.PI * 2.2) * 5.5 +
+            (((i * 13) % 11) - 5) * 0.95;
+          const edge = Math.abs((((i * 7) % 11) - 5) / 5);
+          return (
+            <rect
+              key={i}
+              x={cx}
+              y={cy}
+              width={1.6 + (i % 4) * 0.65}
+              height={0.9 + (i % 3) * 0.5}
+              rx={0.2}
+              fill="currentColor"
+              opacity={0.4 + (1 - edge) * 0.55 + (i % 5) * 0.04}
+              transform={`rotate(${(i * 37) % 80 - 40} ${cx} ${cy})`}
+            />
+          );
+        })}
+      </svg>
+    );
+  }
+  if (brush === "ink") {
+    return (
+      <svg viewBox="0 0 160 36" className={cn("h-6 w-full", className)} aria-hidden>
+        {/* translucent bleed */}
+        <path
+          d="M4 22 C26 6, 48 32, 72 12 C96 -2, 120 30, 156 10 L156 30 C120 42, 96 14, 72 28 C48 42, 26 18, 4 34 Z"
+          fill="currentColor"
+          opacity={0.18}
+        />
+        <path
+          d="M8 20 C30 8, 50 28, 74 14 C98 2, 122 26, 152 12 L152 26 C122 36, 98 12, 74 22 C50 34, 30 16, 8 28 Z"
+          fill="currentColor"
+          opacity={0.28}
+        />
+        {/* opaque core flow */}
+        <path
+          d="M14 19 C36 11, 54 23, 76 15 C100 7, 124 21, 148 13"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={4.2}
+          strokeLinecap="round"
+          opacity={0.95}
+        />
+        <path
+          d="M18 18 C40 12, 58 22, 80 16 C104 10, 126 20, 146 14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.6}
+          strokeLinecap="round"
+          opacity={0.55}
+        />
+        {/* wet edge flecks */}
+        <ellipse cx={42} cy={12} rx={3.2} ry={1.6} fill="currentColor" opacity={0.35} transform="rotate(-18 42 12)" />
+        <ellipse cx={98} cy={24} rx={2.8} ry={1.4} fill="currentColor" opacity={0.3} transform="rotate(22 98 24)" />
+        <circle cx={128} cy={11} r={1.8} fill="currentColor" opacity={0.45} />
+      </svg>
+    );
+  }
+  if (brush === "calligraphy") {
+    return (
+      <svg viewBox="0 0 160 36" className={cn("h-6 w-full", className)} aria-hidden>
+        <path
+          d="M10 26
+             C 28 8, 42 4, 58 14
+             C 72 22, 82 30, 98 24
+             C 116 16, 130 6, 150 10
+             L 146 18
+             C 130 14, 118 22, 102 28
+             C 84 36, 72 28, 58 20
+             C 44 12, 32 14, 16 30 Z"
+          fill="currentColor"
+        />
+      </svg>
+    );
+  }
+  if (brush === "rough") {
+    return (
+      <svg viewBox="0 0 160 36" className={cn("h-6 w-full", className)} aria-hidden>
+        <path
+          d="M6 18 L14 10 L22 26 L30 8 L40 28 L50 12 L60 24 L72 8 L84 30 L96 10 L108 26 L120 12 L132 28 L144 10 L154 18"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2.2}
+          strokeLinejoin="miter"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+  if (brush === "pixel") {
+    return (
+      <svg viewBox="0 0 160 36" className={cn("h-6 w-full", className)} aria-hidden>
+        {[
+          [8, 16], [16, 16], [24, 8], [32, 8], [40, 16], [48, 24], [56, 24],
+          [64, 16], [72, 8], [80, 8], [88, 16], [96, 24], [104, 24], [112, 16],
+          [120, 8], [128, 8], [136, 16], [144, 16],
+        ].map(([x, y], i) => (
+          <rect key={i} x={x} y={y} width={7} height={7} fill="currentColor" />
+        ))}
+      </svg>
+    );
+  }
+  if (brush === "halftone") {
+    return (
+      <svg viewBox="0 0 160 36" className={cn("h-6 w-full", className)} aria-hidden>
+        {Array.from({ length: 14 }, (_, i) => (
+          <circle
+            key={i}
+            cx={10 + i * 11}
+            cy={18}
+            r={1.2 + Math.sin(i * 0.7) * 2.2 + 1.5}
+            fill="currentColor"
+            opacity={0.8}
+          />
+        ))}
+      </svg>
+    );
+  }
+  if (brush === "squares") {
+    return (
+      <svg viewBox="0 0 160 36" className={cn("h-6 w-full", className)} aria-hidden>
+        {Array.from({ length: 11 }, (_, i) => (
+          <rect
+            key={i}
+            x={10 + i * 13}
+            y={12 + (i % 2) * 4}
+            width={7}
+            height={7}
+            fill="currentColor"
+            opacity={0.85}
+          />
+        ))}
+      </svg>
+    );
+  }
+  // smooth (default)
+  return (
+    <svg viewBox="0 0 160 36" className={cn("h-6 w-full", className)} aria-hidden>
+      <path d={wave} fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" />
     </svg>
+  );
+}
+
+/** Vertical Brushes menu — presets for the active Ink / Pen / Marker mode. */
+function BrushPackPanel({
+  kind,
+  active,
+  onPick,
+  onClose,
+}: {
+  kind: DrawBrushKind;
+  active: P5BrushId;
+  onPick: (brush: P5BrushId) => void;
+  onClose: () => void;
+}) {
+  const brushes = brushesForKind(kind);
+  const section =
+    kind === "ink" ? "Ink brushes" : kind === "pen" ? "Pen brushes" : "Marker brushes";
+
+  return (
+    <div
+      className="flex w-[240px] flex-col overflow-hidden rounded-2xl antialiased"
+      style={{
+        backgroundColor: PAPER.surface,
+        fontFamily: PAPER.fontSans,
+        boxShadow: "0 12px 40px rgba(0,0,0,0.45)",
+      }}
+      role="listbox"
+      aria-label={`${section}`}
+    >
+      <div className="flex items-center justify-between gap-3 px-3.5 pb-2.5 pt-3">
+        <span className="text-sm font-medium leading-none text-white">Brushes</span>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close brushes"
+          className="grid size-6 place-items-center rounded-md text-white/50 outline-none transition-colors hover:bg-[#313131] hover:text-white"
+        >
+          <X size={14} />
+        </button>
+      </div>
+      <div className="mx-3 h-px bg-white/10" aria-hidden />
+      <ScrollArea cap className="max-h-[min(420px,calc(100dvh-240px))] w-full">
+        <div className="flex flex-col gap-1 p-2">
+          <span className="px-2 pb-1 pt-1 text-[11px] font-medium tracking-wide text-white/55">
+            {section}
+          </span>
+          {brushes.map((b) => {
+            const selected = active === b.id;
+            return (
+              <button
+                key={b.id}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                onClick={() => onPick(b.id)}
+                className={cn(
+                  "flex flex-col gap-1.5 rounded-xl px-2.5 py-2 text-left outline-none transition-colors",
+                  selected
+                    ? "bg-[rgba(61,79,204,0.55)] text-white"
+                    : "text-white/90 hover:bg-white/[0.06]",
+                )}
+              >
+                <span className="flex items-center gap-1.5 text-[13px] leading-none">
+                  {selected ? (
+                    <Check size={14} className="shrink-0 text-white" strokeWidth={2.5} />
+                  ) : (
+                    <span className="inline-block w-3.5 shrink-0" aria-hidden />
+                  )}
+                  {b.label}
+                </span>
+                <span
+                  className={cn(
+                    "pl-5",
+                    selected ? "text-white/90" : "text-white/70",
+                  )}
+                >
+                  <BrushStrokePreview brush={b.id} />
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </ScrollArea>
+    </div>
   );
 }
 
@@ -970,7 +1444,7 @@ function ShaderExpandedPanel({
               value={c}
               onValueChange={(v) => setColorAt(i, v)}
               triggerShowValue={false}
-              triggerClassName="!size-6 !min-h-6 !min-w-6 !justify-center !gap-0 !rounded-lg !border !border-white/15 !bg-transparent !p-0 !outline-none"
+              triggerClassName="!size-8 !min-h-8 !min-w-8 !justify-center !gap-0 !rounded-lg !border !border-white/15 !bg-transparent !p-0 !outline-none"
             />
           ),
         )}
@@ -980,7 +1454,7 @@ function ShaderExpandedPanel({
             value={background.namedColors?.[key] ?? defaults.namedColors[key]}
             onValueChange={(v) => setNamedColor(key, v)}
             triggerShowValue={false}
-            triggerClassName="!size-6 !min-h-6 !min-w-6 !justify-center !gap-0 !rounded-lg !border !border-white/15 !bg-transparent !p-0 !outline-none"
+            triggerClassName="!size-8 !min-h-8 !min-w-8 !justify-center !gap-0 !rounded-lg !border !border-white/15 !bg-transparent !p-0 !outline-none"
           />
         ))}
       </div>
@@ -1281,6 +1755,10 @@ function ImagePositionCard({
 const BG_SCRUBBER_CLASS =
   "!h-6 !w-full !rounded-lg !border-0 !bg-[#252525] [&_span]:!font-mono [&_span]:!text-sm";
 
+/** Elastic scrubber without track fill — radius / squircle panels. */
+const ELASTIC_SCRUBBER_CLASS =
+  "!h-6 !w-full !rounded-lg !border-0 !bg-transparent !px-2 [&_span]:!font-mono [&_span]:!text-sm";
+
 /** Shared Type chips / Zoom track — same left nudge + width end-to-end. */
 const IMAGE_CONTROL_TRACK = "-ml-9 w-[calc(100%+36px)]";
 
@@ -1550,9 +2028,11 @@ function ImageExpandedPanel({
 function BackgroundExpandedPanel({
   background,
   onSet,
+  onClose,
 }: {
   background: Background | undefined;
   onSet: (bg: Background) => void;
+  onClose?: () => void;
 }) {
   const tab = bgKindTab(background);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -1670,8 +2150,20 @@ function BackgroundExpandedPanel({
         aria-hidden
       />
       <div className="flex w-full flex-col items-stretch gap-3">
-        <div className="w-fit text-xs font-light leading-4 text-white opacity-60">
-          Canvas Background
+        <div className="flex w-full items-center justify-between gap-3">
+          <div className="w-fit text-xs font-light leading-4 text-white opacity-60">
+            Canvas Background
+          </div>
+          {onClose ? (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close background"
+              className="grid size-6 place-items-center rounded-md text-white/50 outline-none transition-colors hover:bg-[#313131] hover:text-white"
+            >
+              <X size={14} />
+            </button>
+          ) : null}
         </div>
         <Tabs
           value={tab}
@@ -1712,10 +2204,12 @@ function CanvasExpandedPanel({
   width,
   height,
   onSet,
+  onClose,
 }: {
   width: number;
   height: number;
   onSet: (patch: { width?: number; height?: number }) => void;
+  onClose?: () => void;
 }) {
   const [linked, setLinked] = useState(true);
   const aspect = aspectLabel(width, height);
@@ -1760,6 +2254,20 @@ function CanvasExpandedPanel({
       className="flex w-max flex-col items-start gap-4 overflow-visible rounded-xl p-4 antialiased"
       style={{ fontFamily: PAPER.fontSans }}
     >
+      <div className="flex w-full items-center justify-between gap-3">
+        <span className="text-sm font-medium leading-none text-white">{aspect}</span>
+        {onClose ? (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close canvas settings"
+            className="grid size-6 place-items-center rounded-md text-white/50 outline-none transition-colors hover:bg-[#313131] hover:text-white"
+          >
+            <X size={14} />
+          </button>
+        ) : null}
+      </div>
+
       <div className="flex flex-col items-start gap-3">
         <div
           className="w-fit text-xs font-light leading-4 text-white opacity-60"
@@ -1821,19 +2329,364 @@ function CanvasExpandedPanel({
   );
 }
 
-type PanelKind = "brush" | "canvas" | "text" | "background";
+/** Corner radius + optional squircle smoothing (elastic scrubbers, no track bg). */
+function RadiusPanel({
+  radius,
+  squircle,
+  smoothing,
+  onRadius,
+  onSquircle,
+  onSmoothing,
+}: {
+  radius: number;
+  squircle: boolean;
+  smoothing: number;
+  onRadius: (v: number) => void;
+  onSquircle: (v: boolean) => void;
+  onSmoothing: (v: number) => void;
+}) {
+  return (
+    <div
+      className="flex w-[240px] flex-col gap-3 rounded-xl p-4 antialiased"
+      style={{ backgroundColor: PAPER.surface, fontFamily: PAPER.fontSans }}
+    >
+      <div className="text-xs font-light leading-4 text-white/60">Corner</div>
+      <SliderComfortable
+        label="Radius"
+        variant="scrubber"
+        value={radius}
+        onChange={onRadius}
+        min={0}
+        max={120}
+        step={1}
+        fillColor="#40608E"
+        formatValue={(v) => `${Math.round(v)}`}
+        className={ELASTIC_SCRUBBER_CLASS}
+      />
+      <div
+        className="flex w-full items-center justify-between gap-4 rounded-lg p-2"
+        style={{ backgroundColor: "#252525" }}
+      >
+        <span className="text-xs leading-4 text-white/80">Squircle</span>
+        <OnOffTabs
+          id="Squircle"
+          checked={squircle}
+          onChange={onSquircle}
+        />
+      </div>
+      {squircle ? (
+        <SliderComfortable
+          label="Smooth"
+          variant="scrubber"
+          value={Math.round(smoothing * 100)}
+          onChange={(v) => onSmoothing(v / 100)}
+          min={0}
+          max={100}
+          step={1}
+          fillColor="#40608E"
+          formatValue={(v) => `${Math.round(v)}%`}
+          className={ELASTIC_SCRUBBER_CLASS}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+type PanelKind =
+  | "brush"
+  | "brushes"
+  | "canvas"
+  | "background"
+  | "radius"
+  | "image"
+  | "motionPath"
+  | TextPanelKind;
+
+function CanvasDimField({
+  label,
+  value,
+  onChange,
+  disabled,
+  widthClass = "w-24 shrink-0",
+  step = 1,
+  shiftStep = 10,
+  altStep = 0.1,
+  min,
+  max,
+}: {
+  label: string;
+  value: number;
+  onChange: (n: number) => void;
+  disabled?: boolean;
+  widthClass?: string;
+  /** ArrowUp/Down step (default 1). */
+  step?: number;
+  /** Shift+Arrow step (default 10). */
+  shiftStep?: number;
+  /** Alt+Arrow step (default 0.1). */
+  altStep?: number;
+  min?: number;
+  max?: number;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const focused = draft !== null;
+  const display = focused
+    ? draft
+    : String(Number.isFinite(value) ? Math.round(value * 100) / 100 : 0);
+
+  function commit(raw: string) {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) {
+      setDraft(null);
+      return;
+    }
+    let next = n;
+    if (min != null) next = Math.max(min, next);
+    if (max != null) next = Math.min(max, next);
+    onChange(next);
+    setDraft(null);
+  }
+
+  function nudge(dir: 1 | -1, shift: boolean, alt: boolean) {
+    const base = alt ? altStep : shift ? shiftStep : step;
+    const cur = Number(draft ?? display);
+    const baseVal = Number.isFinite(cur) ? cur : value;
+    let next = baseVal + dir * base;
+    if (min != null) next = Math.max(min, next);
+    if (max != null) next = Math.min(max, next);
+    next = Math.round(next * 1000) / 1000;
+    setDraft(String(next));
+    onChange(next);
+  }
+
+  const fieldClass =
+    "absolute inset-0 w-full bg-transparent px-2 text-right text-sm leading-[18px] text-white outline-none disabled:opacity-40 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+
+  return (
+    <label
+      className={cn("relative h-6 overflow-clip rounded-lg", widthClass)}
+      style={{ backgroundColor: DIM_SURFACE, fontFamily: PAPER.fontMono }}
+    >
+      <span className="pointer-events-none absolute left-2 top-[3px] text-sm leading-[18px] text-white opacity-[0.23]">
+        {label}
+      </span>
+      <input
+        type="text"
+        inputMode="decimal"
+        aria-label={label}
+        value={display}
+        disabled={disabled}
+        onFocus={() =>
+          setDraft(
+            String(Number.isFinite(value) ? Math.round(value * 100) / 100 : 0),
+          )
+        }
+        onChange={(e) => {
+          // Allow empty, minus, and one decimal while typing.
+          const next = e.target.value.replace(/[^\d.-]/g, "");
+          setDraft(next);
+        }}
+        onBlur={() => {
+          if (draft === null) return;
+          commit(draft);
+        }}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === "Enter") {
+            e.preventDefault();
+            (e.currentTarget as HTMLInputElement).blur();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            setDraft(null);
+            (e.currentTarget as HTMLInputElement).blur();
+          } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+            e.preventDefault();
+            nudge(e.key === "ArrowUp" ? 1 : -1, e.shiftKey, e.altKey);
+          }
+        }}
+        className={fieldClass}
+      />
+    </label>
+  );
+}
+
+function CanvasImageExpandedPanel({
+  image,
+  onPatch,
+  onClose,
+}: {
+  image: import("@/model/types").ImageElement;
+  onPatch: (patch: Partial<import("@/model/types").ImageElement>) => void;
+  onClose: () => void;
+}) {
+  const rotDeg = Math.round(((image.rotation ?? 0) * 180) / Math.PI);
+  const opacityPct = Math.round((image.opacity ?? 1) * 100);
+  const linked = image.lockAspect !== false;
+  const imageRef = useRef(image);
+  imageRef.current = image;
+  const onPatchRef = useRef(onPatch);
+  onPatchRef.current = onPatch;
+
+  function setWidth(next: number) {
+    const w = Math.max(1, next);
+    if (linked && image.naturalWidth > 0) {
+      const ratio = image.naturalHeight / image.naturalWidth;
+      onPatch({ w, h: Math.max(1, w * ratio) });
+    } else onPatch({ w });
+  }
+
+  function setHeight(next: number) {
+    const h = Math.max(1, next);
+    if (linked && image.naturalHeight > 0) {
+      const ratio = image.naturalWidth / image.naturalHeight;
+      onPatch({ h, w: Math.max(1, h * ratio) });
+    } else onPatch({ h });
+  }
+
+  // Arrow keys nudge position while the Image panel is open (capture so
+  // timeline ←/→ frame-step doesn't win). Inputs handle their own arrows.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+      const step = e.shiftKey ? 10 : 1;
+      let dx = 0;
+      let dy = 0;
+      if (e.key === "ArrowLeft") dx = -step;
+      else if (e.key === "ArrowRight") dx = step;
+      else if (e.key === "ArrowUp") dy = -step;
+      else if (e.key === "ArrowDown") dy = step;
+      else return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      const im = imageRef.current;
+      onPatchRef.current({ x: im.x + dx, y: im.y + dy });
+    }
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, []);
+
+  return (
+    <div
+      className="flex w-[280px] flex-col items-start gap-3 overflow-visible rounded-xl p-4 antialiased"
+      style={{ fontFamily: PAPER.fontSans }}
+      onKeyDown={(e) => e.stopPropagation()}
+    >
+      <div className="flex w-full items-center justify-between gap-3">
+        <span className="text-sm font-medium leading-none text-white">Image</span>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close image settings"
+          className="grid size-6 place-items-center rounded-md text-white/50 outline-none transition-colors hover:bg-[#313131] hover:text-white"
+        >
+          <X size={14} />
+        </button>
+      </div>
+
+      <div className="flex w-full flex-col items-start gap-2">
+        <div className="w-fit text-xs font-light leading-4 text-white opacity-60">
+          Position
+        </div>
+        <div className="flex w-full items-center gap-2">
+          <CanvasDimField
+            label="X"
+            value={image.x}
+            widthClass="min-w-0 flex-1"
+            onChange={(n) => onPatch({ x: n })}
+          />
+          <CanvasDimField
+            label="Y"
+            value={image.y}
+            widthClass="min-w-0 flex-1"
+            onChange={(n) => onPatch({ y: n })}
+          />
+        </div>
+      </div>
+
+      <div className="flex w-full flex-col items-start gap-2">
+        <div className="w-fit text-xs font-light leading-4 text-white opacity-60">
+          Size
+        </div>
+        <GooeyLinkedDims
+          fullWidth
+          linked={linked}
+          width={Math.round(image.w)}
+          height={Math.round(image.h)}
+          onWidth={setWidth}
+          onHeight={setHeight}
+          onToggleLink={() => onPatch({ lockAspect: !linked })}
+          min={1}
+        />
+      </div>
+
+      <div className="flex w-full flex-col items-start gap-2">
+        <div className="w-fit text-xs font-light leading-4 text-white opacity-60">
+          Transform
+        </div>
+        <CanvasDimField
+          label="°"
+          value={rotDeg}
+          widthClass="w-full"
+          step={5}
+          shiftStep={15}
+          altStep={1}
+          onChange={(n) => {
+            const snapped = Math.round(n / 5) * 5;
+            onPatch({ rotation: (snapped * Math.PI) / 180 });
+          }}
+        />
+      </div>
+
+      <BgLabeledScrubber
+        label="Opacity"
+        value={opacityPct}
+        onChange={(v) => onPatch({ opacity: v / 100 })}
+        min={0}
+        max={100}
+        step={1}
+        formatValue={(v) => Math.round(v) + "%"}
+      />
+
+      <p className="text-[10px] leading-snug text-white/40">
+        {image.naturalWidth}×{image.naturalHeight}px · artboard clips overflow;
+        dotted bounds when selected.
+      </p>
+    </div>
+  );
+}
 
 /**
  * Paper setting dock (9WZ-0) ↔ expanded settings, joined with gooey melt.
  * Chrome per active tool:
- *   select → aspect + canvas (+ stroke/fill when shapes/lines selected)
+ *   select → aspect + canvas (+ stroke/fill/stroke-size/brush when shapes selected)
  *   ink / pencil / fill → color + brush + aspect + canvas
  *   eraser → brush + aspect + canvas
- *   text → font + color + aspect + canvas (panel 9ZQ-0)
+ *   text → font + aspect + canvas (color lives in font panel)
  *   hand → hidden
- *   shapes → stroke color + fill color
+ *   shapes → stroke color + fill + stroke size + brush pack
  */
-type DockAnchor = "color" | "brush" | "font" | "canvas" | "background";
+type DockAnchor =
+  | "color"
+  | "brush"
+  | "brushes"
+  | "stroke"
+  | "radius"
+  | "canvas"
+  | "background"
+  | "image"
+  | "motionPath"
+  | TextDockAnchor;
 
 export function SettingsDocks() {
   const [open, setOpen] = useState<PanelKind | null>(null);
@@ -1841,9 +2694,24 @@ export function SettingsDocks() {
   const rootRef = useRef<HTMLDivElement>(null);
   const colorAnchorRef = useRef<HTMLButtonElement>(null);
   const brushAnchorRef = useRef<HTMLButtonElement>(null);
+  const strokeAnchorRef = useRef<HTMLButtonElement>(null);
+  const brushesAnchorRef = useRef<HTMLButtonElement>(null);
+  const radiusAnchorRef = useRef<HTMLButtonElement>(null);
   const fontAnchorRef = useRef<HTMLButtonElement>(null);
+  const sizeAnchorRef = useRef<HTMLButtonElement>(null);
+  const alignAnchorRef = useRef<HTMLButtonElement>(null);
+  const advancedAnchorRef = useRef<HTMLButtonElement>(null);
+  const typewriterAnchorRef = useRef<HTMLButtonElement>(null);
+  const pathAnchorRef = useRef<HTMLButtonElement>(null);
+  const shadowAnchorRef = useRef<HTMLButtonElement>(null);
+  const opacityAnchorRef = useRef<HTMLButtonElement>(null);
+  const positionAnchorRef = useRef<HTMLButtonElement>(null);
+  const textBgAnchorRef = useRef<HTMLButtonElement>(null);
   const canvasAnchorRef = useRef<HTMLButtonElement>(null);
   const backgroundAnchorRef = useRef<HTMLButtonElement>(null);
+  const imageAnchorRef = useRef<HTMLButtonElement>(null);
+  const motionPathAnchorRef = useRef<HTMLButtonElement>(null);
+  const measureCtxRef = useRef<CanvasRenderingContext2D | null>(null);
   /** Keep last panel type so exit animation doesn't get `panel={null}` mid-close. */
   const latchedKind = useRef<PanelKind>("brush");
   if (open) latchedKind.current = open;
@@ -1860,40 +2728,135 @@ export function SettingsDocks() {
   const anchorRef =
     dockAnchor === "brush"
       ? brushAnchorRef
-      : dockAnchor === "font"
-        ? fontAnchorRef
-        : dockAnchor === "canvas"
-          ? canvasAnchorRef
-          : dockAnchor === "background"
-            ? backgroundAnchorRef
-            : colorAnchorRef;
+      : dockAnchor === "stroke"
+        ? strokeAnchorRef
+        : dockAnchor === "brushes"
+          ? brushesAnchorRef
+          : dockAnchor === "radius"
+            ? radiusAnchorRef
+          : dockAnchor === "font"
+            ? fontAnchorRef
+            : dockAnchor === "size"
+              ? sizeAnchorRef
+              : dockAnchor === "align"
+                ? alignAnchorRef
+                : dockAnchor === "advanced"
+                  ? advancedAnchorRef
+                  : dockAnchor === "typewriter"
+                    ? typewriterAnchorRef
+                  : dockAnchor === "path"
+                    ? pathAnchorRef
+                    : dockAnchor === "shadow"
+                      ? shadowAnchorRef
+                      : dockAnchor === "opacity"
+                        ? opacityAnchorRef
+                        : dockAnchor === "position"
+                          ? positionAnchorRef
+                          : dockAnchor === "textBg"
+                            ? textBgAnchorRef
+                            : dockAnchor === "canvas"
+                              ? canvasAnchorRef
+                              : dockAnchor === "background"
+                                ? backgroundAnchorRef
+                                : dockAnchor === "image"
+                                  ? imageAnchorRef
+                                  : dockAnchor === "motionPath"
+                                    ? motionPathAnchorRef
+                                  : colorAnchorRef;
 
   const tool = useTools((s) => s.tool);
   const color = useTools((s) => s.color);
   const fillColor = useTools((s) => s.fillColor);
   const size = useTools((s) => s.size);
+  const brushWavelength = useTools((s) => s.brushWavelength);
+  const brushCorners = useTools((s) => s.brushCorners);
+  const brushSmoothing = useTools((s) => s.brushSmoothing);
+  const lastBrushKind = useTools((s) => s.lastBrushKind);
+  const lastP5Brush = useTools((s) => s.lastP5Brush);
+  const lastShapeTool = useTools((s) => s.lastShapeTool);
+  const cornerRadius = useTools((s) => s.cornerRadius);
+  const squircle = useTools((s) => s.squircle);
+  const cornerSmoothing = useTools((s) => s.cornerSmoothing);
   const textSize = useTools((s) => s.textSize);
   const fontFamily = useTools((s) => s.fontFamily);
+  const textBold = useTools((s) => s.textBold);
+  const textItalic = useTools((s) => s.textItalic);
+  const textAlign = useTools((s) => s.textAlign);
   const letterSpacing = useTools((s) => s.letterSpacing);
+  const textUnderline = useTools((s) => s.textUnderline);
+  const textStrikethrough = useTools((s) => s.textStrikethrough);
+  const textCase = useTools((s) => s.textCase);
+  const textOpacity = useTools((s) => s.textOpacity);
+  const textBackgroundColor = useTools((s) => s.textBackgroundColor);
+  const textShadow = useTools((s) => s.textShadow);
+  const textBlendMode = useTools((s) => s.textBlendMode);
+  const textPath = useTools((s) => s.textPath);
+  const textTypewriter = useTools((s) => s.textTypewriter);
+  const textTypewriterSpeed = useTools((s) => s.textTypewriterSpeed);
   const jitterByDefault = useTools((s) => s.jitterByDefault);
   const setColor = useTools((s) => s.setColor);
   const setFillColor = useTools((s) => s.setFillColor);
   const setSize = useTools((s) => s.setSize);
+  const setBrushWavelength = useTools((s) => s.setBrushWavelength);
+  const setBrushCorners = useTools((s) => s.setBrushCorners);
+  const setBrushSmoothing = useTools((s) => s.setBrushSmoothing);
+  const setLastBrushKind = useTools((s) => s.setLastBrushKind);
+  const setLastP5Brush = useTools((s) => s.setLastP5Brush);
+  const setCornerRadius = useTools((s) => s.setCornerRadius);
+  const setSquircle = useTools((s) => s.setSquircle);
+  const setCornerSmoothing = useTools((s) => s.setCornerSmoothing);
   const setTextSize = useTools((s) => s.setTextSize);
   const setLetterSpacing = useTools((s) => s.setLetterSpacing);
   const setFontFamily = useTools((s) => s.setFontFamily);
+  const setTextBold = useTools((s) => s.setTextBold);
+  const setTextItalic = useTools((s) => s.setTextItalic);
+  const setTextAlign = useTools((s) => s.setTextAlign);
+  const setTextUnderline = useTools((s) => s.setTextUnderline);
+  const setTextStrikethrough = useTools((s) => s.setTextStrikethrough);
+  const setTextCase = useTools((s) => s.setTextCase);
+  const setTextOpacity = useTools((s) => s.setTextOpacity);
+  const setTextBackgroundColor = useTools((s) => s.setTextBackgroundColor);
+  const setTextShadow = useTools((s) => s.setTextShadow);
+  const setTextBlendMode = useTools((s) => s.setTextBlendMode);
+  const setTextPath = useTools((s) => s.setTextPath);
+  const setTextTypewriter = useTools((s) => s.setTextTypewriter);
+  const setTextTypewriterSpeed = useTools((s) => s.setTextTypewriterSpeed);
   const toggleJitterByDefault = useTools((s) => s.toggleJitterByDefault);
   const project = useProject((s) => s.project);
   const layerIndex = useProject((s) => s.layerIndex);
   const frameIndex = useProject((s) => s.frameIndex);
+  const clipEasing = useProject((s) => s.clipEasing);
   const setProjectSettings = useProject((s) => s.setProjectSettings);
   const setBoilLive = useProject((s) => s.setBoilLive);
   const updateStrokes = useProject((s) => s.updateStrokes);
+  const updateTextElement = useProject((s) => s.updateTextElement);
+  const updateImageElement = useProject((s) => s.updateImageElement);
+  const removeTextElement = useProject((s) => s.removeTextElement);
+  const reorderTextElement = useProject((s) => s.reorderTextElement);
+  const duplicateTextElement = useProject((s) => s.duplicateTextElement);
+  const setSelection = useSelection((s) => s.set);
   const selIds = useSelection((s) => s.ids);
   const boil = resolveBoil(project.boil);
   const aspect = aspectLabel(project.width, project.height);
 
   const selectedStrokes = useMemo((): Stroke[] => {
+    if (!selIds.length) return [];
+    const idSet = new Set(selIds);
+    const out: Stroke[] = [];
+    const animatron = project.workflow === "animatron";
+    for (const layer of project.layers) {
+      const cel = animatron
+        ? layer.frames.find((f) => f) ?? null
+        : resolveCel(layer, frameIndex);
+      if (!cel) continue;
+      for (const s of cel.strokes) {
+        if (idSet.has(s.id)) out.push(s);
+      }
+    }
+    return out;
+  }, [selIds, project, frameIndex]);
+
+  const selectedTexts = useMemo(() => {
     if (!selIds.length) return [];
     const layer = project.layers[layerIndex];
     if (!layer) return [];
@@ -1901,14 +2864,29 @@ export function SettingsDocks() {
       project.workflow === "animatron"
         ? layer.frames.find((f) => f) ?? null
         : resolveCel(layer, frameIndex);
-    if (!cel) return [];
+    if (!cel?.texts?.length) return [];
     const idSet = new Set(selIds);
-    return cel.strokes.filter((s) => idSet.has(s.id));
+    return cel.texts.filter((t) => idSet.has(t.id));
   }, [selIds, project, layerIndex, frameIndex]);
 
+  const selectedImages = useMemo(() => {
+    if (!selIds.length) return [];
+    const layer = project.layers[layerIndex];
+    if (!layer) return [];
+    const cel =
+      project.workflow === "animatron"
+        ? layer.frames.find((f) => f) ?? null
+        : resolveCel(layer, frameIndex);
+    if (!cel?.images?.length) return [];
+    const idSet = new Set(selIds);
+    return cel.images.filter((im) => idSet.has(im.id));
+  }, [selIds, project, layerIndex, frameIndex]);
+
+  const imageSelectionMode = selectedImages.length > 0;
   const shapesMode = tool === "shapes" || isShapeTool(tool);
   const selectionColorMode =
     (tool === "select" || shapesMode) && selectedStrokes.length > 0;
+  const textSelectionMode = selectedTexts.length > 0;
   const showShapeColors = shapesMode || selectionColorMode;
   const hideDock = tool === "hand";
   const showBrush =
@@ -1917,14 +2895,30 @@ export function SettingsDocks() {
     tool === "marker" ||
     tool === "fill" ||
     tool === "eraser";
+  /** Shape selection / shapes pack — stroke width + brush-type pack. */
+  const showShapeStrokeBrush = showShapeColors;
+  const showCornerControls =
+    showShapeColors &&
+    (tool === "rect" ||
+      (tool === "shapes" && lastShapeTool === "rect") ||
+      selectedStrokes.some((s) => s.shapeKind === "rect"));
+  const displayCornerRadius =
+    selectedStrokes.find((s) => s.shapeKind === "rect")?.cornerRadius ??
+    cornerRadius;
+  const displaySquircle =
+    selectedStrokes.find((s) => s.shapeKind === "rect")?.squircle ?? squircle;
+  const displayCornerSmoothing =
+    selectedStrokes.find((s) => s.shapeKind === "rect")?.cornerSmoothing ??
+    cornerSmoothing;
   const showColor =
     tool === "ink" ||
     tool === "pen" ||
     tool === "marker" ||
     tool === "fill" ||
     tool === "text" ||
+    textSelectionMode ||
     showShapeColors;
-  const showFont = tool === "text";
+  const showFont = tool === "text" || textSelectionMode;
   const showFillColor =
     shapesMode || selectedStrokes.some((s) => s.closed);
   const showCanvas =
@@ -1935,7 +2929,14 @@ export function SettingsDocks() {
     tool === "marker" ||
     tool === "fill" ||
     tool === "eraser" ||
-    tool === "text";
+    tool === "text" ||
+    shapesMode ||
+    textSelectionMode ||
+    imageSelectionMode;
+
+  const boilEnabled = selectedStrokes.length
+    ? selectedStrokes.every((s) => s.jitter)
+    : jitterByDefault;
 
   function applyStrokeColor(next: string) {
     setColor(next);
@@ -1945,6 +2946,7 @@ export function SettingsDocks() {
         { color: next },
       );
     }
+    patchSelectedTexts({ color: next });
   }
 
   function applyFillColor(next: string) {
@@ -1953,10 +2955,293 @@ export function SettingsDocks() {
     if (closedIds.length) updateStrokes(closedIds, { fillColor: next });
   }
 
+  function applyStrokeSize(next: number) {
+    const n = Math.max(1, Math.round(next));
+    setSize(n);
+    if (selectedStrokes.length) {
+      updateStrokes(
+        selectedStrokes.map((s) => s.id),
+        { size: n },
+      );
+    }
+  }
+
+  function applyBrushKind(next: DrawBrushKind) {
+    setLastBrushKind(next);
+    // Always switch the active draw tool so the dock chip + pack follow the mode.
+    if (
+      tool === "ink" ||
+      tool === "pen" ||
+      tool === "marker" ||
+      tool === "fill" ||
+      tool === "eraser" ||
+      tool === "select"
+    ) {
+      useTools.getState().setTool(next);
+    }
+    if (selectedStrokes.length) {
+      const p5 = useTools.getState().lastP5Brush;
+      updateStrokes(
+        selectedStrokes.map((s) => s.id),
+        { brush: next as BrushKind, p5Brush: p5 },
+      );
+    }
+  }
+
+  function applyP5Brush(next: P5BrushId) {
+    setLastP5Brush(next);
+    // Picking a preset also adopts its draw mode (Ink / Pen / Marker).
+    const kind = useTools.getState().lastBrushKind;
+    if (
+      tool === "ink" ||
+      tool === "pen" ||
+      tool === "marker" ||
+      tool === "fill" ||
+      tool === "select"
+    ) {
+      useTools.getState().setTool(kind);
+    }
+    if (selectedStrokes.length) {
+      updateStrokes(
+        selectedStrokes.map((s) => s.id),
+        { brush: kind as BrushKind, p5Brush: next },
+      );
+    }
+  }
+
+  function patchSelectedRects(
+    patch: Partial<
+      Pick<Stroke, "cornerRadius" | "squircle" | "cornerSmoothing" | "points" | "shapeBox">
+    >,
+  ) {
+    const rects = selectedStrokes.filter((s) => s.shapeKind === "rect");
+    if (!rects.length) return;
+    for (const s of rects) {
+      const shapeBox = s.shapeBox ?? shapeBoxFromStroke(s);
+      const next = { ...s, shapeBox, ...patch };
+      const points =
+        patch.points ??
+        rebuildRectPointsFromStroke({
+          shapeBox: next.shapeBox,
+          cornerRadius: next.cornerRadius ?? 0,
+          squircle: next.squircle,
+          cornerSmoothing: next.cornerSmoothing,
+        }) ??
+        s.points;
+      updateStrokes([s.id], {
+        ...patch,
+        shapeBox,
+        points,
+      });
+    }
+  }
+
+  function applyCornerRadius(next: number) {
+    const n = Math.max(0, Math.round(next));
+    setCornerRadius(n);
+    patchSelectedRects({ cornerRadius: n || undefined });
+  }
+
+  function applySquircle(next: boolean) {
+    setSquircle(next);
+    patchSelectedRects({
+      squircle: next || undefined,
+      cornerSmoothing: next ? cornerSmoothing : undefined,
+    });
+  }
+
+  function applyCornerSmoothing(next: number) {
+    const n = Math.max(0, Math.min(1, next));
+    setCornerSmoothing(n);
+    patchSelectedRects({ cornerSmoothing: n });
+  }
+
+  function applyTextSize(next: number) {
+    const n = Math.max(1, Math.round(next));
+    setTextSize(n);
+    patchSelectedTexts({ size: n });
+  }
+
+  function patchSelectedTexts(patch: Partial<import("@/model/types").TextElement>) {
+    for (const t of selectedTexts) updateTextElement(t.id, patch);
+  }
+
+  function applyFontFamily(next: string) {
+    setFontFamily(next);
+    patchSelectedTexts({ fontFamily: next });
+  }
+
+  function applyTextBold(next: boolean) {
+    setTextBold(next);
+    patchSelectedTexts({ bold: next });
+  }
+
+  function applyTextItalic(next: boolean) {
+    setTextItalic(next);
+    patchSelectedTexts({ italic: next });
+  }
+
+  function applyTextAlign(next: TextAlign) {
+    setTextAlign(next);
+    const ctx = measureCtx();
+    // Prefer live project texts over the memoized selection snapshot.
+    const texts = (() => {
+      const s = useProject.getState();
+      const layer = s.project.layers[s.layerIndex];
+      if (!layer) return selectedTexts;
+      const cel =
+        s.project.workflow === "animatron"
+          ? layer.frames.find((f) => f) ?? null
+          : resolveCel(layer, s.frameIndex);
+      if (!cel?.texts?.length) return selectedTexts;
+      const idSet = new Set(useSelection.getState().ids);
+      return cel.texts.filter((t) => idSet.has(t.id));
+    })();
+
+    for (const hit of texts) {
+      const patch: Partial<import("@/model/types").TextElement> = { align: next };
+      // Alignment only shows inside a box wider than the line. Seed / grow if needed.
+      if (ctx && next !== "left") {
+        const natural = measureTextBox(ctx, { ...hit, boxWidth: undefined, align: "left" });
+        const currentW = hit.boxWidth != null && hit.boxWidth > 0 ? hit.boxWidth : natural.w;
+        if (currentW <= natural.w + 1) {
+          patch.boxWidth = Math.max(48, Math.ceil(natural.w * 1.35));
+        }
+      } else if (ctx && !(hit.boxWidth != null && hit.boxWidth > 0)) {
+        const box = measureTextBox(ctx, hit);
+        patch.boxWidth = Math.max(48, Math.ceil(box.w));
+      }
+      updateTextElement(hit.id, patch);
+    }
+  }
+
+  function applyLetterSpacing(next: number) {
+    setLetterSpacing(next);
+    patchSelectedTexts({ letterSpacing: next });
+  }
+
+  function applyTextUnderline(next: boolean) {
+    setTextUnderline(next);
+    patchSelectedTexts({ underline: next });
+  }
+
+  function applyTextStrikethrough(next: boolean) {
+    setTextStrikethrough(next);
+    patchSelectedTexts({ strikethrough: next });
+  }
+
+  function applyTextTypewriter(on: boolean) {
+    setTextTypewriter(on);
+    const cps = on ? textTypewriterSpeed : 0;
+    for (const t of selectedTexts) {
+      const patch: Partial<import("@/model/types").TextElement> = {
+        typewriterSpeed: cps,
+      };
+      if (on && project.workflow === "animatron") {
+        const typingMs = typewriterDurationMs(t.text, Math.max(1, cps));
+        if (!t.clip) {
+          const clip: StrokeClip = {
+            startMs: 0,
+            durationMs: typingMs,
+            easing: { ...clipEasing },
+          };
+          patch.clip = clip;
+        } else if (t.clip.durationMs < typingMs) {
+          patch.clip = { ...t.clip, durationMs: typingMs };
+        }
+      }
+      updateTextElement(t.id, patch);
+    }
+  }
+
+  /** Live scrub — tools only. Never commit project (undo + gooey remorph). */
+  function scrubTextTypewriterSpeed(cps: number) {
+    setTextTypewriterSpeed(Math.max(1, Math.min(120, Math.round(cps))));
+  }
+
+  /** Pointer-up / commit — stamp selected texts once. */
+  function commitTextTypewriterSpeed(cps: number) {
+    const next = Math.max(1, Math.min(120, Math.round(cps)));
+    setTextTypewriterSpeed(next);
+    if (!textTypewriter) return;
+    for (const t of selectedTexts) {
+      const patch: Partial<import("@/model/types").TextElement> = {
+        typewriterSpeed: next,
+      };
+      if (project.workflow === "animatron" && t.clip) {
+        const typingMs = typewriterDurationMs(t.text, next);
+        if (t.clip.durationMs < typingMs) {
+          patch.clip = { ...t.clip, durationMs: typingMs };
+        }
+      }
+      updateTextElement(t.id, patch);
+    }
+  }
+
+  function applyTextCase(next: TextCase) {
+    setTextCase(next);
+    patchSelectedTexts({ textCase: next });
+  }
+
+  function applyTextOpacity(next: number) {
+    setTextOpacity(next);
+    patchSelectedTexts({ opacity: next });
+  }
+
+  function applyTextBackgroundColor(next: string | null) {
+    setTextBackgroundColor(next);
+    patchSelectedTexts({ backgroundColor: next });
+  }
+
+  function applyTextShadow(next: TextShadow | null) {
+    setTextShadow(next);
+    patchSelectedTexts({ shadow: next });
+  }
+
+  function applyTextBlendMode(next: TextBlendMode) {
+    setTextBlendMode(next);
+    patchSelectedTexts({ blendMode: next });
+  }
+
+  function applyTextPath(next: TextPathSettings) {
+    setTextPath(next);
+    patchSelectedTexts({
+      path: next.shape === "none" ? null : { ...next },
+    });
+  }
+
+  function measureCtx() {
+    if (!measureCtxRef.current) {
+      const c = document.createElement("canvas");
+      measureCtxRef.current = c.getContext("2d");
+    }
+    return measureCtxRef.current;
+  }
+
+  function alignTextsToPage(
+    where: "left" | "center" | "right" | "top" | "middle" | "bottom",
+  ) {
+    const ctx = measureCtx();
+    if (!ctx || !selectedTexts.length) return;
+    for (const t of selectedTexts) {
+      const box = measureTextBox(ctx, t);
+      let x = t.x;
+      let y = t.y;
+      if (where === "left") x = 0;
+      else if (where === "center") x = (project.width - box.w) / 2;
+      else if (where === "right") x = project.width - box.w;
+      else if (where === "top") y = 0;
+      else if (where === "middle") y = (project.height - box.h) / 2;
+      else if (where === "bottom") y = project.height - box.h;
+      updateTextElement(t.id, { x, y });
+    }
+  }
+
   useEffect(() => {
     if (!open) return;
-    function onDown(e: MouseEvent) {
-      const t = e.target as HTMLElement;
+    function onDown(e: PointerEvent | MouseEvent) {
+      const t = e.target;
+      if (!(t instanceof Element)) return;
       if (rootRef.current?.contains(t)) return;
       // Color picker / menus portal outside the dock — don't collapse on them.
       if (
@@ -1967,8 +3252,21 @@ export function SettingsDocks() {
         return;
       setOpen(null);
     }
-    window.addEventListener("mousedown", onDown);
-    return () => window.removeEventListener("mousedown", onDown);
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      const t = e.target;
+      // Leave modal dialogs alone (SaveFirst / Export / Help).
+      if (t instanceof Element && t.closest("[role='dialog']")) return;
+      e.preventDefault();
+      setOpen(null);
+    }
+    // Capture so StageCanvas stopPropagation still lets us close on draw/click.
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
   }, [open]);
 
   useEffect(() => {
@@ -1976,12 +3274,31 @@ export function SettingsDocks() {
       setOpen(null);
       return;
     }
-    if (open === "brush" && !showBrush) setOpen(null);
-    if ((open === "canvas" || open === "background") && !showCanvas) {
+    if (open === "brush" && !showBrush && !showShapeStrokeBrush) setOpen(null);
+    if (open === "brushes" && !showShapeStrokeBrush && !showBrush) setOpen(null);
+    if (
+      (open === "canvas" || open === "background" || (open === "motionPath" && PATH_MAKER_ENABLED)) &&
+      !showCanvas
+    ) {
       setOpen(null);
     }
-    if (open === "text" && !showFont) setOpen(null);
-  }, [hideDock, open, showBrush, showCanvas, showFont]);
+    if (open === "motionPath" && !PATH_MAKER_ENABLED) setOpen(null);
+    if (
+      (open === "text" ||
+        open === "size" ||
+        open === "align" ||
+        open === "advanced" ||
+        open === "typewriter" ||
+        open === "path" ||
+        open === "shadow" ||
+        open === "opacity" ||
+        open === "position" ||
+        open === "textBg") &&
+      !showFont
+    ) {
+      setOpen(null);
+    }
+  }, [hideDock, open, showBrush, showShapeStrokeBrush, showCanvas, showFont]);
 
   const kind = open ?? latchedKind.current;
 
@@ -1999,15 +3316,163 @@ export function SettingsDocks() {
   const panel = useMemo(() => {
     if (kind === "text") {
       return (
-        <TextExpandedPanel
+        <TextFontPanel
           color={color}
-          size={textSize}
-          letterSpacing={letterSpacing}
+          bold={textBold}
+          italic={textItalic}
+          align={textAlign}
           fontFamily={fontFamily}
-          onColor={setColor}
-          onSize={setTextSize}
-          onLetterSpacing={setLetterSpacing}
-          onFontFamily={setFontFamily}
+          onColor={applyStrokeColor}
+          onBold={applyTextBold}
+          onItalic={applyTextItalic}
+          onAlign={applyTextAlign}
+          onFontFamily={applyFontFamily}
+        />
+      );
+    }
+    if (kind === "size") {
+      return (
+        <SizePanel
+          size={textSize}
+          onSize={applyTextSize}
+          onClose={() => setOpen(null)}
+        />
+      );
+    }
+    if (kind === "align") {
+      return (
+        <AlignPanel
+          align={textAlign}
+          onAlign={applyTextAlign}
+          onClose={() => setOpen(null)}
+        />
+      );
+    }
+    if (kind === "advanced") {
+      return (
+        <AdvancedPanel
+          textCase={textCase}
+          letterSpacing={letterSpacing}
+          underline={textUnderline}
+          strikethrough={textStrikethrough}
+          onTextCase={applyTextCase}
+          onLetterSpacing={applyLetterSpacing}
+          onUnderline={applyTextUnderline}
+          onStrikethrough={applyTextStrikethrough}
+          onClose={() => setOpen(null)}
+        />
+      );
+    }
+    if (kind === "typewriter") {
+      return (
+        <TypewriterPanel
+          typewriter={textTypewriter}
+          typewriterSpeed={textTypewriterSpeed}
+          onTypewriter={applyTextTypewriter}
+          onTypewriterSpeed={scrubTextTypewriterSpeed}
+          onTypewriterSpeedCommit={commitTextTypewriterSpeed}
+          onClose={() => setOpen(null)}
+        />
+      );
+    }
+    if (kind === "path") {
+      return (
+        <PathPanel
+          path={textPath}
+          onPath={applyTextPath}
+          onClose={() => setOpen(null)}
+        />
+      );
+    }
+    if (kind === "shadow") {
+      return (
+        <ShadowPanel
+          shadow={textShadow}
+          onShadow={applyTextShadow}
+          onClose={() => setOpen(null)}
+        />
+      );
+    }
+    if (kind === "opacity") {
+      return (
+        <OpacityPanel
+          opacity={textOpacity}
+          blendMode={textBlendMode}
+          onOpacity={applyTextOpacity}
+          onBlendMode={applyTextBlendMode}
+          onClose={() => setOpen(null)}
+        />
+      );
+    }
+    if (kind === "textBg") {
+      return (
+        <BackgroundPanel
+          backgroundColor={textBackgroundColor}
+          onBackgroundColor={applyTextBackgroundColor}
+          onClose={() => setOpen(null)}
+        />
+      );
+    }
+    if (kind === "position") {
+      return (
+        <PositionPanel
+          onReorder={(where) => {
+            for (const t of selectedTexts) reorderTextElement(t.id, where);
+          }}
+          onAlignPage={alignTextsToPage}
+          onDuplicate={() => {
+            const ids: string[] = [];
+            for (const t of selectedTexts) {
+              const id = duplicateTextElement(t.id);
+              if (id) ids.push(id);
+            }
+            if (ids.length) setSelection(ids);
+          }}
+          onDelete={() => {
+            for (const t of selectedTexts) removeTextElement(t.id);
+            setSelection([]);
+            setOpen(null);
+          }}
+          onClose={() => setOpen(null)}
+        />
+      );
+    }
+    if (kind === "motionPath" && PATH_MAKER_ENABLED) {
+      return <PathMakerPanel />;
+    }
+    if (kind === "image" && selectedImages[0]) {
+      return (
+        <CanvasImageExpandedPanel
+          image={selectedImages[0]}
+          onPatch={(patch) => {
+            for (const im of selectedImages) updateImageElement(im.id, patch);
+          }}
+          onClose={() => setOpen(null)}
+        />
+      );
+    }
+    if (kind === "brushes") {
+      return (
+        <BrushPackPanel
+          kind={lastBrushKind}
+          active={lastP5Brush}
+          onPick={(b) => {
+            applyP5Brush(b);
+            setOpen(null);
+          }}
+          onClose={() => setOpen(null)}
+        />
+      );
+    }
+    if (kind === "radius") {
+      return (
+        <RadiusPanel
+          radius={displayCornerRadius}
+          squircle={displaySquircle}
+          smoothing={displayCornerSmoothing}
+          onRadius={applyCornerRadius}
+          onSquircle={applySquircle}
+          onSmoothing={applyCornerSmoothing}
         />
       );
     }
@@ -2016,12 +3481,27 @@ export function SettingsDocks() {
         <BrushExpandedPanel
           color={color}
           size={size}
-          jitterByDefault={jitterByDefault}
+          wavelength={brushWavelength}
+          corners={brushCorners}
+          smoothing={brushSmoothing}
+          boilEnabled={boilEnabled}
           boil={boil}
-          showColor={tool !== "eraser"}
-          onColor={setColor}
-          onSize={setSize}
+          showColor={tool !== "eraser" && !showShapeStrokeBrush}
+          brushKind={tool === "eraser" ? undefined : lastBrushKind}
+          onBrushKind={tool === "eraser" ? undefined : applyBrushKind}
+          onColor={applyStrokeColor}
+          onSize={showShapeStrokeBrush ? applyStrokeSize : setSize}
+          onWavelength={setBrushWavelength}
+          onCorners={setBrushCorners}
+          onSmoothing={setBrushSmoothing}
           onJitter={(next) => {
+            if (selectedStrokes.length) {
+              updateStrokes(
+                selectedStrokes.map((s) => s.id),
+                { jitter: next },
+              );
+              return;
+            }
             if (next !== jitterByDefault) toggleJitterByDefault();
           }}
           onBoil={(patch) => setBoilLive(resolveBoil({ ...boil, ...patch }))}
@@ -2034,6 +3514,7 @@ export function SettingsDocks() {
         <BackgroundExpandedPanel
           background={project.background}
           onSet={(bg) => setProjectSettings({ background: bg })}
+          onClose={() => setOpen(null)}
         />
       );
     }
@@ -2042,25 +3523,59 @@ export function SettingsDocks() {
         width={project.width}
         height={project.height}
         onSet={setProjectSettings}
+        onClose={() => setOpen(null)}
       />
     );
   }, [
     kind,
     color,
     size,
+    brushWavelength,
+    brushCorners,
+    brushSmoothing,
+    textSize,
+    textBold,
+    textItalic,
+    textAlign,
+    letterSpacing,
+    textCase,
+    textUnderline,
+    textStrikethrough,
+    textTypewriter,
+    textTypewriterSpeed,
+    textPath,
+    textShadow,
+    textOpacity,
+    textBlendMode,
+    textBackgroundColor,
     fontFamily,
+    lastBrushKind,
+    lastP5Brush,
     jitterByDefault,
+    boilEnabled,
     boil,
     tool,
+    showShapeStrokeBrush,
+    displayCornerRadius,
+    displaySquircle,
+    displayCornerSmoothing,
+    selectedStrokes,
+    selectedTexts,
+    selectedImages,
+    updateImageElement,
+    updateStrokes,
     setColor,
     setSize,
-    setFontFamily,
     toggleJitterByDefault,
     setBoilLive,
     project.width,
     project.height,
     project.background,
     setProjectSettings,
+    reorderTextElement,
+    duplicateTextElement,
+    removeTextElement,
+    setSelection,
   ]);
 
   const sidePanel = useMemo(() => {
@@ -2092,7 +3607,8 @@ export function SettingsDocks() {
 
   const colorOpens: PanelKind = showFont ? "text" : "brush";
   const needsLeadSep =
-    showCanvas && (showColor || showBrush || showFont || showFillColor);
+    showCanvas &&
+    (showColor || showBrush || showFont || showFillColor || showShapeStrokeBrush);
 
   return (
     <div ref={rootRef}>
@@ -2110,6 +3626,8 @@ export function SettingsDocks() {
         surface={PAPER.surface}
         panelClassName={cn(
           "rounded-xl",
+          // Background keeps overflow visible for the side-filter neck;
+          // brushes must clip so ScrollArea max-height actually contains the list.
           kind === "background" ? "overflow-visible" : "overflow-hidden",
         )}
         sidePanelClassName="overflow-visible"
@@ -2121,7 +3639,14 @@ export function SettingsDocks() {
                 value={color}
                 onValueChange={applyStrokeColor}
                 triggerShowValue={false}
-                triggerClassName="!size-[18px] !min-h-[18px] !min-w-[18px] !justify-center !gap-0 !rounded-md !border-0 !bg-transparent !p-0 !outline-none"
+                triggerLabel="border"
+                triggerLabelPosition="right"
+                triggerClassName={cn(
+                  "!h-[26px] !min-h-[26px] !gap-2.5 !rounded-[12px] !border-0 !bg-transparent !px-2 !py-0 !outline-none",
+                  "hover:!bg-[#313131]",
+                  "[&>span:first-of-type]:!size-[18px] [&>span:first-of-type]:!min-h-[18px] [&>span:first-of-type]:!min-w-[18px] [&>span:first-of-type]:!rounded-full [&>span:first-of-type]:!shadow-[inset_0_0_0_1px_rgba(255,255,255,0.15)]",
+                  "[&>span:last-child]:!px-0 [&>span:last-child]:!text-[14px] [&>span:last-child]:!leading-none [&>span:last-child]:!text-[#DEDEDE]",
+                )}
               />
               {showFillColor ? (
                 <>
@@ -2130,37 +3655,155 @@ export function SettingsDocks() {
                     value={fillColor}
                     onValueChange={applyFillColor}
                     triggerShowValue={false}
-                    triggerClassName="!size-[18px] !min-h-[18px] !min-w-[18px] !justify-center !gap-0 !rounded-md !border-0 !bg-transparent !p-0 !outline-none"
+                    triggerLabel="fill"
+                    triggerLabelPosition="right"
+                    triggerClassName={cn(
+                      "!h-[26px] !min-h-[26px] !gap-2.5 !rounded-[12px] !border-0 !bg-transparent !px-2 !py-0 !outline-none",
+                      "hover:!bg-[#313131]",
+                      "[&>span:first-of-type]:!size-[18px] [&>span:first-of-type]:!min-h-[18px] [&>span:first-of-type]:!min-w-[18px] [&>span:first-of-type]:!rounded-full [&>span:first-of-type]:!shadow-[inset_0_0_0_1px_rgba(255,255,255,0.15)]",
+                      "[&>span:last-child]:!px-0 [&>span:last-child]:!text-[14px] [&>span:last-child]:!leading-none [&>span:last-child]:!text-[#DEDEDE]",
+                    )}
                   />
+                </>
+              ) : null}
+              <span className="size-1 shrink-0 rounded-full bg-[#DDDDDD26]" aria-hidden />
+              <button
+                ref={strokeAnchorRef}
+                type="button"
+                onClick={() => openFrom("brush", "stroke")}
+                className={cn(
+                  "flex h-[26px] shrink-0 items-center gap-2 rounded-[12px] px-2 outline-none transition-colors",
+                  "hover:bg-[#313131]",
+                  open === "brush" && dockAnchor === "stroke" && "bg-[#313131]",
+                )}
+                aria-expanded={open === "brush" && dockAnchor === "stroke"}
+                aria-label="Stroke size"
+              >
+                <BrushSizeGlyph />
+                <span
+                  className="inline-block w-[2ch] tabular-nums"
+                  style={CHIP_LABEL_STYLE}
+                >
+                  {size}
+                </span>
+                <span style={CHIP_LABEL_STYLE}>stroke</span>
+              </button>
+              <span className="size-1 shrink-0 rounded-full bg-[#DDDDDD26]" aria-hidden />
+              <button
+                ref={brushesAnchorRef}
+                type="button"
+                onClick={() => openFrom("brushes", "brushes")}
+                className={cn(
+                  "flex h-[26px] w-[88px] shrink-0 items-center gap-1 overflow-hidden rounded-lg px-1.5 outline-none transition-colors",
+                  "hover:bg-[#313131]",
+                  open === "brushes" && "bg-[#313131] ring-1 ring-[#6B97FF]/60",
+                )}
+                aria-expanded={open === "brushes"}
+                aria-label="Brush type"
+              >
+                <span className="min-w-0 flex-1 text-white/85">
+                  <BrushStrokePreview brush={lastP5Brush} className="h-3.5" />
+                </span>
+                <ChevronDown
+                  size={12}
+                  className={cn(
+                    "shrink-0 text-white/45 transition-transform",
+                    open === "brushes" && "rotate-180",
+                  )}
+                />
+              </button>
+              {showCornerControls ? (
+                <>
+                  <span className="size-1 shrink-0 rounded-full bg-[#DDDDDD26]" aria-hidden />
+                  <button
+                    ref={radiusAnchorRef}
+                    type="button"
+                    onClick={() => openFrom("radius", "radius")}
+                    className={cn(
+                      "flex h-[26px] shrink-0 items-center gap-2 rounded-[12px] px-2 outline-none transition-colors",
+                      "hover:bg-[#313131]",
+                      open === "radius" && "bg-[#313131]",
+                      displaySquircle && open !== "radius" && "ring-1 ring-[#6B97FF]/40",
+                    )}
+                    aria-expanded={open === "radius"}
+                    aria-label="Corner radius"
+                  >
+                    <span
+                      className="inline-block min-w-[2ch] tabular-nums"
+                      style={CHIP_LABEL_STYLE}
+                    >
+                      {Math.round(displayCornerRadius)}
+                    </span>
+                    <span style={CHIP_LABEL_STYLE}>radius</span>
+                  </button>
                 </>
               ) : null}
             </>
           ) : (
             <>
+              {imageSelectionMode && selectedImages[0] ? (
+                <>
+                  <button
+                    ref={imageAnchorRef}
+                    type="button"
+                    onClick={() => openFrom("image", "image")}
+                    className={cn(
+                      "flex h-[26px] shrink-0 items-center gap-2 rounded-[12px] px-2 outline-none transition-colors",
+                      "hover:bg-[#313131]",
+                      open === "image" && "bg-[#313131]",
+                    )}
+                    aria-expanded={open === "image"}
+                    aria-label="Image settings"
+                  >
+                    <span style={CHIP_LABEL_STYLE}>
+                      {Math.round(selectedImages[0].w)}×{Math.round(selectedImages[0].h)}
+                    </span>
+                    <span style={CHIP_LABEL_STYLE}>
+                      image
+                    </span>
+                  </button>
+                  <span className="size-1 shrink-0 rounded-full bg-[#DDDDDD26]" aria-hidden />
+                </>
+              ) : null}
               {showFont && (
-                <button
-                  ref={fontAnchorRef}
-                  type="button"
-                  onClick={() => openFrom("text", "font")}
-                  className={cn(
-                    // Fixed label width (longest face: "Playfair Display") so
-                    // swapping fonts doesn't resize the setting dock.
-                    "flex h-8 w-[11.5rem] shrink-0 items-center gap-1.5 rounded-lg px-2 outline-none transition-colors",
-                    "hover:bg-[#313131]",
-                    open === "text" && "bg-[#313131]",
-                  )}
-                  aria-expanded={open === "text"}
-                  aria-label="Font"
-                  style={{ fontFamily: textFontStack(fontFamily) }}
-                >
-                  <span className="min-w-0 flex-1 truncate text-left text-sm leading-[18px] text-white opacity-80">
-                    {fontFamily}
-                  </span>
-                  <FontChevron />
-                </button>
+                <TextDockChips
+                  open={
+                    open === "text" ||
+                    open === "size" ||
+                    open === "align" ||
+                    open === "advanced" ||
+                    open === "typewriter" ||
+                    open === "path" ||
+                    open === "shadow" ||
+                    open === "opacity" ||
+                    open === "position" ||
+                    open === "textBg"
+                      ? open
+                      : null
+                  }
+                  openFrom={(kind, anchor) => openFrom(kind, anchor)}
+                  fontFamily={fontFamily}
+                  textSize={textSize}
+                  textTypewriter={textTypewriter}
+                  textTypewriterSpeed={textTypewriterSpeed}
+                  textPath={textPath}
+                  textShadow={textShadow}
+                  textOpacity={textOpacity}
+                  textBackgroundColor={textBackgroundColor}
+                  fontAnchorRef={fontAnchorRef}
+                  sizeAnchorRef={sizeAnchorRef}
+                  advancedAnchorRef={advancedAnchorRef}
+                  typewriterAnchorRef={typewriterAnchorRef}
+                  pathAnchorRef={pathAnchorRef}
+                  shadowAnchorRef={shadowAnchorRef}
+                  opacityAnchorRef={opacityAnchorRef}
+                  positionAnchorRef={positionAnchorRef}
+                  textBgAnchorRef={textBgAnchorRef}
+                  chipLabelStyle={CHIP_LABEL_STYLE}
+                />
               )}
 
-              {showColor && (
+              {showColor && !showFont && (
                 <button
                   ref={colorAnchorRef}
                   type="button"
@@ -2181,27 +3824,53 @@ export function SettingsDocks() {
               )}
 
               {showBrush && (
-                <button
-                  ref={brushAnchorRef}
-                  type="button"
-                  onClick={() => openFrom("brush", "brush")}
-                  className={cn(
-                    // Shared chip height so brush / aspect / background align.
-                    "flex h-[26px] shrink-0 items-center gap-2 rounded-[12px] px-2 outline-none transition-colors",
-                    "hover:bg-[#313131]",
-                    open === "brush" && "bg-[#313131]",
-                  )}
-                  aria-expanded={open === "brush"}
-                  aria-label="Brush settings"
-                >
-                  <BrushSizeGlyph />
-                  <span
-                    className="inline-block w-[2ch] tabular-nums"
-                    style={CHIP_LABEL_STYLE}
+                <>
+                  <button
+                    ref={brushAnchorRef}
+                    type="button"
+                    onClick={() => openFrom("brush", "brush")}
+                    className={cn(
+                      // Shared chip height so brush / aspect / background align.
+                      "flex h-[26px] shrink-0 items-center gap-2 rounded-[12px] px-2 outline-none transition-colors",
+                      "hover:bg-[#313131]",
+                      open === "brush" && "bg-[#313131]",
+                    )}
+                    aria-expanded={open === "brush"}
+                    aria-label="Brush settings"
                   >
-                    {size}
-                  </span>
-                </button>
+                    <BrushSizeGlyph />
+                    <span
+                      className="inline-block w-[2ch] tabular-nums"
+                      style={CHIP_LABEL_STYLE}
+                    >
+                      {size}
+                    </span>
+                  </button>
+                  <span className="size-1 shrink-0 rounded-full bg-[#DDDDDD26]" aria-hidden />
+                  <button
+                    ref={brushesAnchorRef}
+                    type="button"
+                    onClick={() => openFrom("brushes", "brushes")}
+                    className={cn(
+                      "flex h-[26px] w-[88px] shrink-0 items-center gap-1 overflow-hidden rounded-lg px-1.5 outline-none transition-colors",
+                      "hover:bg-[#313131]",
+                      open === "brushes" && "bg-[#313131] ring-1 ring-[#6B97FF]/60",
+                    )}
+                    aria-expanded={open === "brushes"}
+                    aria-label="Brush type"
+                  >
+                    <span className="min-w-0 flex-1 text-white/85">
+                      <BrushStrokePreview brush={lastP5Brush} className="h-3.5" />
+                    </span>
+                    <ChevronDown
+                      size={12}
+                      className={cn(
+                        "shrink-0 text-white/45 transition-transform",
+                        open === "brushes" && "rotate-180",
+                      )}
+                    />
+                  </button>
+                </>
               )}
             </>
           )}
@@ -2215,13 +3884,22 @@ export function SettingsDocks() {
                 type="button"
                 onClick={() => openFrom("canvas", "canvas")}
                 className={cn(
-                  "flex h-[26px] shrink-0 items-center rounded-[12px] px-2 outline-none transition-colors",
+                  "group flex h-[26px] shrink-0 items-center gap-2 rounded-[12px] py-0 pl-2 outline-none transition-colors",
+                  open === "canvas" ? "pr-1.5 bg-[#313131]" : "pr-2",
                   "hover:bg-[#313131]",
-                  open === "canvas" && "bg-[#313131]",
                 )}
                 aria-expanded={open === "canvas"}
+                aria-label="Canvas size"
               >
                 <span style={CHIP_LABEL_STYLE}>{aspect}</span>
+                {open === "canvas" ? (
+                  <span
+                    className="grid size-5 place-items-center rounded-md text-white/45 transition-colors group-hover:bg-white/10 group-hover:text-white"
+                    aria-hidden
+                  >
+                    <X size={12} />
+                  </span>
+                ) : null}
               </button>
 
               <PaperDockSep />
@@ -2231,20 +3909,51 @@ export function SettingsDocks() {
                 type="button"
                 onClick={() => openFrom("background", "background")}
                 className={cn(
-                  "flex h-[26px] shrink-0 items-center gap-2.5 rounded-[12px] py-0 pl-2 pr-2 outline-none transition-colors",
+                  "group flex h-[26px] shrink-0 items-center gap-2.5 rounded-[12px] py-0 pl-2 outline-none transition-colors",
+                  open === "background" ? "pr-1.5 bg-[#313131]" : "pr-2",
                   "hover:bg-[#313131]",
-                  open === "background" && "bg-[#313131]",
                 )}
                 aria-expanded={open === "background"}
                 aria-label="Background settings"
               >
                 <span
-                  className="size-[18px] shrink-0 rounded-full border border-white/15"
+                  className="size-[18px] shrink-0 rounded-full border border-white/15 transition-[box-shadow] group-hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.28)]"
                   style={backgroundChipStyle(project.background)}
                   aria-hidden
                 />
                 <span style={CHIP_LABEL_STYLE}>background</span>
+                {open === "background" ? (
+                  <span
+                    className="grid size-5 place-items-center rounded-md text-white/45 transition-colors group-hover:bg-white/10 group-hover:text-white"
+                    aria-hidden
+                  >
+                    <X size={12} />
+                  </span>
+                ) : null}
               </button>
+
+              {/* Path Maker parked for MVP — flip PATH_MAKER_ENABLED to restore */}
+              {PATH_MAKER_ENABLED && (
+                <>
+                  <PaperDockSep />
+
+                  <button
+                    ref={motionPathAnchorRef}
+                    type="button"
+                    onClick={() => openFrom("motionPath", "motionPath")}
+                    className={cn(
+                      "flex h-[26px] shrink-0 items-center gap-2 rounded-[12px] px-2 outline-none transition-colors",
+                      "hover:bg-[#313131]",
+                      open === "motionPath" && "bg-[#313131]",
+                    )}
+                    aria-expanded={open === "motionPath"}
+                    aria-label="Path Maker"
+                  >
+                    <PathMakerGlyph />
+                    <span style={CHIP_LABEL_STYLE}>path</span>
+                  </button>
+                </>
+              )}
             </>
           )}
         </PaperDockBar>

@@ -4,11 +4,14 @@ import { cn } from "@/lib/utils";
 import { useHoverCapable } from "@/lib/hooks/use-hover-capable";
 import { SPRING_LAYOUT } from "@/lib/ease";
 import { PAPER } from "@/components/chrome/paper-tokens";
+import { Tooltip } from "@/components/motion/tooltip";
 
 /**
  * Paper dock item — 18px icon → 24px on hover, shortcut letter under icon,
- * black pill tooltip above (Paper 1FB-0).
+ * lucide-style tooltip (label + right-aligned shortcut). Default opens below.
  */
+export type DockBarOrientation = "horizontal" | "vertical";
+
 export function PaperDockItem({
   label,
   shortcut,
@@ -16,6 +19,10 @@ export function PaperDockItem({
   onClick,
   children,
   className,
+  /** Tooltip placement — bottom for top dock; flip to the side when vertical. */
+  tooltipSide = "bottom",
+  /** Set false to skip the lucide-style tooltip (e.g. shapes hover-flyout). */
+  tooltip = true,
 }: {
   label: string;
   shortcut?: string;
@@ -23,14 +30,28 @@ export function PaperDockItem({
   onClick?: () => void;
   children: ReactNode;
   className?: string;
+  tooltipSide?: "top" | "bottom" | "left" | "right";
+  tooltip?: boolean;
 }) {
   const [hovered, setHovered] = useState(false);
   const canHover = useHoverCapable();
   const reduce = useReducedMotion();
   const showHover = canHover && hovered;
-  const iconSize = showHover || active ? 24 : 18;
+  // Fit WorkflowBar `h-9` — icon + hint vertically centered in the cell.
+  const iconSize = showHover || active ? 18 : 16;
 
-  return (
+  const tip = (
+    <span className="flex min-w-[5.5rem] items-center justify-between gap-4">
+      <span>{label}</span>
+      {shortcut ? (
+        <span className="shrink-0 text-right font-medium tracking-wide text-white/55">
+          {shortcut}
+        </span>
+      ) : null}
+    </span>
+  );
+
+  const button = (
     <button
       type="button"
       aria-label={shortcut ? `${label} ${shortcut}` : label}
@@ -39,25 +60,14 @@ export function PaperDockItem({
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       className={cn(
-        "relative flex h-9 w-9 shrink-0 flex-col items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors",
+        "relative flex h-8 w-8 shrink-0 flex-col items-center justify-center gap-0 self-center text-muted-foreground outline-none transition-colors",
         "focus-visible:ring-2 focus-visible:ring-ring",
         (active || showHover) && "text-foreground",
         className,
       )}
     >
-      {showHover && (
-        <span
-          className="pointer-events-none absolute -top-8 left-1/2 z-30 -translate-x-1/2 whitespace-nowrap rounded-md bg-black px-2 py-1 text-[11px] font-medium text-white shadow-lg"
-          role="tooltip"
-        >
-          {label}
-          {shortcut ? (
-            <span className="ml-1.5 text-white/55">{shortcut}</span>
-          ) : null}
-        </span>
-      )}
       <motion.span
-        className="grid place-items-center [&_svg]:h-full [&_svg]:w-full"
+        className="grid shrink-0 place-items-center [&_svg]:h-full [&_svg]:w-full"
         animate={reduce ? undefined : { width: iconSize, height: iconSize }}
         transition={reduce ? { duration: 0 } : SPRING_LAYOUT}
         style={{ width: iconSize, height: iconSize }}
@@ -67,7 +77,7 @@ export function PaperDockItem({
       {shortcut ? (
         <span
           className={cn(
-            "pointer-events-none absolute -bottom-0.5 text-[9px] leading-none text-muted-foreground/70",
+            "pointer-events-none text-[8px] leading-none text-muted-foreground/70",
             (active || showHover) && "text-muted-foreground",
           )}
         >
@@ -76,44 +86,87 @@ export function PaperDockItem({
       ) : null}
     </button>
   );
+
+  if (!tooltip) {
+    return <span className="relative inline-flex shrink-0 self-center align-middle">{button}</span>;
+  }
+
+  return (
+    <Tooltip
+      content={tip}
+      side={tooltipSide}
+      delay={200}
+      wrapperClassName="shrink-0 self-center"
+      className="border-0 bg-black px-2.5 py-1.5 text-[11px] font-medium text-white shadow-lg"
+    >
+      {button}
+    </Tooltip>
+  );
 }
 
 export function PaperDockBar({
   children,
   className,
   variant = "pill",
+  orientation = "horizontal",
 }: {
   children: ReactNode;
   className?: string;
   /** tool = top-right dock; setting = bottom setting bar */
   variant?: "pill" | "setting";
+  orientation?: DockBarOrientation;
 }) {
+  const vertical = orientation === "vertical";
   return (
     <div
+      data-dock-bar=""
       className={cn(
         "inline-flex items-center overflow-clip rounded-full antialiased",
+        vertical ? "flex-col" : "flex-row",
         variant === "pill"
-          ? "gap-3 px-4 py-1.5"
-          // 12px left / 8px right inset (+4px toward left vs prior pl-2).
-          : "gap-3 py-2 pl-3 pr-2",
+          ? vertical
+            ? "h-auto w-9 gap-1.5 px-0.5 py-2"
+            : "h-9 gap-1.5 px-3"
+          : vertical
+            ? "gap-3 px-2 py-3"
+            : "gap-3 py-2 pl-3 pr-2",
         className,
       )}
-      style={{ backgroundColor: PAPER.surface, fontFamily: PAPER.fontSans }}
+      style={{
+        // Transparent while GooeyBarMorph owns the silhouette.
+        backgroundColor: "var(--dock-bar-bg, " + PAPER.surface + ")",
+        fontFamily: PAPER.fontSans,
+      }}
     >
       {children}
     </div>
   );
 }
 
-export function PaperDockSep({ width = 4 }: { width?: 4 | 8 }) {
+export function PaperDockSep({
+  width = 4,
+  orientation = "horizontal",
+  className,
+}: {
+  width?: 4 | 8;
+  /** Matches the parent bar — vertical bar uses a horizontal rule. */
+  orientation?: DockBarOrientation;
+  className?: string;
+}) {
+  const verticalBar = orientation === "vertical";
+  const len = 20;
   return (
     <svg
       viewBox="116.5 116 4.001 24"
-      width={width}
-      height={24}
+      width={verticalBar ? len : width}
+      height={verticalBar ? width : len}
       xmlns="http://www.w3.org/2000/svg"
-      className="shrink-0"
-      style={{ overflow: "visible", opacity: 0.2 }}
+      className={cn("shrink-0", className)}
+      style={{
+        overflow: "visible",
+        opacity: 0.2,
+        transform: verticalBar ? "rotate(90deg)" : undefined,
+      }}
       aria-hidden
     >
       <path

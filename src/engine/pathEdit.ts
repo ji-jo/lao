@@ -1,4 +1,4 @@
-import type { StrokePoint } from "@/model/types";
+import type { BezierNode, StrokePoint } from "@/model/types";
 
 /**
  * Path-editing math for the select tool: warp handles let a duplicated frame's
@@ -75,6 +75,84 @@ export function transformPoints(
   });
 }
 
+function mapAbsPoint(
+  x: number,
+  y: number,
+  pivotX: number,
+  pivotY: number,
+  scale: number,
+  cos: number,
+  sin: number,
+): { x: number; y: number } {
+  let dx = (x - pivotX) * scale;
+  let dy = (y - pivotY) * scale;
+  return {
+    x: dx * cos - dy * sin + pivotX,
+    y: dx * sin + dy * cos + pivotY,
+  };
+}
+
+/** Translate pen/vector bezier nodes (anchors + absolute handles). */
+export function translateBezierNodes(
+  nodes: BezierNode[],
+  dx: number,
+  dy: number,
+): BezierNode[] {
+  if (dx === 0 && dy === 0) return nodes;
+  return nodes.map((n) => ({
+    x: n.x + dx,
+    y: n.y + dy,
+    handleIn: n.handleIn
+      ? { x: n.handleIn.x + dx, y: n.handleIn.y + dy }
+      : undefined,
+    handleOut: n.handleOut
+      ? { x: n.handleOut.x + dx, y: n.handleOut.y + dy }
+      : undefined,
+  }));
+}
+
+/** Scale + rotate bezier nodes around a pivot (anchors + absolute handles). */
+export function transformBezierNodes(
+  nodes: BezierNode[],
+  pivotX: number,
+  pivotY: number,
+  scale: number,
+  rotationRad: number,
+): BezierNode[] {
+  if (scale === 1 && rotationRad === 0) return nodes;
+  const cos = Math.cos(rotationRad);
+  const sin = Math.sin(rotationRad);
+  return nodes.map((n) => {
+    const a = mapAbsPoint(n.x, n.y, pivotX, pivotY, scale, cos, sin);
+    return {
+      x: a.x,
+      y: a.y,
+      handleIn: n.handleIn
+        ? mapAbsPoint(
+            n.handleIn.x,
+            n.handleIn.y,
+            pivotX,
+            pivotY,
+            scale,
+            cos,
+            sin,
+          )
+        : undefined,
+      handleOut: n.handleOut
+        ? mapAbsPoint(
+            n.handleOut.x,
+            n.handleOut.y,
+            pivotX,
+            pivotY,
+            scale,
+            cos,
+            sin,
+          )
+        : undefined,
+    };
+  });
+}
+
 export function boundsCenter(bounds: {
   minX: number;
   minY: number;
@@ -131,6 +209,103 @@ export function distanceToPoints(points: StrokePoint[], x: number, y: number): n
     if (d < best) best = d;
   }
   return best;
+}
+
+/** True when the first and last samples are close enough to read as a closed loop. */
+export function isNearClosedLoop(
+  points: Array<{ x: number; y: number }>,
+  gapThreshold: number,
+): boolean {
+  if (points.length < 3) return false;
+  const first = points[0]!;
+  const last = points[points.length - 1]!;
+  return Math.hypot(first.x - last.x, first.y - last.y) <= gapThreshold;
+}
+
+/** Gap (project px) within which a freehand loop counts as enclosed for bucket fill. */
+export function fillGapThreshold(strokeSize: number): number {
+  return Math.max(strokeSize, 16);
+}
+
+/** Shift edge — expand fill boundary outward toward ink (project px). */
+export function fillShiftEdgeDistance(strokeSize: number): number {
+  return strokeSize * 0.52;
+}
+
+/** Feather — reach into soft / anti-aliased ink pixels (project px). */
+export function fillFeatherDistance(strokeSize: number): number {
+  return Math.max(1.5, strokeSize * 0.24);
+}
+
+/** Combined polygon expansion for vector fill under ink ribbon. */
+export function fillPolygonExpandDistance(strokeSize: number): number {
+  return fillShiftEdgeDistance(strokeSize) + fillFeatherDistance(strokeSize) * 0.4;
+}
+
+/** Insert samples across a small start/end gap so ink + bucket see a closed loop. */
+export function bridgeNearClosedPoints(
+  points: StrokePoint[],
+  gapThreshold: number,
+): StrokePoint[] {
+  if (points.length < 3) return points;
+  const first = points[0]!;
+  const last = points[points.length - 1]!;
+  const gap = Math.hypot(first.x - last.x, first.y - last.y);
+  if (gap <= 1) {
+    const out = points.slice();
+    out[out.length - 1] = { ...last, x: first.x, y: first.y };
+    return out;
+  }
+  if (gap > gapThreshold) return points;
+  const steps = Math.max(2, Math.min(12, Math.ceil(gap / 3)));
+  const bridged = points.slice();
+  for (let i = 1; i <= steps; i++) {
+    const t = i / (steps + 1);
+    bridged.push({
+      ...last,
+      x: last.x + (first.x - last.x) * t,
+      y: last.y + (first.y - last.y) * t,
+      t: last.t + i * 0.001,
+    });
+  }
+  return bridged;
+}
+
+/** Expand a closed polygon outward so interior fills reach ink ribbon edges. */
+export function expandPolygonOutward(
+  points: StrokePoint[],
+  distance: number,
+): StrokePoint[] {
+  const n = points.length;
+  if (n < 3 || distance <= 0) return points;
+  const winding = polygonSignedArea(points) >= 0 ? 1 : -1;
+  const out: StrokePoint[] = [];
+  for (let i = 0; i < n; i++) {
+    const prev = points[(i - 1 + n) % n]!;
+    const curr = points[i]!;
+    const next = points[(i + 1) % n]!;
+    const ax = curr.x - prev.x;
+    const ay = curr.y - prev.y;
+    const bx = next.x - curr.x;
+    const by = next.y - curr.y;
+    const al = Math.hypot(ax, ay) || 1;
+    const bl = Math.hypot(bx, by) || 1;
+    let nx = -ay / al - by / bl;
+    let ny = ax / al + bx / bl;
+    const nl = Math.hypot(nx, ny) || 1;
+    nx = (nx / nl) * distance * winding;
+    ny = (ny / nl) * distance * winding;
+    out.push({ ...curr, x: curr.x + nx, y: curr.y + ny });
+  }
+  return out;
+}
+
+function polygonSignedArea(points: StrokePoint[]): number {
+  let a = 0;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    a += points[j].x * points[i].y - points[i].x * points[j].y;
+  }
+  return a * 0.5;
 }
 
 /** Ray-cast point-in-polygon (for closed shape fill hits). */
