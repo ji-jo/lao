@@ -26,6 +26,17 @@ disagree (Paper wins). Check it before "restoring" a surface that was deliberate
 - Windows + Git Bash. Line endings: repo-local `core.autocrlf false`; commit with
   `-c core.safecrlf=false` to silence CRLF warnings.
 
+## Cursor Cloud
+
+Cloud Agents run on **Ubuntu**, not this Windows `X:` clone. Ignore the drive / Git
+safe.directory notes above. Config is [`.cursor/environment.json`](.cursor/environment.json).
+
+- Installs: `npm install` (keep `package-lock.json`). Install bun if missing (`npm i -g bun`).
+  Never `bun install` / never commit a `bun.lock`.
+- Run: `bun run dev` → **http://localhost:5173**. Tests: `bun test`. Types: `npx tsc -b`.
+- Paper MCP is on D's desktop only — skip pixel-perfect chrome unless it is available.
+- Git identity is already on the repo; do not set a global one.
+
 ## Commands
 
 ```bash

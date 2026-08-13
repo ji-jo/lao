@@ -1,0 +1,13 @@
+{
+  "name": "lao",
+  "install": "npm install && (command -v bun >/dev/null || npm install -g bun)",
+  "start": "bun run dev -- --host 0.0.0.0 --port 5173",
+  "ports": [{ "name": "dev", "port": 5173 }],
+  "terminals": [
+    {
+      "name": "dev",
+      "command": "bun run dev -- --host 0.0.0.0 --port 5173",
+      "description": "Vite app at http://localhost:5173. Installs stay npm (package-lock.json); never bun install."
+    }
+  ]
+}
