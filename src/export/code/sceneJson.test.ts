@@ -85,6 +85,9 @@ test("buildLaoScene emits compressed paths without raw points", () => {
   const scene = buildLaoScene(project, { animated: true, transparent: true });
   const json = emitProjectSceneJson(project, { animated: true, transparent: true });
   expect(json).not.toContain('"pressure"');
+  expect(scene.loop).toBe("once");
+  expect(scene.viewBox).toBe("0 0 320 180");
+  expect(scene.frameCount).toBe(12);
   expect(scene.groups[0]!.paths[0]!.d.length).toBeGreaterThan(8);
   expect(scene.groups[0]!.paths[0]!.boil?.values.length).toBeGreaterThan(1);
   expect(json.length).toBeLessThan(scene.groups[0]!.paths[0]!.d.length * 80);

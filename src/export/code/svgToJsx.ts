@@ -98,7 +98,7 @@ function xmlFragmentToJsx(xml: string): string {
       const next = xml.indexOf("<", i);
       const text = xml.slice(i, next < 0 ? xml.length : next);
       i = next < 0 ? xml.length : next;
-      out += escapeJsxText(text);
+      if (text.trim()) out += escapeJsxText(text);
       continue;
     }
     if (xml.startsWith("</", i)) {

@@ -31,18 +31,36 @@ export function wrapSvg(
   defs: string,
   body: string,
   extraStyle?: string,
+  meta?: {
+    durationMs: number;
+    loop: string;
+    fps: number;
+    frameCount: number;
+    idPrefix: string;
+    usage: string;
+  },
 ): string {
   const style = extraStyle
     ? `<style>${extraStyle}</style>`
     : "";
+  const comment = meta
+    ? `<!-- lao-export durationMs=${meta.durationMs} loop=${meta.loop} fps=${meta.fps} frameCount=${meta.frameCount} idPrefix=${meta.idPrefix} -->\n` +
+      `<!-- ${escapeXml(meta.usage)} -->\n`
+    : "";
   return (
     `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    comment +
     tag("svg", {
       xmlns: "http://www.w3.org/2000/svg",
-      width: width,
-      height: height,
+      width,
+      height,
       viewBox: `0 0 ${width} ${height}`,
+      preserveAspectRatio: "xMidYMid meet",
       fill: "none",
+      "data-lao-duration-ms": meta?.durationMs,
+      "data-lao-loop": meta?.loop,
+      "data-lao-fps": meta?.fps,
+      "data-lao-frames": meta?.frameCount,
     }, `${style}<defs>${defs}</defs>${body}`)
   );
 }

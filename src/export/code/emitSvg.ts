@@ -1,7 +1,11 @@
 import type { Project } from "@/model/types";
 import { analyzeProjectExport } from "@/export/code/capabilities";
-import { buildLaoScene, type BuildSceneOptions } from "@/export/code/sceneJson";
+import {
+  buildLaoScene,
+  type BuildSceneOptions,
+} from "@/export/code/sceneJson";
 import { renderSceneToSvg } from "@/export/code/sceneRender";
+import type { ReactExportMode, SceneLoop } from "@/export/code/exportMeta";
 
 export type SvgPlayMode = "auto" | "scroll";
 
@@ -12,6 +16,8 @@ export interface EmitSvgOptions extends BuildSceneOptions {
    * Ignored for plain SVG files (SMIL always autoplays).
    */
   playMode?: SvgPlayMode;
+  reactMode?: ReactExportMode;
+  loop?: SceneLoop;
 }
 
 export function emitProjectSvg(project: Project, opts: EmitSvgOptions = {}): string {
@@ -21,6 +27,8 @@ export function emitProjectSvg(project: Project, opts: EmitSvgOptions = {}): str
     transparent,
     animated,
     frame: animated ? undefined : (opts.frame ?? 0),
+    loop: opts.loop ?? "once",
+    idPrefix: opts.idPrefix,
   });
   return renderSceneToSvg(scene);
 }
@@ -28,12 +36,14 @@ export function emitProjectSvg(project: Project, opts: EmitSvgOptions = {}): str
 export function emitStaticFrameSvg(
   project: Project,
   frame: number,
-  opts: { transparent?: boolean } = {},
+  opts: { transparent?: boolean; loop?: SceneLoop; idPrefix?: string } = {},
 ): string {
   return emitProjectSvg(project, {
     transparent: opts.transparent,
     animated: false,
     frame,
+    loop: opts.loop,
+    idPrefix: opts.idPrefix,
   });
 }
 

@@ -1,5 +1,6 @@
 import { tag, wrapSvg } from "@/export/code/svgDoc";
 import type { LaoScene, SceneBackground, SceneGroup, SceneMaskDef, ScenePath } from "@/export/code/sceneJson";
+import { smilRepeatAttrs, type SceneLoop } from "@/export/code/exportMeta";
 
 function cubicBezierKeySplines(bezier: [number, number, number, number]): string {
   const [x1, y1, x2, y2] = bezier;
@@ -10,12 +11,13 @@ function renderBackground(
   bg: SceneBackground | null,
   width: number,
   height: number,
+  idPrefix: string,
 ): { defs: string; body: string } {
   if (!bg) return { defs: "", body: "" };
   if (bg.kind === "color") {
     return { defs: "", body: tag("rect", { width, height, fill: bg.color }) };
   }
-  const gradId = "bg";
+  const gradId = `${idPrefix}-bg`;
   const stopTags = bg.stops
     .map((s) => tag("stop", { offset: `${Math.round(s.at * 100)}%`, "stop-color": s.color }))
     .join("");
@@ -33,7 +35,7 @@ function renderBackground(
   };
 }
 
-function renderMaskDef(def: SceneMaskDef): string {
+function renderMaskDef(def: SceneMaskDef, loop: SceneLoop): string {
   if (def.kind === "eraser") {
     const cuts = (def.cuts ?? []).map((d) => tag("path", { d, fill: "black" })).join("");
     return tag(
@@ -43,6 +45,8 @@ function renderMaskDef(def: SceneMaskDef): string {
     );
   }
   const easing = def.easing ?? [0, 0, 1, 1];
+  const durSec = def.durSec ?? 0;
+  const looped = smilRepeatAttrs(loop, "100;0", durSec);
   const maskPath = tag(
     "path",
     {
@@ -58,13 +62,14 @@ function renderMaskDef(def: SceneMaskDef): string {
     },
     tag("animate", {
       attributeName: "stroke-dashoffset",
-      values: "100;0",
+      values: looped.values,
       begin: `${def.beginSec ?? 0}s`,
-      dur: `${def.durSec ?? 0}s`,
-      fill: "freeze",
+      dur: looped.dur,
+      fill: looped.fill,
+      repeatCount: looped.repeatCount,
       calcMode: "spline",
       keySplines: cubicBezierKeySplines(easing),
-      keyTimes: "0;1",
+      keyTimes: loop === "ping-pong" ? "0;0.5;1" : "0;1",
     }),
   );
   return tag(
@@ -74,7 +79,7 @@ function renderMaskDef(def: SceneMaskDef): string {
   );
 }
 
-function renderPath(path: ScenePath): string {
+function renderPath(path: ScenePath, loop: SceneLoop): string {
   let inner = "";
   if (path.fillD && path.fillColor) {
     inner += tag("path", { d: path.fillD, fill: path.fillColor });
@@ -96,16 +101,18 @@ function renderPath(path: ScenePath): string {
   if (path.maskId) attrs.mask = `url(#${path.maskId})`;
   inner += tag("path", attrs, boil || undefined);
   if (path.fade) {
+    const looped = smilRepeatAttrs(loop, path.fade.values, path.fade.durSec);
     inner = tag(
       "g",
       {},
       inner +
         tag("animate", {
           attributeName: "opacity",
-          keyTimes: path.fade.keyTimes,
-          values: path.fade.values,
-          dur: `${path.fade.durSec}s`,
-          fill: "freeze",
+          keyTimes: loop === "ping-pong" ? undefined : path.fade.keyTimes,
+          values: looped.values,
+          dur: looped.dur,
+          fill: looped.fill,
+          repeatCount: looped.repeatCount,
         }),
     );
   } else if (path.opacity !== undefined) {
@@ -114,29 +121,51 @@ function renderPath(path: ScenePath): string {
   return inner;
 }
 
-function exposureSets(from: number, to: number, fps: number): string {
+function exposureSets(
+  from: number,
+  to: number,
+  fps: number,
+  durationSec: number,
+  loop: SceneLoop,
+): string {
   const t0 = from / fps;
   const t1 = to / fps;
-  return (
-    tag("set", {
-      attributeName: "display",
-      to: "none",
-      begin: `${t1}s`,
-      fill: "freeze",
-    }) +
-    tag("set", {
-      attributeName: "display",
-      to: "inline",
-      begin: `${t0}s`,
-      fill: "freeze",
-    })
-  );
+  const T = Math.max(durationSec, 0.001);
+  const k0 = Math.min(1, Math.max(0, t0 / T));
+  const k1 = Math.min(1, Math.max(0, t1 / T));
+  let values = "none;inline;none";
+  let keyTimes = `0;${k0};${k1}`;
+  if (k0 <= 0) {
+    values = "inline;none";
+    keyTimes = `0;${k1}`;
+  }
+  if (k1 >= 1 && k0 <= 0) {
+    values = "inline";
+    keyTimes = "0";
+  }
+  const looped = smilRepeatAttrs(loop, values, T);
+  return tag("animate", {
+    attributeName: "display",
+    values: looped.values,
+    keyTimes: loop === "ping-pong" ? undefined : keyTimes,
+    dur: looped.dur,
+    calcMode: "discrete",
+    fill: looped.fill,
+    repeatCount: looped.repeatCount,
+  });
 }
 
-function renderGroup(group: SceneGroup, fps: number): string {
-  let inner = group.paths.map(renderPath).join("") + group.texts.join("");
+function renderGroup(group: SceneGroup, scene: LaoScene): string {
+  const durationSec = scene.durationMs / 1000;
+  let inner = group.paths.map((p) => renderPath(p, scene.loop)).join("") + group.texts.join("");
   if (group.exposure) {
-    inner += exposureSets(group.exposure.from, group.exposure.to, fps);
+    inner += exposureSets(
+      group.exposure.from,
+      group.exposure.to,
+      scene.fps,
+      durationSec,
+      scene.loop,
+    );
   }
   const attrs: Record<string, string | number | undefined> = {
     id: group.id,
@@ -149,20 +178,30 @@ function renderGroup(group: SceneGroup, fps: number): string {
   return tag("g", attrs, inner);
 }
 
+function sceneParts(scene: LaoScene): { defs: string; body: string } {
+  const bg = renderBackground(scene.background, scene.width, scene.height, scene.idPrefix);
+  const defs = bg.defs + scene.defs.map((d) => renderMaskDef(d, scene.loop)).join("");
+  const body = bg.body + scene.groups.map((g) => renderGroup(g, scene)).join("");
+  return { defs, body };
+}
+
 /** Inner markup (style + defs + body) — used by the React player. */
 export function renderSceneInner(scene: LaoScene): string {
-  const bg = renderBackground(scene.background, scene.width, scene.height);
-  const defs = bg.defs + scene.defs.map(renderMaskDef).join("");
-  const body = bg.body + scene.groups.map((g) => renderGroup(g, scene.fps)).join("");
+  const { defs, body } = sceneParts(scene);
   const style = scene.fontCss ? `<style>${scene.fontCss}</style>` : "";
   return `${style}<defs>${defs}</defs>${body}`;
 }
 
 export function renderSceneToSvg(scene: LaoScene): string {
-  const bg = renderBackground(scene.background, scene.width, scene.height);
-  const defs = bg.defs + scene.defs.map(renderMaskDef).join("");
-  const body = bg.body + scene.groups.map((g) => renderGroup(g, scene.fps)).join("");
-  return wrapSvg(scene.width, scene.height, defs, body, scene.fontCss);
+  const { defs, body } = sceneParts(scene);
+  return wrapSvg(scene.width, scene.height, defs, body, scene.fontCss, {
+    durationMs: scene.durationMs,
+    loop: scene.loop,
+    fps: scene.fps,
+    frameCount: scene.frameCount,
+    idPrefix: scene.idPrefix,
+    usage: "Standalone SVG. Open in a browser. No React or Lao runtime. Uses SMIL.",
+  });
 }
 
 export function sceneSvgByteLength(scene: LaoScene): number {

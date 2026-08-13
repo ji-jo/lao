@@ -14,6 +14,13 @@ import { emitProjectSvg, type SvgPlayMode } from "@/export/code/emitSvg";
 import { emitProjectReact, emitProjectReactFiles } from "@/export/code/emitReact";
 import { emitProjectSceneJson, buildLaoScene } from "@/export/code/sceneJson";
 import { renderSceneToSvg } from "@/export/code/sceneRender";
+import {
+  estimateGzipSize,
+  formatExportUsage,
+  recommendReactDelivery,
+  type ReactExportMode,
+  type SceneLoop,
+} from "@/export/code/exportMeta";
 import type { Project } from "@/model/types";
 import { PAPER } from "@/components/chrome/paper-tokens";
 import { cn } from "@/lib/utils";
@@ -78,9 +85,9 @@ function formatBytes(n: number): string {
 }
 
 function formatLabel(format: DialogExportFormat, animated: boolean): string {
-  if (format === "tsx") return animated ? "React TSX (inline SVG)" : "React TSX (static)";
-  if (format === "json") return animated ? "lao-scene JSON" : "lao-scene JSON (static)";
-  return animated ? "animated SVG" : "static SVG";
+  if (format === "tsx") return animated ? "React TSX (same SMIL as SVG)" : "React TSX (static)";
+  if (format === "json") return animated ? "lao-scene JSON (not a browser file)" : "lao-scene JSON (static)";
+  return animated ? "standalone SVG (opens in a browser)" : "static SVG";
 }
 
 /**
@@ -195,6 +202,8 @@ export function ExportDialog({
   const [transparent, setTransparent] = useState(false);
   const [codeAnimated, setCodeAnimated] = useState(true);
   const [playMode, setPlayMode] = useState<SvgPlayMode>("auto");
+  const [loop, setLoop] = useState<SceneLoop>("once");
+  const [reactMode, setReactMode] = useState<ReactExportMode>("inline-svg");
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const isCodeExport = format === "svg" || format === "tsx" || format === "json";
@@ -233,13 +242,15 @@ export function ExportDialog({
       animated: codeAnimated,
       frame: codeAnimated ? undefined : frameIndex,
       playMode,
+      loop,
+      reactMode,
     }),
-    [transparent, codeAnimated, frameIndex, playMode],
+    [transparent, codeAnimated, frameIndex, playMode, loop, reactMode],
   );
   const codeBytes = useMemo(() => {
     if (!isCodeExport) return 0;
     const scene = buildLaoScene(project, codeOpts);
-    if (format === "json") return new TextEncoder().encode(JSON.stringify(scene)).length;
+    if (format === "json") return new TextEncoder().encode(emitProjectSceneJson(project, codeOpts)).length;
     if (format === "svg") return new TextEncoder().encode(renderSceneToSvg(scene)).length;
     return new TextEncoder().encode(emitProjectReact(project, codeOpts)).length;
   }, [isCodeExport, format, project, codeOpts]);
@@ -340,6 +351,10 @@ export function ExportDialog({
         const name = project.name || "animation";
         if (format === "tsx") {
           const files = emitProjectReactFiles(project, codeOpts);
+          if (files.svg && files.svgFileName) {
+            downloadBlob(new Blob([files.svg], { type: "image/svg+xml;charset=utf-8" }), files.svgFileName);
+            await new Promise((r) => setTimeout(r, 80));
+          }
           downloadBlob(
             new Blob([files.tsx], { type: "text/plain;charset=utf-8" }),
             files.tsxFileName,
@@ -431,6 +446,14 @@ export function ExportDialog({
             >
               Render the scene to an image or the whole sequence to a video.
             </span>
+            {isCodeExport && (
+              <span
+                className="w-fit text-[10px] font-light leading-3 tracking-[0.02em] opacity-60"
+                style={{ color: PAPER.text, fontFamily: PAPER.fontSans }}
+              >
+                {formatExportUsage(format === "tsx" ? "tsx" : format === "json" ? "json" : "svg")}
+              </span>
+            )}
           </div>
           <GradientHoverButton
             onClick={() => onOpenChange(false)}
@@ -525,6 +548,20 @@ export function ExportDialog({
               />
             </div>
             )}
+            {format === "tsx" && (
+              <div className="flex flex-col items-start gap-3 self-stretch">
+                <FieldLabel>React delivery</FieldLabel>
+                <PaperTabs
+                  label="React delivery"
+                  value={reactMode}
+                  options={[
+                    { id: "inline-svg" as const, label: "Inline SVG" },
+                    { id: "external-svg" as const, label: "External SVG" },
+                  ]}
+                  onChange={setReactMode}
+                />
+              </div>
+            )}
             {format === "tsx" && codeAnimated && (
               <div className="flex flex-col items-start gap-3 self-stretch">
                 <FieldLabel>Playback</FieldLabel>
@@ -536,6 +573,21 @@ export function ExportDialog({
                     { id: "scroll" as const, label: "Scroll" },
                   ]}
                   onChange={setPlayMode}
+                />
+              </div>
+            )}
+            {isCodeExport && codeAnimated && (
+              <div className="flex flex-col items-start gap-3 self-stretch">
+                <FieldLabel>Loop</FieldLabel>
+                <PaperTabs
+                  label="Loop"
+                  value={loop}
+                  options={[
+                    { id: "once" as const, label: "Once" },
+                    { id: "infinite" as const, label: "Infinite" },
+                    { id: "ping-pong" as const, label: "Ping-pong" },
+                  ]}
+                  onChange={setLoop}
                 />
               </div>
             )}
@@ -593,7 +645,16 @@ export function ExportDialog({
             {busy
               ? `Rendering… ${Math.round((progress ?? 0) * 100)}%`
               : isCodeExport
-                ? `Output: ${formatLabel(format, codeAnimated)} · ${formatBytes(codeBytes)}`
+                ? (() => {
+                    const gzip = estimateGzipSize(codeBytes);
+                    const rec =
+                      format === "tsx"
+                        ? recommendReactDelivery(codeBytes) === "external-svg"
+                          ? " · use External SVG for web"
+                          : " · inline OK"
+                        : "";
+                    return `Output: ${formatLabel(format, codeAnimated)} · ${(codeOpts.loop ?? "once")} · ${formatBytes(codeBytes)} (${formatBytes(gzip)} gz)${rec}`;
+                  })()
                 : isStillExport
                   ? `Output: composite PNG · ${dims.w}×${dims.h} · frame ${previewFrame + 1}${transparent ? " · alpha" : ""}`
                   : `Output: ${durationSec.toFixed(1)}s | ${project.frameCount} frames @ ${fps}fps | ${approxMb} MB max${transparent ? " · alpha" : ""}`}

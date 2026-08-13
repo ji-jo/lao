@@ -319,7 +319,9 @@ describe("react export", () => {
     expect(tsx).toContain("<animate");
     expect(tsx).toContain("strokeLinecap");
     expect(tsx).toContain("strokeDashoffset");
-    expect(tsx).toContain("export const LaoAnimation");
+    expect(tsx).toContain("paused?: boolean");
+    expect(tsx).toContain("playbackRate?: number");
+    expect(tsx).toContain("export default LaoHelloclip");
   });
 
   test("React emit accepts className and uses a responsive viewBox", async () => {
@@ -353,10 +355,65 @@ describe("react export", () => {
     expect(scene.format).toBe("lao-scene");
     expect(scene.version).toBe(1);
     expect(scene.background).toBeNull();
+    expect(scene.loop).toBe("once");
+    expect(scene.viewBox).toBe("0 0 240 240");
+    expect(scene.frameCount).toBe(4);
+    expect(scene.usage).toMatch(/not browser-renderable/i);
+    expect(scene.idPrefix.startsWith("lao-")).toBe(true);
     const pathCount = scene.groups.reduce((n, g) => n + g.paths.length, 0);
     expect(pathCount).toBe(2);
     const rebuilt = buildLaoScene(project, { animated: true, transparent: true });
     expect(rebuilt.groups.length).toBe(scene.groups.length);
+    expect(rebuilt.durationMs).toBe(scene.durationMs);
+    expect(rebuilt.idPrefix).toBe(scene.idPrefix);
+  });
+
+  test("SVG, React, and JSON share duration, loop, and prefixed ids", async () => {
+    const { emitProjectSvg } = await import("@/export/code/emitSvg");
+    const { emitProjectReact } = await import("@/export/code/emitReact");
+    const { buildLaoScene, emitProjectSceneJson, parseLaoScene } = await import(
+      "@/export/code/sceneJson"
+    );
+    const project = makeProject(
+      [inkStroke({ points: freehandPoints(), clip: { startMs: 0, durationMs: 400 } })],
+      "animatron",
+    );
+    const opts = { animated: true, transparent: true, loop: "infinite" as const };
+    const scene = buildLaoScene(project, opts);
+    const svg = emitProjectSvg(project, opts);
+    const tsx = emitProjectReact(project, opts);
+    const json = parseLaoScene(JSON.parse(emitProjectSceneJson(project, opts)));
+    expect(svg).toContain("<?xml");
+    expect(svg).toContain("preserveAspectRatio=\"xMidYMid meet\"");
+    expect(svg).toContain(`data-lao-loop="infinite"`);
+    expect(svg).toContain(scene.idPrefix);
+    expect(svg).toContain("repeatCount=\"indefinite\"");
+    expect(tsx).toContain("loop = \"infinite\"");
+    expect(tsx).toContain(scene.idPrefix);
+    expect(json.durationMs).toBe(scene.durationMs);
+    expect(json.loop).toBe("infinite");
+    expect(json.idPrefix).toBe(scene.idPrefix);
+    expect(json.formats.json.browserRenderable).toBe(false);
+    expect(json.formats.svg.standalone).toBe(true);
+  });
+
+  test("external React emit ships a sibling SVG loader", async () => {
+    const { emitProjectReactFiles } = await import("@/export/code/emitReact");
+    const project = makeProject([inkStroke({ points: freehandPoints() })]);
+    project.name = "hello clip";
+    const files = emitProjectReactFiles(project, {
+      animated: true,
+      transparent: true,
+      reactMode: "external-svg",
+    });
+    expect(files.svgFileName).toBe("LaoHelloclip.svg");
+    expect(files.svg).toContain("<?xml");
+    expect(files.svg).toContain("<path");
+    expect(files.tsx).toContain('type="image/svg+xml"');
+    expect(files.tsx).toContain("./LaoHelloclip.svg");
+    expect(files.tsx).toContain("export default LaoHelloclip");
+    expect(files.tsx).not.toContain("<path");
+    expect(files.tsx).not.toContain("framer");
   });
 });
 

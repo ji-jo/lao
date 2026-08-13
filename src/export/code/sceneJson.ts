@@ -32,6 +32,7 @@ import { parseCssGradient } from "@/engine/background";
 import { bezierNodesToPathD, compactPolylinePathD, strokeCenterlinePathD, strokeToPathD } from "@/export/code/svgGeometry";
 import { boilPathValues, clipFadeData } from "@/export/code/svgAnimation";
 import { collectFontImports, textElementToSvg } from "@/export/code/svgText";
+import { exportIdPrefix, formatExportUsage, type SceneLoop } from "@/export/code/exportMeta";
 
 export const LAO_SCENE_FORMAT = "lao-scene" as const;
 
@@ -39,6 +40,8 @@ export interface BuildSceneOptions {
   transparent?: boolean;
   frame?: number;
   animated?: boolean;
+  loop?: SceneLoop;
+  idPrefix?: string;
 }
 
 export type SceneBackground =
@@ -84,13 +87,27 @@ export interface SceneGroup {
   texts: string[];
 }
 
+export interface LaoSceneFormats {
+  svg: { standalone: true; usesSmil: boolean };
+  react: { modes: ["inline-svg", "external-svg"] };
+  json: { schemaVersion: 1; browserRenderable: false };
+}
+
 export interface LaoScene {
   format: typeof LAO_SCENE_FORMAT;
   version: 1;
+  /** How an AI agent should treat this file. JSON is not a browser document. */
+  usage: string;
   width: number;
   height: number;
+  viewBox: string;
   fps: number;
+  frameCount: number;
   durationMs: number;
+  loop: SceneLoop;
+  /** Prefix on every id so multiple exports can share a page. */
+  idPrefix: string;
+  formats: LaoSceneFormats;
   background: SceneBackground | null;
   fontCss?: string;
   defs: SceneMaskDef[];
@@ -443,8 +460,42 @@ export function buildLaoScene(project: Project, opts: BuildSceneOptions = {}): L
   const frame = opts.frame ?? 0;
   const { width, height, fps, frameCount } = project;
   const workflow = project.workflow ?? "animatron";
+  const loop = opts.loop ?? "once";
+  const idPrefix =
+    opts.idPrefix ?? exportIdPrefix(project.name, width, height, fps);
   const defs: SceneMaskDef[] = [];
   const groups: SceneGroup[] = [];
+  let fontCss = "";
+
+  const finish = (): LaoScene => {
+    const used = new Set<string>();
+    for (const g of groups) {
+      if (g.maskId) used.add(g.maskId);
+      for (const p of g.paths) if (p.maskId) used.add(p.maskId);
+    }
+    return {
+      format: LAO_SCENE_FORMAT,
+      version: 1,
+      usage: formatExportUsage("json"),
+      width,
+      height,
+      viewBox: `0 0 ${width} ${height}`,
+      fps,
+      frameCount,
+      durationMs: (frameCount / Math.max(fps, 1)) * 1000,
+      loop,
+      idPrefix,
+      formats: {
+        svg: { standalone: true, usesSmil: animated },
+        react: { modes: ["inline-svg", "external-svg"] },
+        json: { schemaVersion: 1, browserRenderable: false },
+      },
+      background: sceneBackground(project, transparent),
+      fontCss: fontCss || undefined,
+      defs: defs.filter((d) => used.has(d.id)),
+      groups,
+    };
+  };
 
   const measureCtx =
     typeof document !== "undefined"
@@ -463,7 +514,7 @@ export function buildLaoScene(project: Project, opts: BuildSceneOptions = {}): L
           : resolveCel(layer, frame);
       if (cel?.texts) allTexts.push(...cel.texts);
     }
-    const fontCss = collectFontImports(allTexts);
+    fontCss = collectFontImports(allTexts);
 
     for (const layer of project.layers) {
       if (!layer.visible || morphHide.has(layer.id)) continue;
@@ -485,7 +536,7 @@ export function buildLaoScene(project: Project, opts: BuildSceneOptions = {}): L
         cel,
         frame,
         false,
-        `l-${layer.id}`,
+        `${idPrefix}-l-${layer.id}`,
         measureCtx,
         defs,
       );
@@ -507,14 +558,14 @@ export function buildLaoScene(project: Project, opts: BuildSceneOptions = {}): L
         boilMap,
         frame,
         false,
-        `morph-${clip.id}`,
+        `${idPrefix}-morph-${clip.id}`,
         measureCtx,
         undefined,
         defs,
       );
       if (content.paths.length) {
         groups.push({
-          id: `morph-${clip.id}`,
+          id: `${idPrefix}-morph-${clip.id}`,
           morphId: clip.id,
           paths: content.paths,
           texts: content.texts,
@@ -523,18 +574,7 @@ export function buildLaoScene(project: Project, opts: BuildSceneOptions = {}): L
       }
     }
 
-    return {
-      format: LAO_SCENE_FORMAT,
-      version: 1,
-      width,
-      height,
-      fps,
-      durationMs: (frameCount / Math.max(fps, 1)) * 1000,
-      background: sceneBackground(project, transparent),
-      fontCss: fontCss || undefined,
-      defs,
-      groups,
-    };
+    return finish();
   }
 
   const allTexts: TextElement[] = [];
@@ -543,7 +583,7 @@ export function buildLaoScene(project: Project, opts: BuildSceneOptions = {}): L
       if (cel?.texts) allTexts.push(...cel.texts);
     }
   }
-  const fontCss = collectFontImports(allTexts);
+  fontCss = collectFontImports(allTexts);
 
   for (const layer of project.layers) {
     if (!layer.visible) continue;
@@ -557,7 +597,7 @@ export function buildLaoScene(project: Project, opts: BuildSceneOptions = {}): L
         cel,
         0,
         true,
-        `l-${layer.id}`,
+        `${idPrefix}-l-${layer.id}`,
         measureCtx,
         defs,
       );
@@ -573,7 +613,7 @@ export function buildLaoScene(project: Project, opts: BuildSceneOptions = {}): L
         seg.cel,
         seg.from,
         true,
-        `l-${layer.id}-c${seg.celIndex}`,
+        `${idPrefix}-l-${layer.id}-c${seg.celIndex}`,
         measureCtx,
         defs,
         { from: seg.from, to: seg.to },
@@ -585,18 +625,7 @@ export function buildLaoScene(project: Project, opts: BuildSceneOptions = {}): L
     }
   }
 
-  return {
-    format: LAO_SCENE_FORMAT,
-    version: 1,
-    width,
-    height,
-    fps,
-    durationMs: (frameCount / Math.max(fps, 1)) * 1000,
-    background: sceneBackground(project, transparent),
-    fontCss: fontCss || undefined,
-    defs,
-    groups,
-  };
+  return finish();
 }
 
 export function parseLaoScene(json: unknown): LaoScene {
@@ -606,14 +635,47 @@ export function parseLaoScene(json: unknown): LaoScene {
   if (typeof doc.width !== "number" || !Array.isArray(doc.groups)) {
     throw new Error("Corrupt lao-scene file");
   }
-  return doc as LaoScene;
+  const width = doc.width;
+  const height = typeof doc.height === "number" ? doc.height : width;
+  const fps = typeof doc.fps === "number" ? doc.fps : 12;
+  const frameCount = typeof doc.frameCount === "number" ? doc.frameCount : 1;
+  const durationMs =
+    typeof doc.durationMs === "number"
+      ? doc.durationMs
+      : (frameCount / Math.max(fps, 1)) * 1000;
+  const idPrefix =
+    typeof doc.idPrefix === "string" && doc.idPrefix
+      ? doc.idPrefix
+      : exportIdPrefix("anim", width, height, fps);
+  return {
+    format: LAO_SCENE_FORMAT,
+    version: 1,
+    usage: doc.usage ?? formatExportUsage("json"),
+    width,
+    height,
+    viewBox: doc.viewBox ?? `0 0 ${width} ${height}`,
+    fps,
+    frameCount,
+    durationMs,
+    loop: doc.loop === "infinite" || doc.loop === "ping-pong" ? doc.loop : "once",
+    idPrefix,
+    formats: doc.formats ?? {
+      svg: { standalone: true, usesSmil: true },
+      react: { modes: ["inline-svg", "external-svg"] },
+      json: { schemaVersion: 1, browserRenderable: false },
+    },
+    background: doc.background ?? null,
+    fontCss: doc.fontCss,
+    defs: doc.defs ?? [],
+    groups: doc.groups,
+  };
 }
 
 export function emitProjectSceneJson(
   project: Project,
   opts: BuildSceneOptions = {},
 ): string {
-  return JSON.stringify(buildLaoScene(project, opts));
+  return JSON.stringify(buildLaoScene(project, opts), null, 2);
 }
 
 export function sceneByteLength(scene: LaoScene): number {

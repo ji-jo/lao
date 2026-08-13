@@ -29,7 +29,8 @@ npx tsc -b    # type-check
 - **Backgrounds**: color, linear/radial gradient, image (fill/cover/contain/crop), and
   live WebGL shaders (@paper-design/shaders-react).
 - **Export**: MP4 (H.264) / WebM VP9 with alpha / PNG composite / GIF via mediabunny +
-  gifenc; compact SVG, self-contained React TSX (inline SVG), lao-scene JSON.
+  gifenc; standalone SVG, React TSX (inline or external SVG), lao-scene JSON (IR, not a
+  browser file — see [docs/LAO_SCENE.md](docs/LAO_SCENE.md)).
 
 ## Docs
 
