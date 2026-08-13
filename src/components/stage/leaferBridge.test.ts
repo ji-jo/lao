@@ -113,6 +113,23 @@ describe("bakeShapeGeometry", () => {
     expect(Math.abs(baked.shapeBox.h)).toBeCloseTo(100, 5);
   });
 
+  test("one-sided width change keeps the unrotated left edge", () => {
+    const box = { x: 10, y: 20, w: 100, h: 50 };
+    const c = shapeBoxToLeaferCenter(box);
+    // Dragging the right handle +20: center shifts +10, width becomes 120.
+    const next = leaferCenterToShapeBox({
+      x: c.x + 10,
+      y: c.y,
+      w: 120,
+      h: 50,
+      rotationDeg: 30,
+    });
+    expect(next.x).toBeCloseTo(10, 5);
+    expect(next.y).toBeCloseTo(20, 5);
+    expect(next.w).toBeCloseTo(120, 5);
+    expect(next.h).toBeCloseTo(50, 5);
+  });
+
   test("center origin round-trips to the unrotated top-left box", () => {
     const box = { x: 10, y: 20, w: 100, h: 50 };
     const c = shapeBoxToLeaferCenter(box);
