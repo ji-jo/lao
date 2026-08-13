@@ -1,6 +1,5 @@
 import { create } from "zustand";
-import { resolveCel } from "@/model/types";
-import { selectableIdsInLayers } from "@/engine/layerCel";
+import { celForLayer, selectableIdsInLayers } from "@/engine/layerCel";
 import { expandSelectionByGroups } from "@/engine/artGroup";
 import { useProject } from "@/state/project";
 
@@ -30,7 +29,7 @@ interface SelectionState {
 function currentCelSelectableIds(): string[] {
   const p = useProject.getState();
   const layer = p.project.layers[p.layerIndex];
-  const cel = layer ? resolveCel(layer, p.frameIndex) : null;
+  const cel = layer ? celForLayer(p.project, layer, p.frameIndex) : null;
   if (!cel) return [];
   const ids = cel.strokes.map((s) => s.id);
   if (cel.texts) {

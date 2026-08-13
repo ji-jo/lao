@@ -3,6 +3,7 @@ import { useProject } from "@/state/project";
 import { useTools, isBrushTool, activeShapeTool } from "@/state/tools";
 import { usePlayback } from "@/state/playback";
 import { useSelection } from "@/state/selection";
+import { setTextEditActive } from "@/state/textEditFlag";
 import { usePathMaker } from "@/state/pathMaker";
 import { useViewport } from "@/state/viewport";
 import { renderStrokes, renderStroke, renderTexts } from "@/engine/renderer";
@@ -80,6 +81,7 @@ import {
   subscribeShapeLivePreview,
 } from "@/engine/shapeLivePreview";
 import { findArtAtProject } from "@/engine/artHitTest";
+import { ART_DUPLICATE_OFFSET } from "@/engine/artDuplicate";
 import {
   computeFloodFill,
   sealInkGaps,
@@ -384,6 +386,8 @@ export function StageCanvas() {
     snapshots: Map<string, StrokePoint[]>;
     bezierSnapshots: Map<string, BezierNode[]>;
     textSnapshots: Map<string, { x: number; y: number }>;
+    /** Alt-duplicate: if the pointer never moved, nudge the copy so it is visible. */
+    nudgeIfStill?: boolean;
   } | null>(null);
   const dirtyRef = useRef(true);
   // Redraw when Camera reference or live image-transform preview changes.
@@ -494,6 +498,35 @@ export function StageCanvas() {
   } | null>(null);
   const textEditRef = useRef(textEdit);
   textEditRef.current = textEdit;
+
+  useEffect(() => {
+    setTextEditActive(!!textEdit);
+    return () => setTextEditActive(false);
+  }, [textEdit]);
+
+  // Cut / delete while the Leafer editor is open must drop the session without
+  // committing the removed text back (cleanup sets disposingRef).
+  useEffect(() => {
+    const id = textEdit?.id;
+    if (!id) return;
+    function textStillExists(): boolean {
+      const project = useProject.getState().project;
+      for (const layer of project.layers) {
+        for (const frame of layer.frames) {
+          if (frame?.texts?.some((t) => t.id === id)) return true;
+        }
+      }
+      return false;
+    }
+    if (!textStillExists()) {
+      setTextEdit(null);
+      return;
+    }
+    return useProject.subscribe((s, prev) => {
+      if (s.project === prev.project) return;
+      if (!textStillExists()) setTextEdit(null);
+    });
+  }, [textEdit?.id]);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -2775,6 +2808,74 @@ export function StageCanvas() {
           }
         }
 
+        // Alt+click duplicates the hit art (or the current selection if clicking it).
+        if (
+          e.altKey &&
+          !e.shiftKey &&
+          !e.ctrlKey &&
+          !e.metaKey &&
+          tools.tool === "select" &&
+          e.detail < 2
+        ) {
+          const { x: ax, y: ay } = toProject(e);
+          const artHit = findArtAt(ax, ay);
+          const bboxHit = selBBoxRef.current;
+          const insideSel =
+            !!bboxHit &&
+            sel.ids.length > 0 &&
+            sx >= bboxHit.x &&
+            sy >= bboxHit.y &&
+            sx <= bboxHit.x + bboxHit.w &&
+            sy <= bboxHit.y + bboxHit.h;
+          const ids =
+            artHit && sel.ids.includes(artHit.id) && sel.ids.length
+              ? [...sel.ids]
+              : artHit
+                ? [artHit.id]
+                : insideSel
+                  ? [...sel.ids]
+                  : [];
+          if (ids.length) {
+            const newIds = useProject.getState().duplicateArt(ids, 0, 0);
+            if (newIds.length) {
+              sel.set(newIds);
+              useTools.getState().setTool("select");
+              const psNow = useProject.getState();
+              const { snapshots, textSnapshots } = celSnapshotsAcrossLayers(
+                newIds,
+                psNow.project,
+                psNow.frameIndex,
+              );
+              try {
+                canvas.setPointerCapture(e.pointerId);
+              } catch {
+                /* best-effort */
+              }
+              const moveSnap = new Map<string, StrokePoint[]>();
+              const bezierSnap = new Map<string, BezierNode[]>();
+              for (const [id, snap] of snapshots.entries()) {
+                moveSnap.set(id, snap.points);
+                if (snap.bezierNodes?.length) {
+                  bezierSnap.set(id, snap.bezierNodes);
+                }
+              }
+              moveRef.current = {
+                ids: newIds,
+                startX: ax,
+                startY: ay,
+                dx: 0,
+                dy: 0,
+                snapshots: moveSnap,
+                bezierSnapshots: bezierSnap,
+                textSnapshots,
+                nudgeIfStill: true,
+              };
+            }
+            dirtyRef.current = true;
+            return;
+          }
+        }
+
         // drag inside selection bbox → group move (skip on double-click so text edit can open)
         const bbox = selBBoxRef.current;
         if (
@@ -3516,6 +3617,10 @@ export function StageCanvas() {
         moveRef.current = null;
         if (move.dx !== 0 || move.dy !== 0) {
           useProject.getState().translateStrokes(move.ids, move.dx, move.dy);
+        } else if (move.nudgeIfStill) {
+          useProject
+            .getState()
+            .translateStrokes(move.ids, ART_DUPLICATE_OFFSET, ART_DUPLICATE_OFFSET);
         }
         dirtyRef.current = true;
         return;

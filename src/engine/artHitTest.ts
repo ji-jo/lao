@@ -52,11 +52,7 @@ export function findArtAtProject(
     }
     for (let j = cel.strokes.length - 1; j >= 0; j--) {
       const s = cel.strokes[j]!;
-      const hitPts = s.bezierNodes?.length
-        ? flattenBezierNodes(s.bezierNodes, s.closed)
-        : s.points;
-      if (!hitPts?.length) continue;
-      if (hitsStroke(hitPts, x, y, Math.max(s.size * 1.5, 12), s.closed)) {
+      if (hitsShapeBody(s, x, y)) {
         return { id: s.id, layerId: layer.id, kind: "stroke" };
       }
     }
@@ -124,6 +120,32 @@ export function hitsShapeEditChrome(
     );
   }
   return false;
+}
+
+/** True on the shape fill/stroke — not the transform-handle padding ring. */
+export function hitsShapeBody(stroke: Stroke, x: number, y: number): boolean {
+  const hitPts = stroke.bezierNodes?.length
+    ? flattenBezierNodes(stroke.bezierNodes, stroke.closed)
+    : stroke.points;
+  if (hitPts?.length) {
+    const threshold = Math.max(stroke.size * 1.5, 12);
+    if (hitsStroke(hitPts, x, y, threshold, stroke.closed)) return true;
+  }
+  const box = stroke.shapeBox;
+  if (!box) return false;
+  const kind = stroke.shapeKind;
+  if (kind === "line" || kind === "arrow") return false;
+  const left = box.w >= 0 ? box.x : box.x + box.w;
+  const top = box.h >= 0 ? box.y : box.y + box.h;
+  return pointInRotatedRect(
+    x,
+    y,
+    left,
+    top,
+    Math.abs(box.w),
+    Math.abs(box.h),
+    box.rotation ?? 0,
+  );
 }
 
 /** True when (x,y) is on the image or near its transform chrome. */

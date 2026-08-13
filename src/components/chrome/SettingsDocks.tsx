@@ -2557,6 +2557,8 @@ function CanvasImageExpandedPanel({
         return;
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const tool = useTools.getState().tool;
+      if (tool === "select" || tool === "path") return;
 
       const step = e.shiftKey ? 10 : 1;
       let dx = 0;

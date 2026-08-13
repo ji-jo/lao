@@ -1,8 +1,8 @@
 import { Rect } from "leafer-ui";
 import type { ImageElement } from "@/model/types";
 
-/** x/y is the box center (rotate around middle). Resize stays one-sided. */
-const CENTER_XFORM = { origin: "center" as const };
+/** `around: "center"` makes x/y the visual center. Skip `origin` (resize jump). */
+const CENTER_XFORM = { around: "center" as const };
 
 /**
  * Leafer proxy for a canvas ImageElement.

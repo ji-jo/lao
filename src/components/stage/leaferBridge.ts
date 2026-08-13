@@ -164,6 +164,88 @@ export function leaferCenterToShapeBox(geo: {
   };
 }
 
+/** Leafer Direction9: TL T TR R BR B BL L center. */
+export type ResizePinAlign =
+  | "top-left"
+  | "top"
+  | "top-right"
+  | "left"
+  | "center"
+  | "right"
+  | "bottom-left"
+  | "bottom"
+  | "bottom-right";
+
+/** Opposite edge/corner of a resize handle. Alt / around:center pins the middle. */
+export function oppositeResizeAlign(
+  direction: number,
+  fromCenter: boolean,
+): ResizePinAlign {
+  if (fromCenter || direction === 8) return "center";
+  switch (direction) {
+    case 0:
+      return "bottom-right";
+    case 1:
+      return "bottom";
+    case 2:
+      return "bottom-left";
+    case 3:
+      return "left";
+    case 4:
+      return "top-left";
+    case 5:
+      return "top";
+    case 6:
+      return "top-right";
+    case 7:
+      return "right";
+    default:
+      return "center";
+  }
+}
+
+function pinOffset(
+  align: ResizePinAlign,
+  w: number,
+  h: number,
+): { x: number; y: number } {
+  const nx = align.includes("left") ? -0.5 : align.includes("right") ? 0.5 : 0;
+  const ny = align.includes("top") ? -0.5 : align.includes("bottom") ? 0.5 : 0;
+  return { x: nx * w, y: ny * h };
+}
+
+/**
+ * New unrotated top-left box after a size change, keeping `align` fixed in
+ * world space (works while rotated). `rotation` is radians.
+ */
+export function resizeBoxKeepingAlign(
+  box: { x: number; y: number; w: number; h: number; rotation?: number },
+  nextW: number,
+  nextH: number,
+  align: ResizePinAlign,
+): { x: number; y: number; w: number; h: number; rotation?: number } {
+  const w = Math.max(1, nextW);
+  const h = Math.max(1, nextH);
+  const rot = box.rotation ?? 0;
+  const cx = box.x + box.w / 2;
+  const cy = box.y + box.h / 2;
+  const cos = Math.cos(rot);
+  const sin = Math.sin(rot);
+  const pin0 = pinOffset(align, box.w, box.h);
+  const pinWorldX = cx + pin0.x * cos - pin0.y * sin;
+  const pinWorldY = cy + pin0.x * sin + pin0.y * cos;
+  const pin1 = pinOffset(align, w, h);
+  const cx2 = pinWorldX - (pin1.x * cos - pin1.y * sin);
+  const cy2 = pinWorldY - (pin1.x * sin + pin1.y * cos);
+  return {
+    x: cx2 - w / 2,
+    y: cy2 - h / 2,
+    w,
+    h,
+    rotation: box.rotation,
+  };
+}
+
 export function applyFitToGroup(
   group: { x?: number; y?: number; scaleX?: number; scaleY?: number },
   fit: StageFit,
