@@ -23,8 +23,14 @@ import { usePlayback } from "@/state/playback";
 import { useReference } from "@/state/reference";
 import { useSelection } from "@/state/selection";
 import { useViewport } from "@/state/viewport";
-import { copyStrokes, readClipboard } from "@/state/clipboard";
-import { resolveCel } from "@/model/types";
+import {
+  clipboardIsEmpty,
+  copySelection,
+  readClipboard,
+  textElementFromPlain,
+  normalizePastedPlainText,
+} from "@/state/clipboard";
+import { isTypingTarget } from "@/lib/typingTarget";
 import { ShaderSnapshotMount } from "@/components/ShaderBackground";
 import {
   ImageFilterSnapshotMount,
@@ -58,6 +64,51 @@ const SHORTCUTS: Record<string, ToolId> = {
   o: "circle",
   l: "line",
 };
+
+function hasArtSelectionOnMoveTool(): boolean {
+  const tool = useTools.getState().tool;
+  if (tool !== "select" && tool !== "path") return false;
+  return useSelection.getState().ids.length > 0;
+}
+
+function sendActiveLayerTo(edge: "back" | "front"): void {
+  const { layerIndex, project, reorderLayer } = useProject.getState();
+  const last = project.layers.length - 1;
+  if (project.layers.length <= 1) return;
+  if (edge === "back" && layerIndex > 0) reorderLayer(layerIndex, 0);
+  else if (edge === "front" && layerIndex < last) reorderLayer(layerIndex, last);
+}
+
+function pastePlainTextAsElement(raw: string): string | null {
+  const text = normalizePastedPlainText(raw);
+  if (!text.trim()) return null;
+  const tools = useTools.getState();
+  const project = useProject.getState().project;
+  const size = tools.textSize;
+  const el = textElementFromPlain(text, {
+    x: Math.round(project.width / 2 - Math.max(120, size * 3)),
+    y: Math.round(project.height / 2 - size),
+    fontFamily: tools.fontFamily,
+    size,
+    color: tools.color,
+    bold: tools.textBold,
+    italic: tools.textItalic,
+    align: tools.textAlign,
+    letterSpacing: tools.letterSpacing,
+    underline: tools.textUnderline,
+    strikethrough: tools.textStrikethrough,
+    textCase: tools.textCase,
+    opacity: tools.textOpacity,
+    backgroundColor: tools.textBackgroundColor,
+    shadow: tools.textShadow,
+    blendMode: tools.textBlendMode,
+    path: tools.textPath.shape === "none" ? null : { ...tools.textPath },
+    boxWidth: Math.max(120, Math.min(project.width * 0.6, size * 8)),
+    typewriterSpeed: tools.textTypewriter ? tools.textTypewriterSpeed : 0,
+  });
+  useProject.getState().addTextElement(el);
+  return el.id;
+}
 
 export default function App() {
   const setTool = useTools((s) => s.setTool);
@@ -123,8 +174,18 @@ export default function App() {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const target = e.target as HTMLElement;
-      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
-        return;
+      const tag = target.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+      const typing = isTypingTarget(target);
+      const artClipboardKey =
+        (e.ctrlKey || e.metaKey) &&
+        !e.altKey &&
+        ["c", "x", "v"].includes(e.key.toLowerCase());
+      // While the text editor is open: Ctrl+V stays native (insert characters).
+      // Ctrl+C / Ctrl+X still copy/cut the text element.
+      if (typing && artClipboardKey && e.key.toLowerCase() === "v") return;
+      if (typing && !artClipboardKey) return;
 
       if (e.key === "Escape") {
         if (usePlayback.getState().stage === "preview") {
@@ -138,23 +199,30 @@ export default function App() {
       }
 
       if (e.ctrlKey || e.metaKey) {
-        if (e.key === "[" || e.code === "BracketLeft") {
-          // Send active layer to bottom (back)
+        const bracketLeft = e.key === "[" || e.code === "BracketLeft";
+        const bracketRight = e.key === "]" || e.code === "BracketRight";
+        if (e.altKey && (bracketLeft || bracketRight)) {
           e.preventDefault();
-          const { layerIndex, project, reorderLayer } = useProject.getState();
-          if (project.layers.length > 1 && layerIndex > 0) {
-            reorderLayer(layerIndex, 0);
+          if (hasArtSelectionOnMoveTool()) {
+            useProject.getState().reorderArt(
+              useSelection.getState().ids,
+              bracketLeft ? "back" : "front",
+            );
+          } else {
+            sendActiveLayerTo(bracketLeft ? "back" : "front");
           }
           return;
         }
-        if (e.key === "]" || e.code === "BracketRight") {
+        if (bracketLeft) {
+          // Send active layer to bottom (back)
+          e.preventDefault();
+          sendActiveLayerTo("back");
+          return;
+        }
+        if (bracketRight) {
           // Bring active layer to top (front)
           e.preventDefault();
-          const { layerIndex, project, reorderLayer } = useProject.getState();
-          const last = project.layers.length - 1;
-          if (project.layers.length > 1 && layerIndex < last) {
-            reorderLayer(layerIndex, last);
-          }
+          sendActiveLayerTo("front");
           return;
         }
         if (e.key === "+" || e.key === "=") {
@@ -214,10 +282,20 @@ export default function App() {
           const ids = useSelection.getState().ids;
           if (!ids.length) return;
           e.preventDefault();
+          e.stopPropagation();
           const ps = useProject.getState();
-          const layer = ps.project.layers[ps.layerIndex];
-          const cel = layer ? resolveCel(layer, ps.frameIndex) : null;
-          if (cel) copyStrokes(cel.strokes.filter((s) => ids.includes(s.id)));
+          copySelection(ps.project, ps.frameIndex, ids);
+          return;
+        }
+        if (e.key.toLowerCase() === "x") {
+          const ids = useSelection.getState().ids;
+          if (!ids.length) return;
+          e.preventDefault();
+          e.stopPropagation();
+          const ps = useProject.getState();
+          if (!copySelection(ps.project, ps.frameIndex, ids)) return;
+          useProject.getState().deleteStrokes(ids);
+          useSelection.getState().clear();
           return;
         }
         if (e.shiftKey && e.key.toLowerCase() === "c") {
@@ -244,10 +322,17 @@ export default function App() {
           return;
         }
         if (e.key.toLowerCase() === "v") {
-          const strokes = readClipboard();
-          if (!strokes.length) return;
+          const art = readClipboard();
+          if (
+            !art.strokes.length &&
+            !art.texts.length &&
+            !art.images.length
+          ) {
+            return;
+          }
           e.preventDefault();
-          const newIds = useProject.getState().pasteStrokes(strokes);
+          e.stopPropagation();
+          const newIds = useProject.getState().pasteArt(art);
           if (newIds.length) {
             useSelection.getState().set(newIds);
             useTools.getState().setTool("select");
@@ -258,19 +343,45 @@ export default function App() {
 
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 
-      if (e.key === "[" || e.code === "BracketLeft") {
-        // Move active layer one step back
+      if (
+        (e.key === "ArrowLeft" ||
+          e.key === "ArrowRight" ||
+          e.key === "ArrowUp" ||
+          e.key === "ArrowDown") &&
+        hasArtSelectionOnMoveTool()
+      ) {
         e.preventDefault();
-        const { layerIndex, reorderLayer } = useProject.getState();
-        if (layerIndex > 0) reorderLayer(layerIndex, layerIndex - 1);
+        e.stopPropagation();
+        const step = e.shiftKey ? 10 : 1;
+        let dx = 0;
+        let dy = 0;
+        if (e.key === "ArrowLeft") dx = -step;
+        else if (e.key === "ArrowRight") dx = step;
+        else if (e.key === "ArrowUp") dy = -step;
+        else dy = step;
+        useProject.getState().translateStrokes(useSelection.getState().ids, dx, dy);
+        return;
+      }
+
+      if (e.key === "[" || e.code === "BracketLeft") {
+        e.preventDefault();
+        if (hasArtSelectionOnMoveTool()) {
+          useProject.getState().reorderArt(useSelection.getState().ids, "backward");
+        } else {
+          const { layerIndex, reorderLayer } = useProject.getState();
+          if (layerIndex > 0) reorderLayer(layerIndex, layerIndex - 1);
+        }
         return;
       }
       if (e.key === "]" || e.code === "BracketRight") {
-        // Move active layer one step forward
         e.preventDefault();
-        const { layerIndex, project, reorderLayer } = useProject.getState();
-        if (layerIndex < project.layers.length - 1) {
-          reorderLayer(layerIndex, layerIndex + 1);
+        if (hasArtSelectionOnMoveTool()) {
+          useProject.getState().reorderArt(useSelection.getState().ids, "forward");
+        } else {
+          const { layerIndex, project, reorderLayer } = useProject.getState();
+          if (layerIndex < project.layers.length - 1) {
+            reorderLayer(layerIndex, layerIndex + 1);
+          }
         }
         return;
       }
@@ -336,6 +447,22 @@ export default function App() {
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [setTool, undo, redo, setStage]);
+
+  useEffect(() => {
+    function onPaste(e: ClipboardEvent) {
+      if (isTypingTarget(e.target)) return;
+      if (e.defaultPrevented) return;
+      if (!clipboardIsEmpty(readClipboard())) return;
+      const plain = e.clipboardData?.getData("text/plain") ?? "";
+      const id = pastePlainTextAsElement(plain);
+      if (!id) return;
+      e.preventDefault();
+      useSelection.getState().set([id]);
+      useTools.getState().setTool("select");
+    }
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, []);
 
   /**
    * Ctrl/trackpad-pinch wheel events over the canvas already drive

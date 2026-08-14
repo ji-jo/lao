@@ -25,6 +25,16 @@ import { extrasAfterPathEdit } from "@/components/stage/leaferBridge";
 import { flattenBezierNodes, pointsToBezierNodes } from "@/lib/bezier";
 import { clearBrushDraftCache } from "@/engine/brushStyles";
 import {
+  ART_DUPLICATE_OFFSET,
+  cloneImageAtOffset,
+  cloneStrokeAtOffset,
+  cloneTextAtOffset,
+} from "@/engine/artDuplicate";
+import {
+  reorderByIds,
+  type ArtReorderWhere,
+} from "@/engine/artReorder";
+import {
   allProjectClipItems,
   projectClipEndMs,
   retimeStrokePoints,
@@ -202,8 +212,18 @@ interface ProjectState {
     id: string,
     where: "forward" | "backward" | "front" | "back",
   ) => void;
+  /** Reorder selected strokes / texts / images within each cel (later = in front). */
+  reorderArt: (ids: string[], where: ArtReorderWhere) => void;
   /** Duplicate text at a slight offset; returns new id or null. */
   duplicateTextElement: (id: string) => string | null;
+  /** Alt+click duplicate: clone selected art on the same layers, offset, new ids. */
+  duplicateArt: (ids: string[], dx?: number, dy?: number) => string[];
+  /** paste art into the current frame at original coordinates; returns the new ids */
+  pasteArt: (art: {
+    strokes: Stroke[];
+    texts?: TextElement[];
+    images?: ImageElement[];
+  }) => string[];
   /** paste strokes into the current frame at their original coordinates; returns the new ids */
   pasteStrokes: (strokes: Stroke[]) => string[];
   deleteStrokes: (ids: string[]) => void;
@@ -817,40 +837,48 @@ export const useProject = create<ProjectState>((set, get) => {
     },
 
     reorderTextElement: (id, where) => {
-      const s = get();
-      let found = false;
-      let nextProject = { ...s.project, layers: [...s.project.layers] };
+      get().reorderArt([id], where);
+    },
+
+    reorderArt: (ids, where) => {
+      if (!ids.length) return;
+      const { project, frameIndex } = get();
+      let nextProject = project;
+      let anyChanged = false;
 
       for (let li = 0; li < nextProject.layers.length; li++) {
         const layer = nextProject.layers[li];
-        let newFrames = [...layer.frames];
-        let layerChanged = false;
+        const target = resolveEditTarget(nextProject, layer, frameIndex);
+        if (!target) continue;
+        const cel = layer.frames[target.readIndex];
+        if (!cel) continue;
 
-        for (let fi = 0; fi < newFrames.length; fi++) {
-          const cel = newFrames[fi];
-          if (!cel?.texts?.length) continue;
-          const idx = cel.texts.findIndex((t) => t.id === id);
-          if (idx === -1) continue;
-          const nextTexts = [...cel.texts];
-          const [item] = nextTexts.splice(idx, 1);
-          if (where === "front") nextTexts.push(item);
-          else if (where === "back") nextTexts.unshift(item);
-          else if (where === "forward") {
-            const to = Math.min(nextTexts.length, idx + 1);
-            nextTexts.splice(to, 0, item);
-          } else {
-            const to = Math.max(0, idx - 1);
-            nextTexts.splice(to, 0, item);
-          }
-          newFrames[fi] = { ...cel, texts: nextTexts };
-          layerChanged = true;
-          found = true;
+        const strokes = reorderByIds(cel.strokes, ids, where);
+        const texts = cel.texts
+          ? reorderByIds(cel.texts, ids, where)
+          : undefined;
+        const images = cel.images
+          ? reorderByIds(cel.images, ids, where)
+          : undefined;
+        if (
+          strokes === cel.strokes &&
+          texts === cel.texts &&
+          images === cel.images
+        ) {
+          continue;
         }
-        if (layerChanged) {
-          nextProject.layers[li] = { ...layer, frames: newFrames };
-        }
+
+        const writeCel = target.cloneFromHeld
+          ? { ...cloneCel(cel), strokes, texts, images }
+          : { ...cel, strokes, texts, images };
+        nextProject = replaceLayer(
+          nextProject,
+          li,
+          setCel(nextProject.layers[li], target.writeIndex, writeCel),
+        );
+        anyChanged = true;
       }
-      if (found) commit(nextProject);
+      if (anyChanged) commit(nextProject);
     },
 
     duplicateTextElement: (id) => {
@@ -881,79 +909,186 @@ export const useProject = create<ProjectState>((set, get) => {
       return newId;
     },
 
-    pasteStrokes: (strokes) => {
-      if (strokes.length === 0) return [];
+    duplicateArt: (ids, dx = ART_DUPLICATE_OFFSET, dy = ART_DUPLICATE_OFFSET) => {
+      if (!ids.length) return [];
+      const idSet = new Set(ids);
+      const { project, frameIndex } = get();
+      const newIds: string[] = [];
+      let nextProject = project;
+      let any = false;
+
+      for (let li = 0; li < nextProject.layers.length; li++) {
+        const layer = nextProject.layers[li];
+        const target = resolveEditTarget(nextProject, layer, frameIndex);
+        if (!target) continue;
+        const cel = layer.frames[target.readIndex];
+        if (!cel) continue;
+
+        const extraStrokes: Stroke[] = [];
+        const extraTexts: TextElement[] = [];
+        const extraImages: ImageElement[] = [];
+        for (const s of cel.strokes) {
+          if (!idSet.has(s.id)) continue;
+          const copy = cloneStrokeAtOffset(s, dx, dy);
+          extraStrokes.push(copy);
+          newIds.push(copy.id);
+        }
+        for (const t of cel.texts ?? []) {
+          if (!idSet.has(t.id)) continue;
+          const copy = cloneTextAtOffset(t, dx, dy);
+          extraTexts.push(copy);
+          newIds.push(copy.id);
+        }
+        for (const im of cel.images ?? []) {
+          if (!idSet.has(im.id)) continue;
+          const copy = cloneImageAtOffset(im, dx, dy);
+          extraImages.push(copy);
+          newIds.push(copy.id);
+        }
+        if (!extraStrokes.length && !extraTexts.length && !extraImages.length) {
+          continue;
+        }
+
+        const writeCel = target.cloneFromHeld ? cloneCel(cel) : { ...cel };
+        writeCel.strokes = [...writeCel.strokes, ...extraStrokes];
+        writeCel.texts = [...(writeCel.texts ?? []), ...extraTexts];
+        writeCel.images = [...(writeCel.images ?? []), ...extraImages];
+        nextProject = replaceLayer(
+          nextProject,
+          li,
+          setCel(nextProject.layers[li], target.writeIndex, writeCel),
+        );
+        any = true;
+      }
+      if (any) commit(nextProject);
+      return newIds;
+    },
+
+    pasteArt: (art) => {
+      const strokesIn = art.strokes ?? [];
+      const textsIn = art.texts ?? [];
+      const imagesIn = art.images ?? [];
+      if (!strokesIn.length && !textsIn.length && !imagesIn.length) return [];
+
       const { project, layerIndex, frameIndex } = get();
       const layer = project.layers[layerIndex];
       if (!layer) return [];
-      const fi = layer.isStatic ? 0 : frameIndex;
-      const pasted = strokes.map((s) => ({
-        ...s,
-        id: crypto.randomUUID(),
-        points: s.points.map((p) => ({ ...p })),
-      }));
-      // paste into the keyframe at this slot; if the slot is empty or held,
-      // start a fresh cel here — the paste is what you're placing
-      const existing = layer.frames[fi] ?? null;
-      const cel: Frame = existing
-        ? { ...existing, strokes: [...existing.strokes, ...pasted] }
-        : { id: crypto.randomUUID(), strokes: pasted };
-      commit(replaceLayer(project, layerIndex, setCel(layer, fi, cel)));
-      return pasted.map((s) => s.id);
+      const target = resolveEditTarget(project, layer, frameIndex);
+      const writeIndex =
+        target?.writeIndex ?? (layer.isStatic ? 0 : frameIndex);
+      const readIndex = target?.readIndex ?? writeIndex;
+
+      const pastedStrokes = strokesIn.map((s) => {
+        const { groupId: _drop, ...rest } = s;
+        return {
+          ...rest,
+          id: crypto.randomUUID(),
+          points: s.points.map((p) => ({ ...p })),
+        };
+      });
+      const pastedTexts = textsIn.map((t) => {
+        const { groupId: _drop, ...rest } = t;
+        return {
+          ...rest,
+          id: crypto.randomUUID(),
+          path: t.path ? { ...t.path } : t.path,
+          shadow: t.shadow ? { ...t.shadow } : t.shadow,
+        };
+      });
+      const pastedImages = imagesIn.map((im) => {
+        const { groupId: _drop, ...rest } = im;
+        return { ...rest, id: crypto.randomUUID() };
+      });
+      const newIds = [
+        ...pastedStrokes.map((s) => s.id),
+        ...pastedTexts.map((t) => t.id),
+        ...pastedImages.map((im) => im.id),
+      ];
+
+      const existing = layer.frames[readIndex] ?? null;
+      const base = existing
+        ? target?.cloneFromHeld
+          ? cloneCel(existing)
+          : { ...existing }
+        : emptyCel();
+      const cel: Frame = {
+        ...base,
+        strokes: [...base.strokes, ...pastedStrokes],
+        texts: [...(base.texts ?? []), ...pastedTexts],
+        images: [...(base.images ?? []), ...pastedImages],
+      };
+      commit(replaceLayer(project, layerIndex, setCel(layer, writeIndex, cel)));
+      return newIds;
     },
 
+    pasteStrokes: (strokes) => get().pasteArt({ strokes }),
+
     deleteStrokes: (ids) => {
-      const { project, layerIndex, frameIndex } = get();
-      const layer = project.layers[layerIndex];
-      if (!layer) return;
-      const target = resolveEditTarget(project, layer, frameIndex);
-      if (!target) return;
+      if (!ids.length) return;
+      const idSet = new Set(ids);
+      const { project, frameIndex, layerIndex } = get();
+      let nextProject = project;
+      let anyChanged = false;
+      const dropLayers = new Set<number>();
 
-      const cel = layer.frames[target.readIndex]!;
-      const strokes = cel.strokes.filter((s) => !ids.includes(s.id));
-      const texts = cel.texts?.filter((t) => !ids.includes(t.id));
-      const images = cel.images?.filter((im) => !ids.includes(im.id));
-      const removedImage =
-        (cel.images?.length ?? 0) > 0 &&
-        (images?.length ?? 0) < (cel.images?.length ?? 0);
-      if (
-        strokes.length === cel.strokes.length &&
-        (!cel.texts || texts?.length === cel.texts.length) &&
-        (!cel.images || images?.length === cel.images.length)
-      ) {
-        return;
+      for (let li = 0; li < nextProject.layers.length; li++) {
+        const layer = nextProject.layers[li];
+        const target = resolveEditTarget(nextProject, layer, frameIndex);
+        if (!target) continue;
+        const cel = layer.frames[target.readIndex];
+        if (!cel) continue;
+
+        const strokes = cel.strokes.filter((s) => !idSet.has(s.id));
+        const texts = cel.texts?.filter((t) => !idSet.has(t.id));
+        const images = cel.images?.filter((im) => !idSet.has(im.id));
+        const removedImage =
+          (cel.images?.length ?? 0) > 0 &&
+          (images?.length ?? 0) < (cel.images?.length ?? 0);
+        if (
+          strokes.length === cel.strokes.length &&
+          (!cel.texts || texts?.length === cel.texts.length) &&
+          (!cel.images || images?.length === cel.images.length)
+        ) {
+          continue;
+        }
+        anyChanged = true;
+
+        if (
+          removedImage &&
+          strokes.length === 0 &&
+          !(texts?.length) &&
+          !(images?.length) &&
+          nextProject.layers.length - dropLayers.size > 1
+        ) {
+          dropLayers.add(li);
+          continue;
+        }
+
+        const writeCel = target.cloneFromHeld
+          ? { ...cloneCel(cel), strokes, texts, images }
+          : { ...cel, strokes, texts, images };
+        nextProject = replaceLayer(
+          nextProject,
+          li,
+          setCel(nextProject.layers[li], target.writeIndex, writeCel),
+        );
       }
+      if (!anyChanged) return;
 
-      // MVP §25 — deleting a canvas image also removes its dedicated layer
-      // when that layer has no other content.
-      if (
-        removedImage &&
-        strokes.length === 0 &&
-        !(texts?.length) &&
-        !(images?.length) &&
-        project.layers.length > 1
-      ) {
-        const layers = project.layers.filter((_, i) => i !== layerIndex);
-        commit({ ...project, layers });
-        set({
-          layerIndex: Math.min(
-            layerIndex,
-            Math.max(0, layers.length - 1),
-          ),
-        });
-        return;
+      let nextLayerIndex = layerIndex;
+      if (dropLayers.size) {
+        const layers = nextProject.layers.filter((_, i) => !dropLayers.has(i));
+        nextProject = { ...nextProject, layers };
+        const removedBefore = [...dropLayers].filter((i) => i < layerIndex).length;
+        nextLayerIndex = Math.min(
+          Math.max(0, layerIndex - removedBefore),
+          Math.max(0, layers.length - 1),
+        );
       }
-
-      const writeCel = target.cloneFromHeld
-        ? { ...cloneCel(cel), strokes, texts, images }
-        : { ...cel, strokes, texts, images };
-      commit(
-        replaceLayer(
-          project,
-          layerIndex,
-          setCel(layer, target.writeIndex, writeCel),
-        ),
-      );
+      commit(nextProject);
+      if (nextLayerIndex !== get().layerIndex) {
+        set({ layerIndex: nextLayerIndex });
+      }
     },
 
     convertStrokeToBezier: (strokeId) => {
@@ -1636,18 +1771,11 @@ export const useProject = create<ProjectState>((set, get) => {
     addKeyframe: () => {
       const { project, layerIndex, frameIndex } = get();
       const layer = project.layers[layerIndex];
-      if (!layer || layer.isStatic) return;
-
-      let newCel = emptyCel();
-      const pb = usePlayback.getState();
-      if (pb.onionSkin && pb.onionAutoDuplicate && frameIndex > 0) {
-        const prevCelIdx = resolveCelIndex(layer, frameIndex - 1);
-        if (prevCelIdx !== null) {
-          newCel = cloneCel(layer.frames[prevCelIdx]!);
-        }
-      }
-
-      commit(replaceLayer(project, layerIndex, setCel(layer, frameIndex, newCel)));
+      if (!layer) return;
+      const fi = layer.isStatic ? 0 : frameIndex;
+      // Always a blank key — onion auto-duplicate is for drawing on a hold,
+      // not for the Empty cel button (that was leaving the previous drawing).
+      commit(replaceLayer(project, layerIndex, setCel(layer, fi, emptyCel())));
     },
 
     /** duplicate the current cel onto the next frame and move there — the core draw→flip→draw loop */

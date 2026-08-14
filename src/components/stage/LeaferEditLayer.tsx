@@ -13,9 +13,13 @@ import "@leafer-in/text-editor";
 import {
   applyFitToGroup,
   canEditShapeWithLeafer,
+  leaferCenterToShapeBox,
   leaferTextToCommit,
+  oppositeResizeAlign,
+  resizeBoxKeepingAlign,
   shapeBoxToLeaferCenter,
   textElementToLeaferProps,
+  type ResizePinAlign,
   type StageFit,
   type TextCommitResult,
   type TextEditSession,
@@ -40,6 +44,7 @@ import {
   snapImageBox,
   setImageLivePreview,
   getImageLivePreview,
+  hitTestImage,
   type GuideLine,
 } from "@/engine/canvasImage";
 import {
@@ -49,13 +54,16 @@ import { hitTextBox } from "@/engine/textGeometry";
 import {
   findArtAtProject,
   hitsImageEditChrome,
+  hitsShapeBody,
   hitsShapeEditChrome,
 } from "@/engine/artHitTest";
+import { ART_DUPLICATE_OFFSET } from "@/engine/artDuplicate";
 import { resolveCel, type Stroke, type TextElement } from "@/model/types";
 import { useProject } from "@/state/project";
 import { useSelection } from "@/state/selection";
 import { useTools, activeShapeTool, type ShapeToolId } from "@/state/tools";
 import { useViewport } from "@/state/viewport";
+import { readClipboard } from "@/state/clipboard";
 import { textFontStack } from "@/lib/google-fonts";
 import {
   EditorMoveEvent,
@@ -186,9 +194,36 @@ export function LeaferEditLayer({
   const shapeEditDirtyRef = useRef(false);
   /** After remount, ignore Leafer SCALE/MOVE until the user pointerdowns (select() fires false transforms). */
   const shapeEditIgnoreTransformsRef = useRef(false);
+  /** Unrotated box at resize-gesture start — pin the opposite edge in world space. */
+  const shapeResizeStartRef = useRef<{
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    rotation?: number;
+    align: ResizePinAlign;
+  } | null>(null);
+  const imageResizeStartRef = useRef<{
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    rotation?: number;
+    align: ResizePinAlign;
+  } | null>(null);
   const imageEditProxyRef = useRef<Rect | null>(null);
   const imageEditIdRef = useRef<string | null>(null);
   const imageEditDirtyRef = useRef(false);
+  /** Alt+drag duplicate: keep this gesture after the copy remounts. */
+  const altDragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    ids: string[];
+    originX?: number;
+    originY?: number;
+    moved: boolean;
+  } | null>(null);
   const imageGuideRefs = useRef<Line[]>([]);
   const textBoxProxyRef = useRef<Rect | null>(null);
   const textDragRef = useRef<{
@@ -464,10 +499,10 @@ export function LeaferEditLayer({
         selectedStyle: { stroke: "#A78BFA", strokeWidth: 2 },
         hoverStyle: { stroke: "#A78BFA", strokeWidth: 1.5 },
         pointSize: 10,
-        // Rotate around the shape center. Do NOT set `around: "center"` —
-        // that doubles side-handle drags so width/height grow from both
-        // edges (Figma Alt). Default: opposite edge stays put. Alt still
-        // scales from center via Leafer getAround(around, altKey).
+        // Node proxies use around:"center" so x/y is the visual center (required
+        // for rotate bake). Do NOT set editor around:"center" — that doubles
+        // side-handle drags so width/height grow from both edges. Rotate still
+        // uses rotateAround. Alt still scales from center via getAround.
         rotateAround: "center",
         editSize: "size",
         // 0 falls back to Leafer's default 45° — use 5° for image/shape rotate.
@@ -671,6 +706,7 @@ export function LeaferEditLayer({
       }, 0);
 
       // Esc finalizes (Leafer also handles Esc). Enter stays a newline in TextEditor.
+      // Ctrl+C/X/V copy the text *element* (App handler); block native char copy/cut.
       keyHandler = (e: KeyboardEvent) => {
         if (e.key === "Escape") {
           e.preventDefault();
@@ -679,6 +715,26 @@ export function LeaferEditLayer({
             app.editor.closeInnerEditor();
           } catch {
             commitOnce();
+          }
+          return;
+        }
+        if (
+          (e.ctrlKey || e.metaKey) &&
+          !e.altKey &&
+          ["c", "x", "v"].includes(e.key.toLowerCase())
+        ) {
+          const k = e.key.toLowerCase();
+          if (k === "v") {
+            const art = readClipboard();
+            if (art.strokes.length || art.texts.length || art.images.length) {
+              e.preventDefault();
+              e.stopPropagation();
+            }
+            return;
+          }
+          if (useSelection.getState().ids.length) {
+            e.preventDefault();
+            e.stopPropagation();
           }
         }
       };
@@ -1170,6 +1226,7 @@ export function LeaferEditLayer({
         shapeEditKindRef.current = null;
         shapeEditDirtyRef.current = false;
         shapeEditIgnoreTransformsRef.current = false;
+        shapeResizeStartRef.current = null;
         setShapeLivePreview(null);
       }
       return;
@@ -1198,6 +1255,7 @@ export function LeaferEditLayer({
       shapeEditStrokeIdRef.current = null;
       shapeEditKindRef.current = null;
       shapeEditDirtyRef.current = false;
+      shapeResizeStartRef.current = null;
       setShapeLivePreview(null);
     };
 
@@ -1248,9 +1306,78 @@ export function LeaferEditLayer({
       publishLive();
     };
 
-    const onPointerUp = () => commitIfDirty();
+    const closedEdit = isClosedShape(kind);
+
+    const resizeHandleDirection = (e: EditorScaleEvent): number =>
+      e.direction ??
+      (
+        appRef.current?.editor as
+          | { dragPoint?: { direction?: number } }
+          | undefined
+      )?.dragPoint?.direction ??
+      8;
+
+    const onScaleBefore = (e: EditorScaleEvent) => {
+      if (shapeEditIgnoreTransformsRef.current) return;
+      if (!closedEdit || shapeResizeStartRef.current) return;
+      const node = shapeEditProxyRef.current;
+      if (!node) return;
+      const w = Math.max(
+        1,
+        Math.abs((Number(node.width) || 1) * (Number(node.scaleX) || 1)),
+      );
+      const h = Math.max(
+        1,
+        Math.abs((Number(node.height) || 1) * (Number(node.scaleY) || 1)),
+      );
+      const box = leaferCenterToShapeBox({
+        x: Number(node.x) || 0,
+        y: Number(node.y) || 0,
+        w,
+        h,
+        rotationDeg: Number(node.rotation) || 0,
+      });
+      shapeResizeStartRef.current = {
+        x: box.x,
+        y: box.y,
+        w: box.w,
+        h: box.h,
+        rotation: (box.rotationDeg * Math.PI) / 180,
+        align: oppositeResizeAlign(
+          resizeHandleDirection(e),
+          e.around === "center",
+        ),
+      };
+    };
+
+    const onScale = () => {
+      const start = shapeResizeStartRef.current;
+      const node = shapeEditProxyRef.current;
+      if (start && node && closedEdit && !shapeEditIgnoreTransformsRef.current) {
+        const w = Math.max(
+          1,
+          Math.abs((Number(node.width) || 1) * (Number(node.scaleX) || 1)),
+        );
+        const h = Math.max(
+          1,
+          Math.abs((Number(node.height) || 1) * (Number(node.scaleY) || 1)),
+        );
+        const next = resizeBoxKeepingAlign(start, w, h, start.align);
+        const c = shapeBoxToLeaferCenter(next);
+        node.x = c.x;
+        node.y = c.y;
+      }
+      markDirty();
+    };
+
+    const onPointerUp = () => {
+      if (altDragRef.current) return;
+      shapeResizeStartRef.current = null;
+      commitIfDirty();
+    };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        shapeResizeStartRef.current = null;
         commitIfDirty();
         useSelection.getState().clear();
       }
@@ -1286,7 +1413,11 @@ export function LeaferEditLayer({
         shapeEditStrokeIdRef.current = stroke.id;
         shapeEditKindRef.current = kind;
         shapeEditDirtyRef.current = false;
-        shapeEditIgnoreTransformsRef.current = true;
+        shapeEditIgnoreTransformsRef.current = !altDragRef.current;
+        if (altDragRef.current && altDragRef.current.originX == null) {
+          altDragRef.current.originX = Number(proxy.x) || 0;
+          altDragRef.current.originY = Number(proxy.y) || 0;
+        }
         try {
           app.editor.select(proxy);
           app.editor.update();
@@ -1321,7 +1452,8 @@ export function LeaferEditLayer({
       if (!mounted) {
         mounted = true;
         app.editor.on(EditorMoveEvent.MOVE, markDirty);
-        app.editor.on(EditorScaleEvent.SCALE, markDirty);
+        app.editor.on(EditorScaleEvent.BEFORE_SCALE, onScaleBefore);
+        app.editor.on(EditorScaleEvent.SCALE, onScale);
         app.editor.on(EditorRotateEvent.ROTATE, markDirty);
         host?.addEventListener("pointerdown", armUserTransforms, true);
         window.addEventListener("pointerdown", armUserTransforms, true);
@@ -1338,7 +1470,8 @@ export function LeaferEditLayer({
       const app = appRef.current;
       if (app && mounted) {
         app.editor.off(EditorMoveEvent.MOVE, markDirty);
-        app.editor.off(EditorScaleEvent.SCALE, markDirty);
+        app.editor.off(EditorScaleEvent.BEFORE_SCALE, onScaleBefore);
+        app.editor.off(EditorScaleEvent.SCALE, onScale);
         app.editor.off(EditorRotateEvent.ROTATE, markDirty);
       }
       host?.removeEventListener("pointerdown", armUserTransforms, true);
@@ -1392,6 +1525,89 @@ export function LeaferEditLayer({
 
       const shape = editingShape;
       const image = editingImage;
+      const selectedId = shape?.id ?? image?.id ?? null;
+
+      // Shift+click another shape even if the pointer is inside this one's
+      // padded editor chrome (otherwise Leafer eats the click as a move).
+      if (e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+        const art = findArtAtProject(
+          useProject.getState().project,
+          useProject.getState().frameIndex,
+          x,
+          y,
+          measureCtx,
+        );
+        if (art && art.id !== selectedId) {
+          e.preventDefault();
+          e.stopPropagation();
+          flushShapeEditToProject();
+          const idx = useProject
+            .getState()
+            .project.layers.findIndex((l) => l.id === art.layerId);
+          if (idx !== -1 && idx !== useProject.getState().layerIndex) {
+            useProject.getState().setLayerIndex(idx);
+          }
+          useSelection.getState().toggle(art.id);
+          useTools.getState().setTool("select");
+          return;
+        }
+      }
+
+      if (
+        e.altKey &&
+        !e.shiftKey &&
+        !e.ctrlKey &&
+        !e.metaKey
+      ) {
+        const onCurrentBody =
+          (shape && hitsShapeBody(shape, x, y)) ||
+          (image && hitTestImage(image, x, y));
+        const art = onCurrentBody
+          ? null
+          : findArtAtProject(
+              useProject.getState().project,
+              useProject.getState().frameIndex,
+              x,
+              y,
+              measureCtx,
+            );
+        const sel = useSelection.getState();
+        const ids =
+          onCurrentBody && shape && sel.ids.includes(shape.id) && sel.ids.length > 1
+            ? [...sel.ids]
+            : onCurrentBody && image && sel.ids.includes(image.id) && sel.ids.length > 1
+              ? [...sel.ids]
+              : onCurrentBody
+                ? [shape?.id ?? image?.id ?? ""]
+                : art
+                  ? [art.id]
+                  : [];
+        const cleanIds = ids.filter(Boolean);
+        if (cleanIds.length) {
+          e.preventDefault();
+          e.stopPropagation();
+          flushShapeEditToProject();
+          const newIds = useProject.getState().duplicateArt(cleanIds, 0, 0);
+          if (newIds.length) {
+            sel.set(newIds);
+            useTools.getState().setTool("select");
+            altDragRef.current = {
+              pointerId: e.pointerId,
+              startX: x,
+              startY: y,
+              ids: newIds,
+              moved: false,
+            };
+            try {
+              host.setPointerCapture(e.pointerId);
+            } catch {
+              /* best-effort */
+            }
+          }
+          return;
+        }
+      }
+
       if (shape && hitsShapeEditChrome(shape, x, y, fit.scale)) {
         return;
       }
@@ -1404,7 +1620,6 @@ export function LeaferEditLayer({
       e.stopPropagation();
 
       const ps = useProject.getState();
-      const selectedId = shape?.id ?? image?.id ?? null;
       const art = findArtAtProject(
         ps.project,
         ps.frameIndex,
@@ -1453,6 +1668,122 @@ export function LeaferEditLayer({
     textCreateActive,
     fitRef,
   ]);
+
+  // Alt+duplicate drag — survives Leafer remount onto the copy.
+  useEffect(() => {
+    const projectPoint = (e: PointerEvent) => {
+      const host = hostRef.current;
+      const fit = fitRef.current;
+      if (!host || !fit || fit.scale <= 0) return null;
+      const rect = host.getBoundingClientRect();
+      return {
+        x: (e.clientX - rect.left - fit.ox) / fit.scale,
+        y: (e.clientY - rect.top - fit.oy) / fit.scale,
+      };
+    };
+
+    const onMove = (e: PointerEvent) => {
+      const drag = altDragRef.current;
+      if (!drag || e.pointerId !== drag.pointerId) return;
+      const p = projectPoint(e);
+      if (!p) return;
+      const dx = p.x - drag.startX;
+      const dy = p.y - drag.startY;
+      if (Math.hypot(dx, dy) >= 2) drag.moved = true;
+      const node =
+        shapeEditProxyRef.current ?? imageEditProxyRef.current;
+      if (!node) return;
+      if (drag.originX == null) {
+        drag.originX = Number(node.x) || 0;
+        drag.originY = Number(node.y) || 0;
+      }
+      node.x = drag.originX + dx;
+      node.y = (drag.originY ?? 0) + dy;
+      const id = shapeEditStrokeIdRef.current;
+      const k = shapeEditKindRef.current;
+      if (shapeEditProxyRef.current && id && k) {
+        shapeEditDirtyRef.current = true;
+        const existing = (() => {
+          const ps = useProject.getState();
+          for (const layer of ps.project.layers) {
+            for (const frame of layer.frames) {
+              const hit = frame?.strokes.find((s) => s.id === id);
+              if (hit) return hit;
+            }
+          }
+          return null;
+        })();
+        if (!existing) return;
+        const baked = bakeEditableShape(k, shapeEditProxyRef.current, {
+          cornerRadius: existing.cornerRadius,
+          squircle: existing.squircle,
+          cornerSmoothing: existing.cornerSmoothing,
+        });
+        setShapeLivePreview({
+          id,
+          points: baked.points,
+          shapeBox: baked.shapeBox,
+        });
+      } else if (imageEditProxyRef.current && imageEditIdRef.current) {
+        imageEditDirtyRef.current = true;
+        const baked = bakeEditableImage(imageEditProxyRef.current);
+        setImageLivePreview({ id: imageEditIdRef.current, ...baked });
+      }
+    };
+
+    const onUp = (e: PointerEvent) => {
+      const drag = altDragRef.current;
+      if (!drag || e.pointerId !== drag.pointerId) return;
+      altDragRef.current = null;
+      if (!drag.moved) {
+        shapeEditDirtyRef.current = false;
+        imageEditDirtyRef.current = false;
+        setShapeLivePreview(null);
+        setImageLivePreview(null);
+        useProject
+          .getState()
+          .translateStrokes(
+            drag.ids,
+            ART_DUPLICATE_OFFSET,
+            ART_DUPLICATE_OFFSET,
+          );
+        return;
+      }
+      flushShapeEditToProject();
+      const img = imageEditProxyRef.current;
+      const imgId = imageEditIdRef.current;
+      if (img && imgId && imageEditDirtyRef.current) {
+        const baked = bakeEditableImage(img);
+        const pw = useProject.getState().project.width;
+        const ph = useProject.getState().project.height;
+        const snapped = snapImageBox(baked, pw, ph, 0);
+        useProject.getState().updateImageElement(imgId, {
+          x: snapped.box.x,
+          y: snapped.box.y,
+          w: snapped.box.w,
+          h: snapped.box.h,
+          rotation: baked.rotation,
+        });
+        imageEditDirtyRef.current = false;
+        setImageLivePreview(null);
+        img.scaleX = 1;
+        img.scaleY = 1;
+        img.x = snapped.box.x + snapped.box.w / 2;
+        img.y = snapped.box.y + snapped.box.h / 2;
+        img.width = snapped.box.w;
+        img.height = snapped.box.h;
+      }
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [fitRef]);
 
   // Selected canvas image — Leafer free transform (move / squeeze / rotate) + guides.
   useEffect(() => {
@@ -1579,6 +1910,7 @@ export function LeaferEditLayer({
       imageEditProxyRef.current = null;
       imageEditIdRef.current = null;
       imageEditDirtyRef.current = false;
+      imageResizeStartRef.current = null;
       setImageLivePreview(null);
       clearGuides();
     };
@@ -1603,8 +1935,8 @@ export function LeaferEditLayer({
       setImageLivePreview(null);
       node.scaleX = 1;
       node.scaleY = 1;
-      node.x = snapped.box.x;
-      node.y = snapped.box.y;
+      node.x = snapped.box.x + snapped.box.w / 2;
+      node.y = snapped.box.y + snapped.box.h / 2;
       node.width = snapped.box.w;
       node.height = snapped.box.h;
       node.rotation = (baked.rotation * 180) / Math.PI;
@@ -1629,7 +1961,55 @@ export function LeaferEditLayer({
       showGuides(guides);
     };
 
+    const imageResizeHandleDirection = (e: EditorScaleEvent): number =>
+      e.direction ??
+      (
+        appRef.current?.editor as
+          | { dragPoint?: { direction?: number } }
+          | undefined
+      )?.dragPoint?.direction ??
+      8;
+
+    const onImageScaleBefore = (e: EditorScaleEvent) => {
+      if (imageResizeStartRef.current) return;
+      const node = imageEditProxyRef.current;
+      if (!node) return;
+      const baked = bakeEditableImage(node);
+      imageResizeStartRef.current = {
+        x: baked.x,
+        y: baked.y,
+        w: baked.w,
+        h: baked.h,
+        rotation: baked.rotation,
+        align: oppositeResizeAlign(
+          imageResizeHandleDirection(e),
+          e.around === "center",
+        ),
+      };
+    };
+
+    const onImageScale = () => {
+      const start = imageResizeStartRef.current;
+      const node = imageEditProxyRef.current;
+      if (start && node) {
+        const w = Math.max(
+          1,
+          Math.abs((Number(node.width) || 1) * (Number(node.scaleX) || 1)),
+        );
+        const h = Math.max(
+          1,
+          Math.abs((Number(node.height) || 1) * (Number(node.scaleY) || 1)),
+        );
+        const next = resizeBoxKeepingAlign(start, w, h, start.align);
+        node.x = next.x + next.w / 2;
+        node.y = next.y + next.h / 2;
+      }
+      onTransform();
+    };
+
     const onPointerUp = () => {
+      if (altDragRef.current) return;
+      imageResizeStartRef.current = null;
       const node = imageEditProxyRef.current;
       if (node && imageEditDirtyRef.current) {
         const baked = bakeEditableImage(node);
@@ -1677,6 +2057,10 @@ export function LeaferEditLayer({
         imageEditProxyRef.current = proxy;
         imageEditIdRef.current = image.id;
         imageEditDirtyRef.current = false;
+        if (altDragRef.current && altDragRef.current.originX == null) {
+          altDragRef.current.originX = Number(proxy.x) || 0;
+          altDragRef.current.originY = Number(proxy.y) || 0;
+        }
         try {
           app.editor.select(proxy);
           app.editor.update();
@@ -1707,7 +2091,8 @@ export function LeaferEditLayer({
       if (!mounted) {
         mounted = true;
         app.editor.on(EditorMoveEvent.MOVE, onTransform);
-        app.editor.on(EditorScaleEvent.SCALE, onTransform);
+        app.editor.on(EditorScaleEvent.BEFORE_SCALE, onImageScaleBefore);
+        app.editor.on(EditorScaleEvent.SCALE, onImageScale);
         app.editor.on(EditorRotateEvent.ROTATE, onTransform);
         window.addEventListener("pointerup", onPointerUp);
         window.addEventListener("keydown", onKeyDown);
@@ -1722,7 +2107,8 @@ export function LeaferEditLayer({
       const app = appRef.current;
       if (app && mounted) {
         app.editor.off(EditorMoveEvent.MOVE, onTransform);
-        app.editor.off(EditorScaleEvent.SCALE, onTransform);
+        app.editor.off(EditorScaleEvent.BEFORE_SCALE, onImageScaleBefore);
+        app.editor.off(EditorScaleEvent.SCALE, onImageScale);
         app.editor.off(EditorRotateEvent.ROTATE, onTransform);
       }
       window.removeEventListener("pointerup", onPointerUp);

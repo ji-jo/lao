@@ -4,6 +4,8 @@ import {
   extrasAfterPathEdit,
   leaferCenterToShapeBox,
   leaferTextToCommit,
+  oppositeResizeAlign,
+  resizeBoxKeepingAlign,
   shapeBoxToLeaferCenter,
   textElementToLeaferProps,
 } from "@/components/stage/leaferBridge";
@@ -150,5 +152,61 @@ describe("bakeShapeGeometry", () => {
     const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
     expect(cx).toBeCloseTo(60, 1);
     expect(cy).toBeCloseTo(45, 1);
+  });
+});
+
+describe("resizeBoxKeepingAlign", () => {
+  const box = { x: 10, y: 20, w: 100, h: 50 };
+
+  test("right handle keeps the left edge", () => {
+    expect(oppositeResizeAlign(3, false)).toBe("left");
+    const next = resizeBoxKeepingAlign(box, 120, 50, "left");
+    expect(next.x).toBeCloseTo(10, 5);
+    expect(next.y).toBeCloseTo(20, 5);
+    expect(next.w).toBeCloseTo(120, 5);
+    expect(next.h).toBeCloseTo(50, 5);
+  });
+
+  test("left handle keeps the right edge", () => {
+    const next = resizeBoxKeepingAlign(box, 80, 50, "right");
+    expect(next.x + next.w).toBeCloseTo(110, 5);
+    expect(next.y).toBeCloseTo(20, 5);
+    expect(next.w).toBeCloseTo(80, 5);
+  });
+
+  test("top handle keeps the bottom edge", () => {
+    expect(oppositeResizeAlign(1, false)).toBe("bottom");
+    const next = resizeBoxKeepingAlign(box, 100, 70, "bottom");
+    expect(next.x).toBeCloseTo(10, 5);
+    expect(next.y + next.h).toBeCloseTo(70, 5);
+    expect(next.h).toBeCloseTo(70, 5);
+  });
+
+  test("alt / center keeps the midpoint", () => {
+    expect(oppositeResizeAlign(3, true)).toBe("center");
+    const next = resizeBoxKeepingAlign(box, 120, 50, "center");
+    expect(next.x).toBeCloseTo(0, 5);
+    expect(next.y).toBeCloseTo(20, 5);
+    expect(next.x + next.w / 2).toBeCloseTo(60, 5);
+  });
+
+  test("rotated right-handle resize keeps the local left edge in world space", () => {
+    const rot = Math.PI / 2;
+    const start = { ...box, rotation: rot };
+    const next = resizeBoxKeepingAlign(start, 120, 50, "left");
+    const cos = Math.cos(rot);
+    const sin = Math.sin(rot);
+    const startLeft = {
+      x: 60 + (-50) * cos - 0 * sin,
+      y: 45 + (-50) * sin + 0 * cos,
+    };
+    const nextCx = next.x + next.w / 2;
+    const nextCy = next.y + next.h / 2;
+    const nextLeft = {
+      x: nextCx + (-60) * cos - 0 * sin,
+      y: nextCy + (-60) * sin + 0 * cos,
+    };
+    expect(nextLeft.x).toBeCloseTo(startLeft.x, 5);
+    expect(nextLeft.y).toBeCloseTo(startLeft.y, 5);
   });
 });

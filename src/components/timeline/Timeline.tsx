@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { Layers2 } from "reicon-react";
+import { isTypingTarget } from "@/lib/typingTarget";
 import { useProject } from "@/state/project";
 import { usePlayback } from "@/state/playback";
 import { useTools } from "@/state/tools";
@@ -481,11 +482,19 @@ export function Timeline() {
   // frame stepping shortcuts
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      const target = e.target as HTMLElement;
-      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
-      if (e.key === "ArrowLeft" || e.key === ",") stepFrame(-1);
-      else if (e.key === "ArrowRight" || e.key === ".") stepFrame(1);
-      else if (e.key === "Enter" && !e.ctrlKey) togglePlaying();
+      if (isTypingTarget(e.target)) return;
+      if (e.defaultPrevented) return;
+      const tool = useTools.getState().tool;
+      const artSelected =
+        (tool === "select" || tool === "path") &&
+        useSelection.getState().ids.length > 0;
+      if (e.key === "ArrowLeft" || e.key === ",") {
+        if (e.key === "ArrowLeft" && artSelected) return;
+        stepFrame(-1);
+      } else if (e.key === "ArrowRight") {
+        if (artSelected) return;
+        stepFrame(1);
+      } else if (e.key === "Enter" && !e.ctrlKey) togglePlaying();
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -719,7 +728,7 @@ export function Timeline() {
         </DockBtn>
 
         <DockBtn
-          label="Empty cel — stop the held drawing here, start fresh"
+          label="Empty cel — wipe this cell, stop any hold"
           onClick={addKeyframe}
         >
           <ClearFrameIcon />

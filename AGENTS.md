@@ -151,9 +151,9 @@ V/B/P/M/E tools · A / Ctrl+A select all on canvas · Ctrl+Shift+A select all ti
 layers · Ctrl+Shift+A then V or A selects every layer’s art for move / path edit ·
 D deselect · Del/Backspace delete selection (layers first when timeline layers are
 selected, then nodes, then strokes) ·
-Ctrl+C / Ctrl+V copy/paste strokes across frames (same coordinates) ·
+Ctrl+C / Ctrl+X / Ctrl+V copy / cut / paste art across frames (same coordinates); Ctrl+V with system text creates a text object ·
 Ctrl+Z / Ctrl+Shift+Z undo/redo · Ctrl+S / Ctrl+O save/open .lao ·
-Shift+drag = straight line · ←/→ or , / . step frames · Enter play/pause.
+Shift+drag = straight line · ←/→ or , step frames (arrows nudge 1px / Shift+10px when V or A has a canvas selection; arrows stay in the caret while editing text) · [ / ] send art backward / forward (Ctrl+Alt+[ / ] to back / front); without a V/A selection they reorder timeline layers · Enter play/pause.
 
 ## Verifying changes (no visible browser needed)
 
