@@ -1,5 +1,6 @@
-import type { Project } from "@/model/types";
+import type { Project, ProjectWorkflow } from "@/model/types";
 import { useProject } from "@/state/project";
+import { useWorkflowMemory } from "@/state/workflowMemory";
 
 /** IndexedDB autosave — crash/refresh recovery, separate from explicit .lao saves. */
 
@@ -7,6 +8,12 @@ const DB_NAME = "lao";
 const STORE = "autosave";
 const KEY = "latest";
 const DEBOUNCE_MS = 1000;
+
+export interface AutosaveRecord {
+  project: Project;
+  savedAt: number;
+  workflowMemory?: Partial<Record<ProjectWorkflow, Project>>;
+}
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -28,18 +35,18 @@ async function put(value: unknown) {
   db.close();
 }
 
-export async function readAutosave(): Promise<{ project: Project; savedAt: number } | null> {
+export async function readAutosave(): Promise<AutosaveRecord | null> {
   try {
     const db = await openDb();
     const value = await new Promise<unknown>((resolve, reject) => {
       const tx = db.transaction(STORE, "readonly");
       const req = tx.objectStore(STORE).get(KEY);
       req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
+      req.onerror = () => reject(tx.error);
     });
     db.close();
     if (!value || typeof value !== "object") return null;
-    return value as { project: Project; savedAt: number };
+    return value as AutosaveRecord;
   } catch {
     return null;
   }
@@ -53,6 +60,16 @@ export async function clearAutosave() {
   }
 }
 
+function snapshotForAutosave(): AutosaveRecord {
+  const project = useProject.getState().project;
+  const workflow = project.workflow ?? "animatron";
+  return {
+    project,
+    savedAt: Date.now(),
+    workflowMemory: useWorkflowMemory.getState().projectsForSave(workflow),
+  };
+}
+
 /** subscribe to the project store and persist snapshots, debounced */
 export function startAutosave(): () => void {
   let timer = 0;
@@ -60,7 +77,7 @@ export function startAutosave(): () => void {
     if (s.project === prev.project) return;
     window.clearTimeout(timer);
     timer = window.setTimeout(() => {
-      void put({ project: useProject.getState().project, savedAt: Date.now() });
+      void put(snapshotForAutosave());
     }, DEBOUNCE_MS);
   });
   return () => {

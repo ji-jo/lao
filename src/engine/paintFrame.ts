@@ -15,6 +15,7 @@ import {
 } from "@/engine/boil";
 import {
   clipFadeOpacity,
+  clipVisibleAt,
   sampleBezierY,
   strokeAtTime,
   strokeWithClipPoints,
@@ -171,7 +172,12 @@ export function paintProjectFrame(
     const motion = PATH_MAKER_ENABLED
       ? layerMotionAt(layer, timeMs, frame, workflow)
       : null;
-    const posedImages = poseImages(cel.images, motion);
+    const posedImages = poseImages(
+      workflow === "animatron"
+        ? cel.images?.filter((im) => clipVisibleAt(im.clip, timeMs))
+        : cel.images,
+      motion,
+    );
     const posedTexts = poseTexts(cel.texts, motion);
     const hasContent =
       strokes.length > 0 ||

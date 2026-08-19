@@ -120,9 +120,24 @@ export function sampleBezierY(u: number, bezier: Bezier4): number {
 }
 
 /**
+ * Whether clipped art is on screen at composition timeMs.
+ * Default (hold omitted / true): hidden before start, visible from start onward.
+ * `hold: false`: also hidden once start+duration has elapsed (flipbook pop-off).
+ */
+export function clipVisibleAt(
+  clip: StrokeClip | undefined,
+  timeMs: number,
+): boolean {
+  if (!clip) return true;
+  if (timeMs < clip.startMs) return false;
+  if (clip.hold === false && timeMs >= clip.startMs + clip.durationMs) return false;
+  return true;
+}
+
+/**
  * Visibility + progressive points for a stroke at composition timeMs.
  * Before clip.startMs → hidden. During clip → draw-on by point t (eased).
- * After start+duration → full stroke (held).
+ * After start+duration → full stroke (held), unless `clip.hold === false`.
  */
 export function strokeAtTime(
   stroke: Stroke,
@@ -132,7 +147,7 @@ export function strokeAtTime(
   if (!clip) {
     return stroke.points;
   }
-  if (timeMs < clip.startMs) return null;
+  if (!clipVisibleAt(clip, timeMs)) return null;
   const localT = timeMs - clip.startMs;
   if (localT >= clip.durationMs) return stroke.points;
   const rawProgress = clip.durationMs > 0 ? localT / clip.durationMs : 1;
@@ -179,7 +194,7 @@ export function textProgressAtTime(
 ): number | null {
   const clip = text.clip;
   if (!clip) return 1;
-  if (timeMs < clip.startMs) return null;
+  if (!clipVisibleAt(clip, timeMs)) return null;
   const localT = timeMs - clip.startMs;
   if (localT >= clip.durationMs) return 1;
   const speed = text.typewriterSpeed;
@@ -222,7 +237,7 @@ export function textContentAtTime(
 ): string | null {
   const clip = text.clip;
   if (!clip) return text.text;
-  if (timeMs < clip.startMs) return null;
+  if (!clipVisibleAt(clip, timeMs)) return null;
   const localT = timeMs - clip.startMs;
   if (localT >= clip.durationMs) return text.text;
 

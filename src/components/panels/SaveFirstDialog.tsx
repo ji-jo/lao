@@ -7,6 +7,10 @@ import { PAPER } from "@/components/chrome/paper-tokens";
 /**
  * Paper save-first confirm — `8BI-0`.
  *
+ * Used for New / Ctrl+N. Mode switch no longer opens this (each workflow
+ * keeps its own document), but the design stays for a possible one-shot
+ * confirm later.
+ *
  * Three exits:
  * - Close chip / Esc → cancel (nothing happens)
  * - Secondary → proceed without saving

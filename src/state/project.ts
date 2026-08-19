@@ -12,6 +12,7 @@ import {
   type MotionAssignment,
   type MotionPath,
   type Project,
+  type ProjectWorkflow,
   type Stroke,
   type StrokeClip,
   type TextElement,
@@ -19,6 +20,8 @@ import {
 } from "@/model/types";
 import { useTools } from "@/state/tools";
 import { usePlayback } from "@/state/playback";
+import { useWorkflowMemory } from "@/state/workflowMemory";
+import { convertProjectWorkflow } from "@/model/workflowConvert";
 import { translatePoints, transformPoints, translateBezierNodes, transformBezierNodes } from "@/engine/pathEdit";
 import { measureTextBox, transformTextElement } from "@/engine/textGeometry";
 import { extrasAfterPathEdit } from "@/components/stage/leaferBridge";
@@ -315,6 +318,8 @@ interface ProjectState {
   toggleLayerVisible: (layerIndex: number) => void;
 
   loadProject: (project: Project) => void;
+  /** Swap Animatron ↔ Stop-motion, remembering each mode's document. */
+  switchWorkflow: (next: ProjectWorkflow) => void;
   undo: () => void;
   redo: () => void;
 }
@@ -1931,6 +1936,7 @@ export const useProject = create<ProjectState>((set, get) => {
     },
 
     loadProject: (project) => {
+      useWorkflowMemory.getState().clear();
       clearBrushDraftCache();
       set({
         project: migrateLegacyVanishingClips(project),
@@ -1940,6 +1946,46 @@ export const useProject = create<ProjectState>((set, get) => {
         redoStack: [],
       });
       usePlayback.getState().setWorkflow(project.workflow ?? "animatron");
+    },
+
+    switchWorkflow: (next) => {
+      const s = get();
+      const from: ProjectWorkflow =
+        s.project.workflow ?? usePlayback.getState().workflow;
+      if (from === next) return;
+
+      useWorkflowMemory.getState().remember(from, {
+        project: s.project,
+        layerIndex: s.layerIndex,
+        frameIndex: s.frameIndex,
+        undoStack: s.undoStack,
+        redoStack: s.redoStack,
+      });
+
+      const remembered = useWorkflowMemory.getState().take(next);
+      const incoming = remembered
+        ? remembered.project
+        : convertProjectWorkflow(s.project, next);
+
+      clearBrushDraftCache();
+      set({
+        project: migrateLegacyVanishingClips(incoming),
+        layerIndex: remembered
+          ? Math.max(
+              0,
+              Math.min(remembered.layerIndex, incoming.layers.length - 1),
+            )
+          : 0,
+        frameIndex: remembered
+          ? Math.max(
+              0,
+              Math.min(remembered.frameIndex, incoming.frameCount - 1),
+            )
+          : 0,
+        undoStack: remembered?.undoStack ?? [],
+        redoStack: remembered?.redoStack ?? [],
+      });
+      usePlayback.getState().setWorkflow(next);
     },
 
     undo: () =>

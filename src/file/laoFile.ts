@@ -1,33 +1,48 @@
-import type { Project } from "@/model/types";
+import type { Project, ProjectWorkflow } from "@/model/types";
 import { downloadBlob } from "@/export/exportProject";
 
 /** .lao — versioned JSON container for a full project */
 
-interface LaoDocument {
+export interface LaoDocument {
   format: "lao";
   version: 1;
   savedAt: string;
   project: Project;
+  /** Inactive-mode snapshot so Animatron ↔ Stop-motion round-trips. */
+  workflowMemory?: Partial<Record<ProjectWorkflow, Project>>;
 }
 
-export function serializeProject(project: Project): string {
+export function serializeProject(
+  project: Project,
+  workflowMemory?: Partial<Record<ProjectWorkflow, Project>>,
+): string {
   const doc: LaoDocument = {
     format: "lao",
     version: 1,
     savedAt: new Date().toISOString(),
     project,
   };
+  if (workflowMemory && Object.keys(workflowMemory).length > 0) {
+    doc.workflowMemory = workflowMemory;
+  }
   return JSON.stringify(doc);
 }
 
-export function parseLao(text: string): Project {
+export function parseLaoDocument(text: string): {
+  project: Project;
+  workflowMemory?: Partial<Record<ProjectWorkflow, Project>>;
+} {
   const doc = JSON.parse(text) as Partial<LaoDocument>;
   if (doc.format !== "lao") throw new Error("Not a .lao file");
   if (doc.version !== 1) throw new Error(`Unsupported .lao version: ${doc.version}`);
   const p = doc.project;
   if (!p || !Array.isArray(p.layers) || typeof p.width !== "number")
     throw new Error("Corrupt .lao file");
-  return p;
+  return { project: p, workflowMemory: doc.workflowMemory };
+}
+
+export function parseLao(text: string): Project {
+  return parseLaoDocument(text).project;
 }
 
 const PICKER_TYPES = [
@@ -38,8 +53,11 @@ const PICKER_TYPES = [
 ];
 
 /** Save via File System Access API; plain download fallback for browsers without it. */
-export async function saveLaoFile(project: Project): Promise<boolean> {
-  const text = serializeProject(project);
+export async function saveLaoFile(
+  project: Project,
+  workflowMemory?: Partial<Record<ProjectWorkflow, Project>>,
+): Promise<boolean> {
+  const text = serializeProject(project, workflowMemory);
   const name = `${project.name || "untitled"}.lao`;
   if ("showSaveFilePicker" in window) {
     try {
@@ -68,13 +86,21 @@ export async function saveLaoFile(project: Project): Promise<boolean> {
  * picker API but reject `getFile()` with NotAllowedError ("not allowed by
  * the user agent or the platform in the current context").
  */
-function openLaoViaInput(): Promise<Project | null> {
+function openLaoViaInput(): Promise<{
+  project: Project;
+  workflowMemory?: Partial<Record<ProjectWorkflow, Project>>;
+} | null> {
   return new Promise((resolve, reject) => {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".lao,application/json";
     let settled = false;
-    const finish = (result: Project | null) => {
+    const finish = (
+      result: {
+        project: Project;
+        workflowMemory?: Partial<Record<ProjectWorkflow, Project>>;
+      } | null,
+    ) => {
       if (settled) return;
       settled = true;
       resolve(result);
@@ -84,7 +110,7 @@ function openLaoViaInput(): Promise<Project | null> {
       const file = input.files?.[0];
       if (!file) return finish(null);
       try {
-        finish(parseLao(await file.text()));
+        finish(parseLaoDocument(await file.text()));
       } catch (err) {
         settled = true;
         reject(err);
@@ -94,7 +120,10 @@ function openLaoViaInput(): Promise<Project | null> {
   });
 }
 
-export async function openLaoFile(): Promise<Project | null> {
+export async function openLaoFile(): Promise<{
+  project: Project;
+  workflowMemory?: Partial<Record<ProjectWorkflow, Project>>;
+} | null> {
   if ("showOpenFilePicker" in window) {
     try {
       const [handle] = await window.showOpenFilePicker({
@@ -115,7 +144,7 @@ export async function openLaoFile(): Promise<Project | null> {
         if (state !== "granted") return openLaoViaInput();
       }
       const file = await handle.getFile();
-      return parseLao(await file.text());
+      return parseLaoDocument(await file.text());
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return null;
       // Restricted context: fall back to the classic file input (one more pick).

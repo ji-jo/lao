@@ -4,9 +4,9 @@ import { WorkflowBar } from "@/components/chrome/WorkflowBar";
 import CameraIcon from "@/components/ui/camera-icon";
 import { ExportDialog } from "@/components/panels/ExportDialog";
 import { SaveFirstDialog } from "@/components/panels/SaveFirstDialog";
-import { saveLaoFile, openLaoFile, parseLao } from "@/file/laoFile";
-import { startAutosave, readAutosave, clearAutosave } from "@/file/autosave";
-import { createEmptyProject, projectHasArt, type Project } from "@/model/types";
+import { saveLaoFile, openLaoFile, parseLaoDocument } from "@/file/laoFile";
+import { startAutosave, readAutosave, clearAutosave, type AutosaveRecord } from "@/file/autosave";
+import { createEmptyProject, projectHasArt } from "@/model/types";
 import { createImageElementFromFile } from "@/engine/canvasImage";
 import { StageCanvas } from "@/components/StageCanvas";
 import { PreviewStage } from "@/components/PreviewStage";
@@ -23,6 +23,7 @@ import { usePlayback } from "@/state/playback";
 import { useReference } from "@/state/reference";
 import { useSelection } from "@/state/selection";
 import { useViewport } from "@/state/viewport";
+import { useWorkflowMemory } from "@/state/workflowMemory";
 import {
   clipboardIsEmpty,
   copySelection,
@@ -121,14 +122,18 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const [exportOpen, setExportOpen] = useState(false);
-  const [recovered, setRecovered] = useState<Project | null>(null);
+  const [recovered, setRecovered] = useState<AutosaveRecord | null>(null);
   const [referenceOpen, setReferenceOpen] = useState(false);
   const [newFilePromptOpen, setNewFilePromptOpen] = useState(false);
 
   async function handleSave() {
     try {
       const project = useProject.getState().project;
-      const ok = await saveLaoFile(project);
+      const workflow = project.workflow ?? "animatron";
+      const ok = await saveLaoFile(
+        project,
+        useWorkflowMemory.getState().projectsForSave(workflow),
+      );
       if (ok) toastSaved(project.name || "untitled");
       return ok;
     } catch (err) {
@@ -138,10 +143,11 @@ export default function App() {
   }
   async function handleOpen() {
     try {
-      const project = await openLaoFile();
-      if (!project) return;
-      useProject.getState().loadProject(project);
-      toastOpened(project.name || "untitled.lao");
+      const opened = await openLaoFile();
+      if (!opened) return;
+      useProject.getState().loadProject(opened.project);
+      useWorkflowMemory.getState().hydrate(opened.workflowMemory);
+      toastOpened(opened.project.name || "untitled.lao");
     } catch (err) {
       toastError("Couldn’t open file", err);
     }
@@ -166,7 +172,7 @@ export default function App() {
       if (!saved?.project) return;
       const current = useProject.getState();
       const untouched = current.undoStack.length === 0 && current.redoStack.length === 0;
-      if (projectHasArt(saved.project) && untouched) setRecovered(saved.project);
+      if (projectHasArt(saved.project) && untouched) setRecovered(saved);
     });
     return stop;
   }, []);
@@ -513,7 +519,9 @@ export default function App() {
         void file
           .text()
           .then((text) => {
-            useProject.getState().loadProject(parseLao(text));
+            const opened = parseLaoDocument(text);
+            useProject.getState().loadProject(opened.project);
+            useWorkflowMemory.getState().hydrate(opened.workflowMemory);
             toastOpened(file.name);
           })
           .catch((err) => toastError("Couldn’t open file", err));
@@ -657,7 +665,8 @@ export default function App() {
             type="button"
             className="font-semibold text-foreground hover:underline"
             onClick={() => {
-              useProject.getState().loadProject(recovered);
+              useProject.getState().loadProject(recovered.project);
+              useWorkflowMemory.getState().hydrate(recovered.workflowMemory);
               setRecovered(null);
             }}
           >

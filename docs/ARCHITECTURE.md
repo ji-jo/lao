@@ -16,9 +16,9 @@ Layer   { id, name, visible, isStatic, frames: (Frame|null)[] }   // exposure sh
 Frame   { id, strokes[] }                                          // a "cel"
 Stroke  { id, brush, color, size, points[], seed, jitter, clip? }
 StrokePoint { x, y, pressure (0..1), t (ms from stroke start) }
-StrokeClip { startMs, durationMs }                                 // Animatron only
+StrokeClip { startMs, durationMs, hold? }                          // Animatron; hold:false = pop-off
 Background = none | color | gradient(linear/radial) | image(fill/cover/contain/crop) | shader
-workflow = "stopmotion" | "animatron"                              // optional; default stopmotion
+workflow = "stopmotion" | "animatron"                              // optional; default animatron
 ```
 
 **Exposure semantics** (`resolveCel`/`resolveCelIndex`): the cel shown at frame *i* is the
@@ -30,6 +30,13 @@ Auto-Key ON on a held slot **clones** the held cel into the new key (then append
 frame 0) with `Stroke.clip` staggered after the previous path. Playback / export use
 `strokeProgress` to progressively reveal points by `t` at composition time.
 
+**Mode switch** (Animatron ↔ Stop-motion): each workflow keeps its own document in
+`useWorkflowMemory`. First visit **converts**; later visits restore the remembered
+document. Animatron → Stop-motion flattens every visible path onto **one layer / one
+frame**. Stop-motion → Animatron maps **one timeline frame → one layer**, with
+`clip.hold: false` so each frame pops on fully and pops off (flipbook feel, no draw-on).
+`SaveFirstDialog` stays for New; mode switch does not prompt.
+
 Everything is **retained vector** — strokes keep their input points; raster is derived. This
 powers boil, warp editing, copy/paste, and clean re-rendering at any resolution.
 
@@ -40,7 +47,8 @@ powers boil, warp editing, copy/paste, and clean re-rendering at any resolution.
   addStroke (stop-motion Auto-Key **or** Animatron layer-per-path), pasteStrokes,
   deleteStrokes, replaceStrokePoints, translateStrokes, updateStrokeClip, addKeyframe,
   duplicateFrameForward, deleteKeyframe, extendTimeline, setProjectSettings, addLayer,
-  deleteLayer, reorderLayer, toggleLayerVisible, loadProject.
+  deleteLayer, reorderLayer, toggleLayerVisible, loadProject, switchWorkflow.
+- `workflowMemory.ts` — inactive-mode document (+ playhead / undo) so mode switch round-trips.
 - `tools.ts` — active tool, color, size, autoKey (also Animatron auto-record), jitterByDefault.
 - `playback.ts` — `stage` (`draw` | `preview`), `workflow` (`stopmotion` | `animatron`),
   playing, onionSkin. (`mode` mirrors `stage` for compatibility.)
@@ -83,9 +91,9 @@ powers boil, warp editing, copy/paste, and clean re-rendering at any resolution.
 
 ## Files & persistence — `src/file/`
 
-- `laoFile.ts` — `.lao` = versioned JSON `{format:"lao", version:1, savedAt, project}`;
-  optional `workflow` / `clip` fields are backward compatible.
-- `autosave.ts` — debounced (1 s) IndexedDB snapshot; recovery banner on boot.
+- `laoFile.ts` — `.lao` = versioned JSON `{format:"lao", version:1, savedAt, project, workflowMemory?}`;
+  optional `workflow` / `clip` / `workflowMemory` fields are backward compatible.
+- `autosave.ts` — debounced (1 s) IndexedDB snapshot (includes workflow memory); recovery banner on boot.
 
 ## Export — `src/export/exportProject.ts`
 

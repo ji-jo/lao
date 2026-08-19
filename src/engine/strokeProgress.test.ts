@@ -100,6 +100,16 @@ describe("strokeAtTime", () => {
     });
     expect(strokeAtTime(s, 200)?.length).toBe(3);
   });
+
+  test("hold: false hides after clip end (stop-motion pop-off)", () => {
+    const s = stroke({
+      points: pts(0, 50, 100),
+      clip: { startMs: 0, durationMs: 100, hold: false },
+    });
+    expect(strokeAtTime(s, 50)?.length).toBe(2);
+    expect(strokeAtTime(s, 100)).toBeNull();
+    expect(strokeAtTime(s, 500)).toBeNull();
+  });
 });
 
 describe("strokeDurationMs", () => {

@@ -37,7 +37,7 @@ import {
   expandPolygonOutward,
   pointInPolygon,
 } from "@/engine/pathEdit";
-import { strokeAtTime, textContentAtTime, strokeWithClipPoints } from "@/engine/strokeProgress";
+import { clipVisibleAt, strokeAtTime, textContentAtTime, strokeWithClipPoints } from "@/engine/strokeProgress";
 import { celForLayer } from "@/engine/layerCel";
 import { boilDisplacement } from "@/engine/boil";
 import {
@@ -1061,12 +1061,7 @@ export function StageCanvas() {
         }
         let images = cel?.images ?? [];
         if (animatron && !pb.showFullStrokes) {
-          images = images.filter((im) => {
-            const c = im.clip;
-            if (!c) return true;
-            // Match stroke clips: hidden before start, held after duration.
-            return timeMs >= c.startMs;
-          });
+          images = images.filter((im) => clipVisibleAt(im.clip, timeMs));
         }
         const workflow = ps.project.workflow ?? "animatron";
         // Path Maker: pose art on Draw scrub/play (parity with paintProjectFrame).

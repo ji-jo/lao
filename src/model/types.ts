@@ -25,6 +25,12 @@ export interface StrokeClip {
   durationMs: number;
   /** optional Animatron easing + fade (preview === export) */
   easing?: ClipEasing;
+  /**
+   * After start+duration, Animatron keeps the art on screen (draw-on hold).
+   * Stop-motion → Animatron conversion sets `false` so each frame pops off
+   * when the next one starts.
+   */
+  hold?: boolean;
 }
 
 /** Cubic bezier easing [x1,y1,x2,y2] — Animatron clip timing curves */

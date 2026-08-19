@@ -2,12 +2,8 @@ import { useState, useRef, useEffect } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { usePlayback, type Workflow } from "@/state/playback";
 import { useProject } from "@/state/project";
-import { projectHasArt } from "@/model/types";
-import { saveLaoFile } from "@/file/laoFile";
 import { PAPER } from "@/components/chrome/paper-tokens";
-import { SaveFirstDialog } from "@/components/panels/SaveFirstDialog";
 import { EASE_OUT } from "@/lib/ease";
-import { toastError, toastSaved } from "@/lib/laoToast";
 import EllipsisIcon from "@/components/ui/ellipsis-icon";
 import EllipsisCloseIcon from "@/components/ui/ellipsis-close-icon";
 
@@ -43,9 +39,8 @@ export function WorkflowBar({
   onNew?: () => void;
 }) {
   const workflow = usePlayback((s) => s.workflow);
-  const setWorkflow = usePlayback((s) => s.setWorkflow);
+  const switchWorkflow = useProject((s) => s.switchWorkflow);
   const [fileOpen, setFileOpen] = useState(false);
-  const [pendingWorkflow, setPendingWorkflow] = useState<Workflow | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const reduce = useReducedMotion() ?? false;
 
@@ -67,18 +62,9 @@ export function WorkflowBar({
     };
   }, [fileOpen]);
 
-  function applySwitch(next: Workflow) {
-    setWorkflow(next);
-    useProject.getState().setProjectSettings({ workflow: next });
-  }
-
   function requestSwitch(next: Workflow) {
     if (next === workflow) return;
-    if (!projectHasArt(useProject.getState().project)) {
-      applySwitch(next);
-      return;
-    }
-    setPendingWorkflow(next);
+    switchWorkflow(next);
   }
 
   function runAction(fn: () => void) {
@@ -87,7 +73,6 @@ export function WorkflowBar({
   }
 
   return (
-    <>
     <div
       ref={barRef}
       data-lao-workflow-bar=""
@@ -150,35 +135,6 @@ export function WorkflowBar({
         </div>
       </div>
     </div>
-
-    <SaveFirstDialog
-      open={pendingWorkflow !== null}
-      onOpenChange={(open) => {
-        if (!open) setPendingWorkflow(null);
-      }}
-      alert="Alert: Switching modes without saving will delete the progress of your current session."
-      skipLabel="No, Switch"
-      confirmLabel="Yes, Save First"
-      onSkip={() => {
-        if (pendingWorkflow) applySwitch(pendingWorkflow);
-        setPendingWorkflow(null);
-      }}
-      onConfirm={async () => {
-        try {
-          const project = useProject.getState().project;
-          const ok = await saveLaoFile(project);
-          if (!ok) return false;
-          toastSaved(project.name || "untitled");
-          if (pendingWorkflow) applySwitch(pendingWorkflow);
-          setPendingWorkflow(null);
-          return true;
-        } catch (err) {
-          toastError("Couldn’t save file", err);
-          return false;
-        }
-      }}
-    />
-    </>
   );
 }
 
