@@ -30,11 +30,10 @@ Auto-Key ON on a held slot **clones** the held cel into the new key (then append
 frame 0) with `Stroke.clip` staggered after the previous path. Playback / export use
 `strokeProgress` to progressively reveal points by `t` at composition time.
 
-**Mode switch** (Animatron ↔ Stop-motion): each workflow keeps its own document in
-`useWorkflowMemory`. First visit **converts**; later visits restore the remembered
-document. Animatron → Stop-motion flattens every visible path onto **one layer / one
-frame**. Stop-motion → Animatron maps **one timeline frame → one layer**, with
-`clip.hold: false` so each frame pops on fully and pops off (flipbook feel, no draw-on).
+**Mode switch** (Animatron ↔ Stop-motion): restore a mode when it already has
+art (keeps a one-layer Animatron drawing intact). Otherwise convert. Animatron →
+Stop-motion bakes onto **one layer**. Stop-motion → Animatron keeps **one layer
+per SM layer**; frame keys become clips on that layer, not extra layers.
 `SaveFirstDialog` stays for New; mode switch does not prompt.
 
 Everything is **retained vector** — strokes keep their input points; raster is derived. This

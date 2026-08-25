@@ -19,54 +19,52 @@ function ink(id: string): Stroke {
   };
 }
 
-describe("switchWorkflow memory", () => {
+describe("switchWorkflow", () => {
   beforeEach(() => {
     useWorkflowMemory.getState().clear();
+  });
+
+  test("one Animatron layer round-trips without splitting into Frame layers", () => {
     const project = createEmptyProject();
     project.workflow = "animatron";
     project.layers[0]!.name = "Path 1";
     project.layers[0]!.frames[0]!.strokes.push(ink("keep-me"));
     useProject.getState().loadProject(project);
     usePlayback.getState().setWorkflow("animatron");
-  });
-
-  test("first visit converts; return restores the original Animatron art", () => {
-    const originalId = useProject.getState().project.layers[0]!.frames[0]!.strokes[0]!.id;
-    expect(originalId).toBe("keep-me");
 
     useProject.getState().switchWorkflow("stopmotion");
-    expect(usePlayback.getState().workflow).toBe("stopmotion");
-    expect(useProject.getState().project.workflow).toBe("stopmotion");
-    expect(useProject.getState().project.frameCount).toBe(1);
     expect(useProject.getState().project.layers).toHaveLength(1);
 
     useProject.getState().switchWorkflow("animatron");
-    expect(usePlayback.getState().workflow).toBe("animatron");
     const back = useProject.getState().project;
-    expect(back.workflow).toBe("animatron");
+    expect(back.layers).toHaveLength(1);
     expect(back.layers[0]!.frames[0]!.strokes[0]!.id).toBe("keep-me");
   });
 
-  test("edits in Stop-motion survive a round trip back", () => {
-    useProject.getState().switchWorkflow("stopmotion");
-    useProject.getState().addStroke(ink("sm-only"));
-    const smCount = useProject
-      .getState()
-      .project.layers[0]!.frames[0]!.strokes.length;
+  test("one Stop-motion layer becomes one Animatron layer (frames are clips)", () => {
+    const sm = createEmptyProject();
+    sm.workflow = "stopmotion";
+    sm.frameCount = 3;
+    sm.layers = [
+      {
+        id: "sheet",
+        name: "Layer 1",
+        visible: true,
+        isStatic: false,
+        frames: [
+          { id: "a", strokes: [ink("a")], texts: [], images: [] },
+          { id: "b", strokes: [ink("b")], texts: [], images: [] },
+          { id: "c", strokes: [ink("c")], texts: [], images: [] },
+        ],
+      },
+    ];
+    useProject.getState().loadProject(sm);
+    usePlayback.getState().setWorkflow("stopmotion");
 
     useProject.getState().switchWorkflow("animatron");
-    expect(
-      useProject.getState().project.layers[0]!.frames[0]!.strokes[0]!.id,
-    ).toBe("keep-me");
-
-    useProject.getState().switchWorkflow("stopmotion");
-    expect(useProject.getState().project.layers[0]!.frames[0]!.strokes.length).toBe(
-      smCount,
-    );
-    expect(
-      useProject
-        .getState()
-        .project.layers[0]!.frames[0]!.strokes.some((s) => s.id === "sm-only"),
-    ).toBe(true);
+    const layers = useProject.getState().project.layers;
+    expect(layers).toHaveLength(1);
+    expect(layers[0]!.name).toBe("Layer 1");
+    expect(layers[0]!.frames[0]!.strokes).toHaveLength(3);
   });
 });

@@ -2,6 +2,7 @@ import { create } from "zustand";
 import {
   createEmptyProject,
   isLegacyVanishingEasing,
+  projectHasArt,
   resolveCel,
   resolveCelIndex,
   DEFAULT_CLIP_EASING,
@@ -21,7 +22,10 @@ import {
 import { useTools } from "@/state/tools";
 import { usePlayback } from "@/state/playback";
 import { useWorkflowMemory } from "@/state/workflowMemory";
-import { convertProjectWorkflow } from "@/model/workflowConvert";
+import {
+  convertProjectWorkflow,
+  firstVisibleWorkflowFrame,
+} from "@/model/workflowConvert";
 import { translatePoints, transformPoints, translateBezierNodes, transformBezierNodes } from "@/engine/pathEdit";
 import { measureTextBox, transformTextElement } from "@/engine/textGeometry";
 import { extrasAfterPathEdit } from "@/components/stage/leaferBridge";
@@ -1950,8 +1954,7 @@ export const useProject = create<ProjectState>((set, get) => {
 
     switchWorkflow: (next) => {
       const s = get();
-      const from: ProjectWorkflow =
-        s.project.workflow ?? usePlayback.getState().workflow;
+      const from: ProjectWorkflow = usePlayback.getState().workflow;
       if (from === next) return;
 
       useWorkflowMemory.getState().remember(from, {
@@ -1963,27 +1966,29 @@ export const useProject = create<ProjectState>((set, get) => {
       });
 
       const remembered = useWorkflowMemory.getState().take(next);
-      const incoming = remembered
-        ? remembered.project
-        : convertProjectWorkflow(s.project, next);
+      const restore = !!(remembered && projectHasArt(remembered.project));
+      const incoming = restore
+        ? remembered!.project
+        : convertProjectWorkflow({ ...s.project, workflow: from }, next, from);
 
       clearBrushDraftCache();
+      const project = migrateLegacyVanishingClips(incoming);
       set({
-        project: migrateLegacyVanishingClips(incoming),
-        layerIndex: remembered
+        project,
+        layerIndex: restore
           ? Math.max(
               0,
-              Math.min(remembered.layerIndex, incoming.layers.length - 1),
+              Math.min(remembered!.layerIndex, project.layers.length - 1),
             )
           : 0,
-        frameIndex: remembered
+        frameIndex: restore
           ? Math.max(
               0,
-              Math.min(remembered.frameIndex, incoming.frameCount - 1),
+              Math.min(remembered!.frameIndex, project.frameCount - 1),
             )
-          : 0,
-        undoStack: remembered?.undoStack ?? [],
-        redoStack: remembered?.redoStack ?? [],
+          : firstVisibleWorkflowFrame(project),
+        undoStack: restore ? remembered!.undoStack : [],
+        redoStack: restore ? remembered!.redoStack : [],
       });
       usePlayback.getState().setWorkflow(next);
     },
