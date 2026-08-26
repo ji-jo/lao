@@ -67,4 +67,44 @@ describe("switchWorkflow", () => {
     expect(layers[0]!.name).toBe("Layer 1");
     expect(layers[0]!.frames[0]!.strokes).toHaveLength(3);
   });
+
+  test("Stop-motion animation converts even when Animatron memory has a doodle", () => {
+    const sm = createEmptyProject();
+    sm.workflow = "stopmotion";
+    sm.frameCount = 3;
+    sm.layers = [
+      {
+        id: "sheet",
+        name: "Layer 1",
+        visible: true,
+        isStatic: false,
+        frames: [
+          { id: "a", strokes: [ink("a")], texts: [], images: [] },
+          { id: "b", strokes: [ink("b")], texts: [], images: [] },
+          { id: "c", strokes: [ink("c")], texts: [], images: [] },
+        ],
+      },
+    ];
+    useProject.getState().loadProject(sm);
+    usePlayback.getState().setWorkflow("stopmotion");
+
+    const doodle = createEmptyProject();
+    doodle.workflow = "animatron";
+    doodle.layers[0]!.frames[0]!.strokes.push(ink("doodle"));
+    useWorkflowMemory.getState().remember("animatron", {
+      project: doodle,
+      layerIndex: 0,
+      frameIndex: 0,
+      undoStack: [],
+      redoStack: [],
+    });
+
+    useProject.getState().switchWorkflow("animatron");
+    const packed = useProject.getState().project.layers[0]!.frames[0]!.strokes;
+    expect(useProject.getState().project.workflow).toBe("animatron");
+    expect(packed).toHaveLength(3);
+    expect(packed.every((s) => s.id !== "doodle")).toBe(true);
+    expect(packed[0]!.clip?.hold).toBe(false);
+    expect(packed[2]!.clip?.hold).toBe(true);
+  });
 });

@@ -1,4 +1,11 @@
 import type { Background, Project } from "@/model/types";
+import {
+  dotsHomePoints,
+  dotsPatternOrigin,
+  dotsTileSize,
+  resolveDots,
+  type ResolvedDots,
+} from "@/lib/dots-background";
 
 /**
  * Background painting for canvas contexts (edit stage, preview composition,
@@ -233,5 +240,132 @@ export function paintBackground(ctx: Ctx, project: Project, opts: PaintBackgroun
       }
       return true;
     }
+    case "dots": {
+      paintDotsBackground(ctx, w, h, resolveDots(bg));
+      return true;
+    }
   }
+}
+
+function snapUserX(ctx: Ctx, x: number): number {
+  const m = ctx.getTransform();
+  if (Math.abs(m.b) > 1e-6 || Math.abs(m.c) > 1e-6 || Math.abs(m.a) < 1e-8) return x;
+  const device = x * m.a + m.e;
+  return (Math.round(device) - m.e) / m.a;
+}
+
+function snapUserY(ctx: Ctx, y: number): number {
+  const m = ctx.getTransform();
+  if (Math.abs(m.b) > 1e-6 || Math.abs(m.c) > 1e-6 || Math.abs(m.d) < 1e-8) return y;
+  const device = y * m.d + m.f;
+  return (Math.round(device) - m.f) / m.d;
+}
+
+function snapUserSize(ctx: Ctx, size: number): number {
+  const m = ctx.getTransform();
+  const scale = Math.abs(m.a);
+  if (Math.abs(m.b) > 1e-6 || Math.abs(m.c) > 1e-6 || scale < 1e-8) {
+    return Math.max(0.5, size);
+  }
+  return Math.max(1, Math.round(size * scale)) / scale;
+}
+
+/** Pixel-align a center so even device sizes sit on integers and odd on .5. */
+function alignCenter(ctx: Ctx, n: number, size: number, axis: "x" | "y"): number {
+  const m = ctx.getTransform();
+  const scale = axis === "x" ? m.a : m.d;
+  const trans = axis === "x" ? m.e : m.f;
+  if (Math.abs(m.b) > 1e-6 || Math.abs(m.c) > 1e-6 || Math.abs(scale) < 1e-8) {
+    return n;
+  }
+  const deviceSize = Math.max(1, Math.round(size * Math.abs(scale)));
+  const deviceCenter = n * scale + trans;
+  const snapped =
+    deviceSize % 2 === 0
+      ? Math.round(deviceCenter)
+      : Math.round(deviceCenter - 0.5) + 0.5;
+  return (snapped - trans) / scale;
+}
+
+function stampDot(
+  ctx: Ctx,
+  x: number,
+  y: number,
+  size: number,
+  shape: ResolvedDots["shape"],
+) {
+  const s = snapUserSize(ctx, size);
+  const cx = alignCenter(ctx, x, s, "x");
+  const cy = alignCenter(ctx, y, s, "y");
+  const half = s / 2;
+
+  if (shape === "square") {
+    const left = snapUserX(ctx, cx - half);
+    const top = snapUserY(ctx, cy - half);
+    ctx.fillRect(left, top, s, s);
+    return;
+  }
+
+  ctx.beginPath();
+  if (shape === "diamond") {
+    ctx.moveTo(cx, cy - half);
+    ctx.lineTo(cx + half, cy);
+    ctx.lineTo(cx, cy + half);
+    ctx.lineTo(cx - half, cy);
+    ctx.closePath();
+  } else {
+    ctx.arc(cx, cy, Math.max(0.5, half), 0, Math.PI * 2);
+  }
+  ctx.fill();
+}
+
+function paintDotsBackground(ctx: Ctx, w: number, h: number, d: ResolvedDots) {
+  ctx.fillStyle = d.color;
+  ctx.fillRect(0, 0, w, h);
+  if (d.opacity <= 0 || d.size <= 0) return;
+
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.globalAlpha = d.opacity;
+  ctx.fillStyle = d.dotColor;
+
+  if (Math.abs(d.rotation) > 0.01) {
+    const rad = (d.rotation * Math.PI) / 180;
+    ctx.translate(w / 2, h / 2);
+    ctx.rotate(rad);
+    ctx.translate(-w / 2, -h / 2);
+  }
+
+  const origin = dotsPatternOrigin(d, w, h);
+  const tile = dotsTileSize(d);
+  const homes = dotsHomePoints(d);
+  const pad =
+    Math.abs(d.rotation) > 0.01
+      ? Math.hypot(w, h)
+      : d.size + d.softness * d.size + 1;
+  const i0 = Math.floor((-pad - origin.x) / tile.w) - 1;
+  const i1 = Math.ceil((w + pad - origin.x) / tile.w) + 1;
+  const j0 = Math.floor((-pad - origin.y) / tile.h) - 1;
+  const j1 = Math.ceil((h + pad - origin.y) / tile.h) + 1;
+
+  const blur = d.softness * (d.size / 2);
+  if (blur > 0.05) {
+    ctx.shadowColor = d.dotColor;
+    ctx.shadowBlur = blur;
+  }
+
+  for (let j = j0; j <= j1; j++) {
+    for (let i = i0; i <= i1; i++) {
+      for (const p of homes) {
+        stampDot(
+          ctx,
+          origin.x + i * tile.w + p.x,
+          origin.y + j * tile.h + p.y,
+          d.size,
+          d.shape,
+        );
+      }
+    }
+  }
+  ctx.restore();
 }

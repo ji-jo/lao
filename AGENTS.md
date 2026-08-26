@@ -88,6 +88,8 @@ by hand with Tailwind + the existing tokens — do not reach for a new dependenc
    export with Leafer; never use `@leafer-ui/node` in the client. Chrome stays fluid/beui.
 7. Boil/jitter must stay **deterministic** (seeded) so preview === export. Tests enforce it.
 8. Keep `npx tsc -b` clean and `bun test` green before every commit.
+9. **Never show scrollbars.** Clipped overflow still scrolls (wheel / trackpad / drag).
+   No native bars, no nano thumbs, no hover-reveal bars — in every component.
 
 ## Design source of truth — Paper (read this before touching any chrome)
 
@@ -139,10 +141,9 @@ Re-verify a token against Paper before trusting it; prefer `get_tokens` where it
 - **Bottom (Draw stage)** — `@beui/dock` tool rail stacked above the timeline: Select/Ink/
   Pencil/Marker/Eraser + duplicate-frame / empty-cel / onion + undo/redo. Ink uses reicon
   `PenNib`.
-- **Bottom** — the floating `Timeline`; frame rows share ONE horizontal scrollbar
-  (`src/components/ui/horizontal-scroll.tsx` — react-custom-scroll is vertical-only, so this
-  is a hand-rolled X scroller); layer labels are a pinned left column. Animatron swaps the
-  frame grid for `ClipTimeline`.
+- **Bottom** — the floating `Timeline`; frame rows share ONE hidden-bar horizontal
+  scroll (wheel / trackpad). Layer labels are a pinned left column. Animatron swaps the
+  frame grid for `ClipTimeline`. Never paint a visible scrollbar.
 - **Export** — fluid `Dialog` (`panels/ExportDialog.tsx`).
 
 ## Keyboard map (implemented)

@@ -164,7 +164,7 @@ Inactive hover: `PAPER.pillHover` (`#252525`) — **not** applied on the active 
 | `insetBottom` | 48 |
 | `settingGap` | 12 |
 | `barHeight` (tool / workflow) | 36 (`h-9`) |
-| `timelineWidth` | 845 |
+| `timelineWidth` | 961 |
 
 ---
 

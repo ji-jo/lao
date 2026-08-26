@@ -37,7 +37,7 @@ import {
   expandPolygonOutward,
   pointInPolygon,
 } from "@/engine/pathEdit";
-import { clipVisibleAt, strokeAtTime, textContentAtTime, strokeWithClipPoints } from "@/engine/strokeProgress";
+import { clipVisibleAt, animatronStrokesAtTime, textContentAtTime } from "@/engine/strokeProgress";
 import { celForLayer } from "@/engine/layerCel";
 import { boilDisplacement } from "@/engine/boil";
 import {
@@ -916,7 +916,11 @@ export function StageCanvas() {
       const move = moveRef.current;
       const xf = transformRef.current;
       const animatron = ps.project.workflow === "animatron";
-      const timeMs = (ps.frameIndex / Math.max(ps.project.fps, 1)) * 1000;
+      const fps = Math.max(1, ps.project.fps);
+      const timeMs =
+        pb.playing && pb.timeMs != null
+          ? pb.timeMs
+          : (ps.frameIndex / fps) * 1000;
       ps.project.layers.forEach((layer, li) => {
         if (!layer.visible) return;
         const cel = animatron
@@ -953,7 +957,12 @@ export function StageCanvas() {
                 xf.scale,
                 xf.rotation,
               );
-              next.points = flattenBezierNodes(next.bezierNodes, s.closed);
+              next.points = flattenBezierNodes(
+                next.bezierNodes,
+                s.closed,
+                undefined,
+                snap.points,
+              );
             } else {
               // Avoid stale bezierNodes winning over transformed points.
               next.bezierNodes = undefined;
@@ -1040,15 +1049,11 @@ export function StageCanvas() {
         if (animatron) {
           const selected = new Set(useSelection.getState().ids);
           const showFullDrawing = pb.showFullStrokes;
-          strokes = strokes
-            .map((s) => {
-              if (selected.has(s.id)) return s;
-              if (showFullDrawing) return s;
-              const pts = strokeAtTime(s, timeMs);
-              if (!pts) return null;
-              return strokeWithClipPoints(s, pts);
-            })
-            .filter((s): s is Stroke => !!s);
+          if (!showFullDrawing) {
+            const rest = strokes.filter((s) => !selected.has(s.id));
+            const kept = strokes.filter((s) => selected.has(s.id));
+            strokes = [...animatronStrokesAtTime(rest, timeMs), ...kept];
+          }
           texts = texts
             .map((t) => {
               if (selected.has(t.id)) return t;
@@ -1140,7 +1145,12 @@ export function StageCanvas() {
             // Keep pack-brush / point consumers in sync with node drags.
             displaced.set(
               warp.strokeId,
-              flattenBezierNodes(warp.currentBezierNodes, !!warp.isClosed),
+              flattenBezierNodes(
+                warp.currentBezierNodes,
+                !!warp.isClosed,
+                undefined,
+                warp.origPoints,
+              ),
             );
           } else {
             displaced.set(warp.strokeId, warp.currentPoints);
@@ -2028,7 +2038,12 @@ export function StageCanvas() {
       newNodes.splice(bestHit.insertIndex, 0, newNode);
     }
 
-    const newPts = flattenBezierNodes(newNodes, !!stroke.closed);
+    const newPts = flattenBezierNodes(
+      newNodes,
+      !!stroke.closed,
+      undefined,
+      stroke.points,
+    );
     useProject
       .getState()
       .replaceStrokePoints(
@@ -2724,7 +2739,12 @@ export function StageCanvas() {
                 spot.index,
                 !!stroke.closed,
               );
-              const newPts = flattenBezierNodes(newNodes, stroke.closed);
+              const newPts = flattenBezierNodes(
+                newNodes,
+                stroke.closed,
+                undefined,
+                stroke.points,
+              );
               useProject
                 .getState()
                 .replaceStrokePoints(
@@ -3567,7 +3587,12 @@ export function StageCanvas() {
       if (warp) {
         warpRef.current = null;
         if (warp.isBezier && warp.currentBezierNodes) {
-          warp.currentPoints = flattenBezierNodes(warp.currentBezierNodes, !!warp.isClosed);
+          warp.currentPoints = flattenBezierNodes(
+            warp.currentBezierNodes,
+            !!warp.isClosed,
+            undefined,
+            warp.origPoints,
+          );
         }
         const ps = useProject.getState();
         const layer = ps.project.layers[ps.layerIndex];

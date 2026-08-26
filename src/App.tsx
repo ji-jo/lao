@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ExpandableActionBar } from "@/components/motion/expandable-action-bar";
 import { WorkflowBar } from "@/components/chrome/WorkflowBar";
-import CameraIcon from "@/components/ui/camera-icon";
 import { ExportDialog } from "@/components/panels/ExportDialog";
 import { SaveFirstDialog } from "@/components/panels/SaveFirstDialog";
 import { saveLaoFile, openLaoFile, parseLaoDocument } from "@/file/laoFile";
@@ -11,7 +9,6 @@ import { createImageElementFromFile } from "@/engine/canvasImage";
 import { StageCanvas } from "@/components/StageCanvas";
 import { PreviewStage } from "@/components/PreviewStage";
 import { ToolDock } from "@/components/chrome/ToolDock";
-import { ReferencePanel } from "@/components/chrome/ReferencePanel";
 import { ZoomDock } from "@/components/chrome/ZoomDock";
 import { ZoomHud } from "@/components/chrome/ZoomHud";
 import { FeedbackDock } from "@/components/chrome/FeedbackDock";
@@ -43,6 +40,7 @@ import { copyArtboardToClipboard } from "@/export/clipboardShot";
 import { getShaderSnapshotCanvas } from "@/components/ShaderBackground";
 import { hasImageFilter } from "@/lib/image-filters";
 import { LaoToaster } from "@/components/chrome/LaoToaster";
+import { ModalCloseChip } from "@/components/ui/modal-close-chip";
 import {
   toastCopied,
   toastError,
@@ -538,37 +536,30 @@ export default function App() {
         <ImageFilterSnapshotMount background={background} aspect={aspect} />
       )}
 
-      <div
-        className="absolute z-20"
-        style={{ left: PAPER.insetX, top: PAPER.insetTop }}
-      >
-        <WorkflowBar
-          onSave={() => void handleSave()}
-          onOpen={() => void handleOpen()}
-          onExport={() => setExportOpen(true)}
-          onNew={handleNew}
-        />
-      </div>
-
-      {stage === "preview" && (
-        <div className="absolute left-1/2 top-4 z-20 -translate-x-1/2">
-          <ExpandableActionBar
-            size="sm"
-            items={[
-              {
-                id: "reference",
-                label: "Reference",
-                icon: <CameraIcon size={14} />,
-                onClick: () => setReferenceOpen(true),
-              },
-            ]}
-            className="!min-h-[42px] h-[42px]"
+      {stage === "draw" && (
+        <div
+          className="absolute z-20"
+          style={{ left: PAPER.insetX, top: PAPER.insetTop }}
+        >
+          <WorkflowBar
+            onSave={() => void handleSave()}
+            onOpen={() => void handleOpen()}
+            onExport={() => setExportOpen(true)}
+            onNew={handleNew}
           />
         </div>
       )}
 
       {stage === "preview" && (
-        <ReferencePanel open={referenceOpen} onClose={() => setReferenceOpen(false)} />
+        <div
+          className="absolute left-1/2 z-20 -translate-x-1/2"
+          style={{ top: PAPER.insetTop }}
+        >
+          <ModalCloseChip
+            aria-label="Close preview"
+            onClick={() => setStage("draw")}
+          />
+        </div>
       )}
 
       <input
@@ -632,7 +623,7 @@ export default function App() {
         <div
           className="pointer-events-auto flex min-h-0 w-full flex-col overflow-visible"
           style={{
-            width: PAPER.timelineWidth,
+            width: "max-content",
             maxWidth: "calc(100vw - 124px)",
           }}
         >

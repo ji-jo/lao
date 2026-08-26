@@ -31,6 +31,20 @@ describe("bezier path editing", () => {
     expect(flat[flat.length - 1].t).toBe(500);
   });
 
+  test("flattenBezierNodes copies pressure along the path", () => {
+    const source = [
+      { x: 0, y: 0, pressure: 0.2, t: 0 },
+      { x: 50, y: 0, pressure: 0.95, t: 50 },
+      { x: 100, y: 0, pressure: 0.25, t: 100 },
+    ];
+    const { nodes } = pointsToBezierNodes(source, { strokeSize: 8 });
+    const flat = flattenBezierNodes(nodes, false, 100, source);
+    expect(flat[0]!.pressure).toBeCloseTo(0.2, 1);
+    expect(flat[flat.length - 1]!.pressure).toBeCloseTo(0.25, 1);
+    const mid = flat[Math.floor(flat.length / 2)]!;
+    expect(mid.pressure).toBeGreaterThan(0.5);
+  });
+
   test("toggleBezierNodeCorner removes and restores handles", () => {
     const nodes = [
       { x: 0, y: 0, handleOut: { x: 10, y: 0 } },

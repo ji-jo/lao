@@ -380,7 +380,7 @@ export function StepperBox({
 }) {
   return (
     <div
-      className="flex h-[29px] items-center gap-[10px] overflow-clip rounded-[7px] px-2 py-1"
+      className="flex h-[29px] items-center gap-2 overflow-clip rounded-[8px] px-2 py-1"
       style={{ backgroundColor: PAPER.surfaceAlt, border: `0.4px solid ${PAPER.borderHairline}` }}
     >
       {leading}
@@ -439,12 +439,8 @@ export function DockSep() {
 /**
  * Bare icon button in the transport row (play / prev / loop / …).
  *
- * The button IS the hit target — icon size plus a fixed pad on every side —
- * so hovering the padded area (not just the tiny glyph) triggers the chip.
- * Hover is plain CSS `:hover` (icon paints with `currentColor`, so
- * `hover:text-white` cascades into the SVG for free); nothing here depends on
- * a React event handler firing, so it cannot silently fail to trigger the way
- * the old cloneElement/useState version did.
+ * 29×29 hit target, no negative margin — the row’s 12px flex gap is the real
+ * space between icons, inputs, and tabs.
  */
 const DOCK_BTN_PAD = 6;
 
@@ -468,7 +464,7 @@ export function DockBtn({
         onClick={onClick}
         aria-label={label}
         aria-pressed={active}
-        style={{ width: size + DOCK_BTN_PAD * 2, height: size + DOCK_BTN_PAD * 2, margin: -DOCK_BTN_PAD }}
+        style={{ width: size + DOCK_BTN_PAD * 2, height: size + DOCK_BTN_PAD * 2 }}
         className={cn(
           "grid shrink-0 place-items-center rounded-[6px] transition-colors hover:bg-[#313131] hover:text-white",
           active ? "text-white opacity-100" : "text-[#DADADA] opacity-90 hover:opacity-100",

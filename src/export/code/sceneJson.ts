@@ -16,8 +16,7 @@ import {
 } from "@/engine/boil";
 import {
   clipFadeOpacity,
-  strokeAtTime,
-  strokeWithClipPoints,
+  animatronStrokesAtTime,
 } from "@/engine/strokeProgress";
 import {
   applyMotionPoseToPoint,
@@ -29,6 +28,7 @@ import { tweenFrames } from "@/engine/tween";
 import { PATH_MAKER_ENABLED } from "@/lib/mvpFlags";
 import { expandPolygonOutward, fillPolygonExpandDistance } from "@/engine/pathEdit";
 import { parseCssGradient } from "@/engine/background";
+import { resolveDots } from "@/lib/dots-background";
 import { bezierNodesToPathD, compactPolylinePathD, strokeCenterlinePathD, strokeToPathD } from "@/export/code/svgGeometry";
 import { boilPathValues, clipFadeData } from "@/export/code/svgAnimation";
 import { collectFontImports, textElementToSvg } from "@/export/code/svgText";
@@ -50,6 +50,22 @@ export type SceneBackground =
       kind: "gradient";
       shape: "linear" | "radial";
       stops: Array<{ color: string; at: number }>;
+    }
+  | {
+      kind: "dots";
+      color: string;
+      dotColor: string;
+      size: number;
+      gapX: number;
+      gapY: number;
+      offsetX: number;
+      offsetY: number;
+      opacity: number;
+      shape: "circle" | "square" | "diamond";
+      pattern: "grid" | "hex";
+      rotation: number;
+      softness: number;
+      origin: "center" | "corner";
     };
 
 export interface SceneMaskDef {
@@ -127,13 +143,7 @@ function resetMaskCounter(): void {
 function strokesForFrame(project: Project, frame: number, layerStrokes: Stroke[]): Stroke[] {
   if (project.workflow !== "animatron") return layerStrokes;
   const timeMs = (frame / Math.max(project.fps, 1)) * 1000;
-  const out: Stroke[] = [];
-  for (const s of layerStrokes) {
-    const pts = strokeAtTime(s, timeMs);
-    if (!pts || pts.length === 0) continue;
-    out.push(strokeWithClipPoints(s, pts));
-  }
-  return out;
+  return animatronStrokesAtTime(layerStrokes, timeMs);
 }
 
 function morphProgress(
@@ -234,6 +244,25 @@ function sceneBackground(project: Project, transparent: boolean): SceneBackgroun
     case "image":
     case "shader":
       return { kind: "color", color: "#141416" };
+    case "dots": {
+      const d = resolveDots(bg);
+      return {
+        kind: "dots",
+        color: d.color,
+        dotColor: d.dotColor,
+        size: d.size,
+        gapX: d.gapX,
+        gapY: d.gapY,
+        offsetX: d.offsetX,
+        offsetY: d.offsetY,
+        opacity: d.opacity,
+        shape: d.shape,
+        pattern: d.pattern,
+        rotation: d.rotation,
+        softness: d.softness,
+        origin: d.origin,
+      };
+    }
     default:
       return { kind: "color", color: "#141416" };
   }

@@ -39,6 +39,7 @@ export function WorkflowBar({
   onNew?: () => void;
 }) {
   const workflow = usePlayback((s) => s.workflow);
+  const stage = usePlayback((s) => s.stage);
   const switchWorkflow = useProject((s) => s.switchWorkflow);
   const [fileOpen, setFileOpen] = useState(false);
   const barRef = useRef<HTMLDivElement>(null);
@@ -121,18 +122,20 @@ export function WorkflowBar({
           </div>
         </motion.div>
 
-        <div className="flex items-start gap-1">
-          <ModePill
-            label="Animatron"
-            active={workflow === "animatron"}
-            onClick={() => requestSwitch("animatron")}
-          />
-          <ModePill
-            label="Stop-motion"
-            active={workflow === "stopmotion"}
-            onClick={() => requestSwitch("stopmotion")}
-          />
-        </div>
+        {stage === "draw" ? (
+          <div className="flex items-start gap-1">
+            <ModePill
+              label="Animatron"
+              active={workflow === "animatron"}
+              onClick={() => requestSwitch("animatron")}
+            />
+            <ModePill
+              label="Stop-motion"
+              active={workflow === "stopmotion"}
+              onClick={() => requestSwitch("stopmotion")}
+            />
+          </div>
+        ) : null}
       </div>
     </div>
   );

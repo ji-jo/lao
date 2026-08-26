@@ -30,10 +30,12 @@ import { useTools, isShapeTool, DRAW_BRUSHES, brushesForKind, type DrawBrushKind
 import { useProject } from "@/state/project";
 import { useSelection } from "@/state/selection";
 import {
+  createEmptyProject,
   resolveCel,
   type Background,
   type BoilSettings,
   type BrushKind,
+  type DotsBackground,
   type ImageFilterId,
   type ShaderPresetId,
   type Stroke,
@@ -72,7 +74,7 @@ import {
 } from "@/assets/icons/tools/tool-icons";
 import { ShaderBackground } from "@/components/ShaderBackground";
 import { ImageFilterBackground } from "@/components/ImageFilterBackground";
-import { loadBackgroundImage } from "@/engine/background";
+import { loadBackgroundImage, paintBackground } from "@/engine/background";
 import {
   makeShaderBackground,
   normalizeShaderPreset,
@@ -80,6 +82,13 @@ import {
   SHADER_DEFAULTS,
   SHADER_PRESETS,
 } from "@/lib/shader-presets";
+import {
+  DOTS_ORIGINS,
+  DOTS_PATTERNS,
+  DOTS_SHAPES,
+  makeDotsBackground,
+  resolveDots,
+} from "@/lib/dots-background";
 import {
   applyImageFilter,
   clearImageFilter,
@@ -102,6 +111,7 @@ const CHIP_LABEL_STYLE: CSSProperties = {
 
 const BG_COLOR_DEFAULT: Background = { kind: "color", color: "#FFFFFF" };
 const BG_SHADER_DEFAULT: Background = makeShaderBackground("plasma");
+const BG_DOTS_DEFAULT: Background = makeDotsBackground();
 
 /** CSS `background` for the dock chip — solid, gradient, image, or shader. */
 function backgroundChipStyle(bg: Background | undefined): CSSProperties {
@@ -123,15 +133,27 @@ function backgroundChipStyle(bg: Background | undefined): CSSProperties {
     }
     return { background: colors[0] ?? "#888888" };
   }
+  if (bg.kind === "dots") {
+    const d = resolveDots(bg);
+    const gx = Math.max(3, d.gapX / 4);
+    const gy = Math.max(3, d.gapY / 4);
+    const r = Math.max(0.6, d.size / 4);
+    return {
+      backgroundColor: d.color,
+      backgroundImage: `radial-gradient(circle, ${d.dotColor} ${r}px, transparent ${r + 0.35}px)`,
+      backgroundSize: `${gx}px ${gy}px`,
+    };
+  }
   // color | gradient — same CSS the picker preview uses
   return { background: backgroundToPickerValue(bg) };
 }
 
-type BgKindTab = "none" | "color" | "shader" | "image";
+type BgKindTab = "none" | "color" | "shader" | "image" | "dots";
 
 function bgKindTab(bg: Background | undefined): BgKindTab {
   const kind = bg?.kind ?? "none";
-  if (kind === "color" || kind === "shader" || kind === "image") return kind;
+  if (kind === "color" || kind === "shader" || kind === "image" || kind === "dots")
+    return kind;
   // gradient maps into Color for this compact panel
   if (kind === "gradient") return "color";
   return "none";
@@ -1789,7 +1811,7 @@ function BgLabeledScrubber({
   trackClassName?: string;
 }) {
   return (
-    <div className="flex w-full items-center gap-6">
+    <div className="flex w-full min-w-0 items-center gap-6">
       <span
         className={cn(
           "w-[72px] shrink-0 truncate text-xs leading-4 text-white/70",
@@ -2024,7 +2046,292 @@ function ImageExpandedPanel({
   );
 }
 
-/** Paper 272-0 — Canvas Background kind picker (None / Color / Shader / Image). */
+function DotsPreview({ background }: { background: DotsBackground }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const d = resolveDots(background);
+  const sig = [
+    d.color,
+    d.dotColor,
+    d.size,
+    d.gapX,
+    d.gapY,
+    d.offsetX,
+    d.offsetY,
+    d.opacity,
+    d.shape,
+    d.pattern,
+    d.rotation,
+    d.softness,
+    d.origin,
+  ].join("|");
+
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const project = createEmptyProject();
+    project.width = canvas.width;
+    project.height = canvas.height;
+    project.background = d;
+    paintBackground(ctx, project);
+    // `sig` captures every field that affects the paint.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sig]);
+
+  return (
+    <div className="relative h-[124px] w-full min-w-0 shrink-0 overflow-hidden rounded-lg bg-black">
+      <canvas
+        ref={canvasRef}
+        width={284}
+        height={124}
+        className="block h-[124px] w-full max-w-full"
+        aria-hidden
+      />
+    </div>
+  );
+}
+
+function DotsColorSwatch({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="flex min-w-0 flex-1 items-center gap-2">
+      <ColorPickerPopover
+        value={value}
+        onValueChange={onChange}
+        triggerShowValue={false}
+        triggerClassName="!size-8 !min-h-8 !min-w-8 !justify-center !gap-0 !rounded-lg !border !border-white/15 !bg-transparent !p-0 !outline-none"
+      />
+      <span
+        className="truncate text-xs leading-4 text-white/70"
+        style={{ fontFamily: PAPER.fontSans }}
+      >
+        {label}
+      </span>
+    </div>
+  );
+}
+
+function DotsChipRow<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: { id: T; label: string }[];
+  onChange: (id: T) => void;
+}) {
+  return (
+    <div className="flex w-full min-w-0 items-center gap-3">
+      <span
+        className="w-[72px] shrink-0 truncate text-xs leading-4 text-white/70"
+        style={{ fontFamily: PAPER.fontSans }}
+      >
+        {label}
+      </span>
+      <div className="flex min-w-0 flex-1 items-center gap-1.5">
+        {options.map((o) => (
+          <Chip
+            key={o.id}
+            label={o.label}
+            active={value === o.id}
+            onClick={() => onChange(o.id)}
+            className="min-w-0 flex-1 justify-center !px-1"
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Dots paper — fill, dot color, size, gaps, offset, shape, hex, rotation, … */
+function DotsExpandedPanel({
+  background,
+  onSet,
+}: {
+  background: DotsBackground;
+  onSet: (bg: Background) => void;
+}) {
+  const d = resolveDots(background);
+
+  function readDots(): DotsBackground | null {
+    const bg = useProject.getState().project.background;
+    return bg?.kind === "dots" ? bg : null;
+  }
+
+  function patchLive(partial: Partial<Omit<DotsBackground, "kind">>) {
+    const bg = readDots();
+    if (!bg) return;
+    useProject.getState().setBackgroundLive(resolveDots({ ...bg, ...partial }));
+  }
+
+  function patchCommit(partial: Partial<Omit<DotsBackground, "kind">>) {
+    const bg = readDots();
+    if (!bg) return;
+    onSet(resolveDots({ ...bg, ...partial }));
+  }
+
+  return (
+    <div className="flex w-full min-w-0 flex-col items-start gap-3">
+      <DotsPreview background={d} />
+
+      <div className="flex w-full items-center gap-3">
+        <DotsColorSwatch
+          label="Fill"
+          value={d.color}
+          onChange={(color) => patchCommit({ color })}
+        />
+        <DotsColorSwatch
+          label="Dots"
+          value={d.dotColor}
+          onChange={(dotColor) => patchCommit({ dotColor })}
+        />
+      </div>
+
+      <DotsChipRow
+        label="Shape"
+        value={d.shape}
+        options={DOTS_SHAPES}
+        onChange={(shape) => patchCommit({ shape })}
+      />
+      <DotsChipRow
+        label="Pattern"
+        value={d.pattern}
+        options={DOTS_PATTERNS}
+        onChange={(pattern) => patchCommit({ pattern })}
+      />
+      <DotsChipRow
+        label="Origin"
+        value={d.origin}
+        options={DOTS_ORIGINS}
+        onChange={(origin) => patchCommit({ origin })}
+      />
+
+      <div className="flex max-h-[min(42vh,340px)] w-full min-w-0 flex-col gap-2 overflow-y-auto overflow-x-hidden">
+        <BgLabeledScrubber
+          label="Size"
+          value={d.size}
+          onChange={(size) => patchLive({ size })}
+          onValueCommit={(size) => patchCommit({ size })}
+          min={0.5}
+          max={48}
+          step={0.5}
+          formatValue={(v) => `${v.toFixed(v < 10 ? 1 : 0)}px`}
+        />
+        {d.gapLinked ? (
+          <BgLabeledScrubber
+            label="Gap"
+            value={d.gapX}
+            onChange={(gapX) => patchLive({ gapX, gapY: gapX })}
+            onValueCommit={(gapX) => patchCommit({ gapX, gapY: gapX })}
+            min={2}
+            max={200}
+            step={1}
+            formatValue={(v) => `${Math.round(v)}px`}
+          />
+        ) : (
+          <>
+            <BgLabeledScrubber
+              label="Gap X"
+              value={d.gapX}
+              onChange={(gapX) => patchLive({ gapX })}
+              onValueCommit={(gapX) => patchCommit({ gapX })}
+              min={2}
+              max={200}
+              step={1}
+              formatValue={(v) => `${Math.round(v)}px`}
+            />
+            <BgLabeledScrubber
+              label="Gap Y"
+              value={d.gapY}
+              onChange={(gapY) => patchLive({ gapY })}
+              onValueCommit={(gapY) => patchCommit({ gapY })}
+              min={2}
+              max={200}
+              step={1}
+              formatValue={(v) => `${Math.round(v)}px`}
+            />
+          </>
+        )}
+        <button
+          type="button"
+          onClick={() =>
+            patchCommit({
+              gapLinked: !d.gapLinked,
+              gapY: !d.gapLinked ? d.gapX : d.gapY,
+            })
+          }
+          aria-pressed={d.gapLinked}
+          className="flex h-6 w-full items-center justify-center rounded-[7px] text-xs text-white/70 outline-none hover:bg-[#252525] hover:text-white"
+          style={{ fontFamily: PAPER.fontMono }}
+        >
+          {d.gapLinked ? "Unlink X / Y gap" : "Link X / Y gap"}
+        </button>
+        <BgLabeledScrubber
+          label="Offset X"
+          value={d.offsetX}
+          onChange={(offsetX) => patchLive({ offsetX })}
+          onValueCommit={(offsetX) => patchCommit({ offsetX })}
+          min={-80}
+          max={80}
+          step={1}
+          formatValue={(v) => `${Math.round(v)}px`}
+        />
+        <BgLabeledScrubber
+          label="Offset Y"
+          value={d.offsetY}
+          onChange={(offsetY) => patchLive({ offsetY })}
+          onValueCommit={(offsetY) => patchCommit({ offsetY })}
+          min={-80}
+          max={80}
+          step={1}
+          formatValue={(v) => `${Math.round(v)}px`}
+        />
+        <BgLabeledScrubber
+          label="Rotate"
+          value={d.rotation}
+          onChange={(rotation) => patchLive({ rotation })}
+          onValueCommit={(rotation) => patchCommit({ rotation })}
+          min={-90}
+          max={90}
+          step={1}
+          formatValue={(v) => `${Math.round(v)}°`}
+        />
+        <BgLabeledScrubber
+          label="Opacity"
+          value={d.opacity}
+          onChange={(opacity) => patchLive({ opacity })}
+          onValueCommit={(opacity) => patchCommit({ opacity })}
+          min={0}
+          max={1}
+          step={0.01}
+          formatValue={(v) => `${Math.round(v * 100)}%`}
+        />
+        <BgLabeledScrubber
+          label="Softness"
+          value={d.softness}
+          onChange={(softness) => patchLive({ softness })}
+          onValueCommit={(softness) => patchCommit({ softness })}
+          min={0}
+          max={1}
+          step={0.01}
+          formatValue={(v) => v.toFixed(2)}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** Paper 272-0 — Canvas Background kind picker (None / Color / Shader / Image / Dots). */
 function BackgroundExpandedPanel({
   background,
   onSet,
@@ -2096,6 +2403,10 @@ function BackgroundExpandedPanel({
       onSet(background?.kind === "shader" ? background : BG_SHADER_DEFAULT);
       return;
     }
+    if (next === "dots") {
+      onSet(background?.kind === "dots" ? background : BG_DOTS_DEFAULT);
+      return;
+    }
     // Image tab — show empty state; don't force the file dialog.
     if (background?.kind === "image") return;
     onSet(makeEmptyImageBackground("cover"));
@@ -2106,6 +2417,7 @@ function BackgroundExpandedPanel({
     { id: "color", label: "Color" },
     { id: "shader", label: "Shader" },
     { id: "image", label: "Image" },
+    { id: "dots", label: "Dots" },
   ];
 
   const bodyPanels = (
@@ -2133,14 +2445,17 @@ function BackgroundExpandedPanel({
             onPickFile={openImagePicker}
           />
         )}
+        {tab === "dots" && background?.kind === "dots" && (
+          <DotsExpandedPanel background={background} onSet={onSet} />
+        )}
       </motion.div>
     </AnimatePresence>
   );
 
   return (
     <div
-      className="flex flex-col items-stretch gap-4 overflow-visible rounded-xl p-4 antialiased"
-      style={{ width: BG_PANEL_WIDTH, fontFamily: PAPER.fontSans }}
+      className="flex w-full min-w-0 flex-col items-stretch gap-4 overflow-visible rounded-xl p-4 antialiased"
+      style={{ width: BG_PANEL_WIDTH, maxWidth: BG_PANEL_WIDTH, fontFamily: PAPER.fontSans }}
     >
       <input
         ref={imageInputRef}
@@ -2149,7 +2464,7 @@ function BackgroundExpandedPanel({
         className="hidden"
         aria-hidden
       />
-      <div className="flex w-full flex-col items-stretch gap-3">
+      <div className="flex w-full min-w-0 flex-col items-stretch gap-3">
         <div className="flex w-full items-center justify-between gap-3">
           <div className="w-fit text-xs font-light leading-4 text-white opacity-60">
             Canvas Background
@@ -2168,12 +2483,12 @@ function BackgroundExpandedPanel({
         <Tabs
           value={tab}
           onValueChange={(v) => pickKind(v as BgKindTab)}
-          className="w-full"
+          className="w-full min-w-0"
         >
           <TabsList
             aria-label="Canvas background kind"
             className={cn(
-              "!flex !h-7 !w-full !gap-1 !rounded-lg !bg-[#121212] !p-0.5",
+              "!flex !h-7 !w-full !min-w-0 !overflow-hidden !gap-1 !rounded-lg !bg-[#121212] !p-0.5",
               "!outline !outline-1 !outline-[#292A2A]",
               "[&>div.absolute.pointer-events-none:first-of-type]:!rounded-[7px]",
               "[&>div.absolute.pointer-events-none:first-of-type]:!bg-[#313131]",
@@ -2185,9 +2500,9 @@ function BackgroundExpandedPanel({
                 value={id}
                 label={label}
                 className={cn(
-                  "!h-6 !min-w-0 !flex-1 !justify-center !gap-0 !rounded-[7px] !px-0",
+                  "!h-6 !min-w-0 !flex-1 !justify-center !gap-0 !rounded-[7px] !px-0 !overflow-hidden",
                   "[&_span]:!font-mono [&_span]:!text-xs [&_span]:!leading-4",
-                  "[&_span]:!text-white/80",
+                  "[&_span]:!text-white/80 [&_span]:!overflow-hidden",
                 )}
               />
             ))}

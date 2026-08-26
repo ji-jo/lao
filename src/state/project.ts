@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import {
+  celHasArt,
   createEmptyProject,
   isLegacyVanishingEasing,
   projectHasArt,
@@ -24,12 +25,12 @@ import { usePlayback } from "@/state/playback";
 import { useWorkflowMemory } from "@/state/workflowMemory";
 import {
   convertProjectWorkflow,
-  firstVisibleWorkflowFrame,
+  projectHasTimelineMotion,
 } from "@/model/workflowConvert";
 import { translatePoints, transformPoints, translateBezierNodes, transformBezierNodes } from "@/engine/pathEdit";
 import { measureTextBox, transformTextElement } from "@/engine/textGeometry";
 import { extrasAfterPathEdit } from "@/components/stage/leaferBridge";
-import { flattenBezierNodes, pointsToBezierNodes } from "@/lib/bezier";
+import { flattenBezierNodes, mapPressureAlongPath, pointsToBezierNodes } from "@/lib/bezier";
 import { clearBrushDraftCache } from "@/engine/brushStyles";
 import {
   ART_DUPLICATE_OFFSET,
@@ -414,12 +415,7 @@ export const useProject = create<ProjectState>((set, get) => {
     const activeCel = active?.frames.find((f) => f) ?? null;
     // Image / text layers look "empty" for strokes but still have content —
     // never replace their frames or the bitmap/text vanishes on first draw.
-    const celHasArt =
-      !!activeCel &&
-      (activeCel.strokes.length > 0 ||
-        (activeCel.texts?.length ?? 0) > 0 ||
-        (activeCel.images?.length ?? 0) > 0);
-    const activeEmpty = !!active && !celHasArt;
+    const activeEmpty = !!active && !celHasArt(activeCel);
 
     if (activeEmpty && active) {
       // reuse the empty active layer for the first path
@@ -1125,6 +1121,7 @@ export const useProject = create<ProjectState>((set, get) => {
           nodes,
           closed || stroke.closed,
           durationHint > 0 ? durationHint : undefined,
+          stroke.points,
         );
         const extras = extrasAfterPathEdit(stroke);
         const strokes = cel.strokes.map((s) => {
@@ -1197,6 +1194,7 @@ export const useProject = create<ProjectState>((set, get) => {
               newNodes,
               s.closed,
               durationHint > 0 ? durationHint : undefined,
+              s.points,
             );
             const next: Stroke = {
               ...s,
@@ -1246,7 +1244,7 @@ export const useProject = create<ProjectState>((set, get) => {
           s.clip?.durationMs ?? strokeDurationMs(s.points);
         const timedPoints = bezierNodes
           ? retimeStrokePoints(
-              points,
+              mapPressureAlongPath(points, s.points),
               durationHint > 0 ? durationHint : undefined,
             )
           : points;
@@ -1316,6 +1314,7 @@ export const useProject = create<ProjectState>((set, get) => {
               next.bezierNodes,
               s.closed,
               durationHint > 0 ? durationHint : undefined,
+              next.points,
             );
           }
           if (s.shapeBox) {
@@ -1394,6 +1393,7 @@ export const useProject = create<ProjectState>((set, get) => {
               (s.clip?.durationMs ?? strokeDurationMs(s.points)) > 0
                 ? s.clip?.durationMs ?? strokeDurationMs(s.points)
                 : undefined,
+              next.points,
             );
           }
           if (s.shapeBox) {
@@ -1782,9 +1782,23 @@ export const useProject = create<ProjectState>((set, get) => {
       const layer = project.layers[layerIndex];
       if (!layer) return;
       const fi = layer.isStatic ? 0 : frameIndex;
-      // Always a blank key — onion auto-duplicate is for drawing on a hold,
-      // not for the Empty cel button (that was leaving the previous drawing).
-      commit(replaceLayer(project, layerIndex, setCel(layer, fi, emptyCel())));
+      // Empty cel: nil when nothing earlier would show through. If a previous
+      // drawing would hold into this cell, write a blank key so the canvas
+      // stays empty (the timeline still paints that as nil — no art, no dot).
+      let prevArt = -1;
+      for (let i = fi - 1; i >= 0; i--) {
+        if (celHasArt(layer.frames[i] ?? null)) {
+          prevArt = i;
+          break;
+        }
+      }
+      commit(
+        replaceLayer(
+          project,
+          layerIndex,
+          setCel(layer, fi, prevArt >= 0 ? emptyCel() : null),
+        ),
+      );
     },
 
     /** duplicate the current cel onto the next frame and move there — the core draw→flip→draw loop */
@@ -1966,7 +1980,16 @@ export const useProject = create<ProjectState>((set, get) => {
       });
 
       const remembered = useWorkflowMemory.getState().take(next);
-      const restore = !!(remembered && projectHasArt(remembered.project));
+      const sourceMoves = projectHasTimelineMotion(s.project);
+      const rememberedMoves = !!(
+        remembered && projectHasTimelineMotion(remembered.project)
+      );
+      // Restore the other mode when it has art, unless you're bringing a
+      // real animation into a leftover still/doodle (SM flipbook vs one
+      // Animatron path). Native Animatron motion still round-trips.
+      const restore =
+        !!(remembered && projectHasArt(remembered.project)) &&
+        (!sourceMoves || rememberedMoves);
       const incoming = restore
         ? remembered!.project
         : convertProjectWorkflow({ ...s.project, workflow: from }, next, from);
@@ -1986,7 +2009,7 @@ export const useProject = create<ProjectState>((set, get) => {
               0,
               Math.min(remembered!.frameIndex, project.frameCount - 1),
             )
-          : firstVisibleWorkflowFrame(project),
+          : 0,
         undoStack: restore ? remembered!.undoStack : [],
         redoStack: restore ? remembered!.redoStack : [],
       });

@@ -1,0 +1,22 @@
+---
+description: Never show scrollbars — clipped overflow still scrolls
+alwaysApply: true
+---
+
+# No visible scrollbars
+
+Clipped content may scroll (wheel, trackpad, drag, arrow keys). **Never paint a scrollbar.**
+
+- Do not add native bars (`overflow: auto` is fine; hide the chrome).
+- Do not add nano / custom thumbs, hover-reveal bars, or `alwaysShowScrollbar`.
+- Use `ScrollArea` or `overflow-*` + the global hide in `src/index.css`.
+- Edge fades (`scroll-fade-effect`) are OK; they are not scrollbars.
+
+```tsx
+// ❌ BAD
+<div className="overflow-auto">…</div> // without the global hide, or with a visible thumb
+
+// ✅ GOOD
+<ScrollArea orientation="both">{children}</ScrollArea>
+// or overflow-auto under .lao-app — bars are globally hidden
+```

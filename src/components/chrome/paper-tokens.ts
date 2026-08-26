@@ -66,8 +66,11 @@ export const PAPER = {
   insetTop: 24,
   insetBottom: 48,
   settingGap: 12,
-  /** +20% over Paper's 704 was 845; +49 (≈24.5px/side) for transport breathing room. */
-  timelineWidth: 894,
+  /**
+   * Fallback dock width (drag math when the panel isn’t mounted). The shell
+   * hugs the 12px-pitch transport + 19px side pads — no leftover after Draw/Preview.
+   */
+  timelineWidth: 961,
   barHeight: 36,
   fontSans: "'Geist', 'Inter Variable', system-ui, sans-serif",
   fontMono: "'Geist Mono', ui-monospace, monospace",

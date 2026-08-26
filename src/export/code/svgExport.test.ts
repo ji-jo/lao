@@ -5,6 +5,7 @@ import { createEmptyProject, type Stroke, type StrokePoint } from "@/model/types
 import { paintProjectFrame } from "@/engine/paintFrame";
 import { emitStaticFrameSvg } from "@/export/code/emitSvg";
 import { strokeToPathD } from "@/export/code/svgGeometry";
+import { flattenBezierNodes, pointsToBezierNodes } from "@/lib/bezier";
 import {
   analyzeProjectExport,
   strokeExportMode,
@@ -123,6 +124,34 @@ describe("svgGeometry", () => {
     });
     const d = strokeToPathD(s, s.points);
     expect(d).toMatch(/[Cc]/);
+  });
+
+  test("path-edited ink brush exports a filled ribbon, not a cubic centerline", () => {
+    const source: StrokePoint[] = Array.from({ length: 20 }, (_, i) => ({
+      x: 40 + i * 8,
+      y: 120,
+      pressure: i < 10 ? 0.2 + i * 0.07 : 0.9 - (i - 10) * 0.06,
+      t: i * 10,
+    }));
+    const { nodes } = pointsToBezierNodes(source, { strokeSize: 16 });
+    const flat = flattenBezierNodes(nodes, false, 200, source);
+    const s = inkStroke({
+      p5Brush: "smooth",
+      size: 16,
+      points: flat,
+      bezierNodes: nodes,
+    });
+    const d = strokeToPathD(s, s.points);
+    expect(d.length).toBeGreaterThan(20);
+    expect(d.includes("Z")).toBe(true);
+    expect(d).not.toMatch(/[Cc]/);
+
+    const nums = [...d.matchAll(/-?\d+\.?\d*/g)].map((m) => Number(m[0]));
+    const ys = nums.filter((_, i) => i % 2 === 1);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    // Pressure peaks mid-stroke (~0.9) vs ends (~0.2) → ribbon is taller in Y.
+    expect(maxY - minY).toBeGreaterThan(8);
   });
 
   test("closed fill stroke includes fill polygon", () => {
@@ -430,6 +459,35 @@ if (hasDom) {
       });
       const mismatch = pixelMismatchFraction(fromSvg, fromCanvas, 24);
       expect(mismatch).toBeLessThan(0.04);
+    });
+
+    test("path-edited ink SVG matches canvas pressure ribbon, not a cubic tube", () => {
+      const source: StrokePoint[] = Array.from({ length: 24 }, (_, i) => ({
+        x: 28 + i * 8,
+        y: 120,
+        pressure: i < 12 ? 0.18 + i * 0.06 : 0.9 - (i - 12) * 0.055,
+        t: i * 8,
+      }));
+      const { nodes } = pointsToBezierNodes(source, { strokeSize: 18 });
+      const flat = flattenBezierNodes(nodes, false, 200, source);
+      const strokes = [
+        inkStroke({
+          id: "ink",
+          p5Brush: "smooth",
+          size: 18,
+          points: flat,
+          bezierNodes: nodes,
+        }),
+      ];
+      const project = makeProject(strokes);
+      const svg = emitStaticFrameSvg(project, 0, { transparent: true });
+      expect(svg).not.toMatch(/[Cc][\d. ,-]+[Cc]/);
+      const fromSvg = rasterizeSvg(svg, project.width, project.height);
+      const fromCanvas = rasterizeCanvas(project.width, project.height, (ctx) => {
+        paintProjectFrame(ctx, project, 0);
+      });
+      const mismatch = pixelMismatchFraction(fromSvg, fromCanvas, 24);
+      expect(mismatch).toBeLessThan(0.05);
     });
 
     test("static frame SVG matches paint for closed fill rect", () => {

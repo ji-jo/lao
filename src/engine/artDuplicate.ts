@@ -29,6 +29,7 @@ export function cloneStrokeAtOffset(
       next.bezierNodes,
       stroke.closed,
       durationHint > 0 ? durationHint : undefined,
+      next.points,
     );
   }
   if (stroke.shapeBox) {

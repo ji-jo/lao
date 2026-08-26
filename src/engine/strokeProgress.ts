@@ -1,4 +1,5 @@
 import type { Bezier4, Stroke, StrokeClip, StrokePoint, TextElement } from "@/model/types";
+import { tweenStrokesAt } from "@/engine/tween";
 
 /** Last recorded `t` on a stroke (or bare point list), or 0. */
 export function strokeDurationMs(strokeOrPoints: Stroke | StrokePoint[]): number {
@@ -156,6 +157,100 @@ export function strokeAtTime(
     : rawProgress;
   const targetT = eased * strokeDurationMs(stroke);
   return truncateStrokePoints(stroke.points, targetT);
+}
+
+/** Composition time in ms. `overrideMs` is the live play clock (sub-frame). */
+export function compositionTimeMs(
+  fps: number,
+  frame: number,
+  overrideMs?: number | null,
+): number {
+  if (overrideMs != null && Number.isFinite(overrideMs)) return overrideMs;
+  return (frame / Math.max(1, fps)) * 1000;
+}
+
+type ClipGroup = {
+  startMs: number;
+  durationMs: number;
+  hold: boolean | undefined;
+  strokes: Stroke[];
+};
+
+function clipGroupKey(clip: StrokeClip): string {
+  return `${clip.startMs}:${clip.durationMs}:${clip.hold === false ? "pop" : "hold"}`;
+}
+
+/**
+ * Animatron strokes visible at composition timeMs.
+ *
+ * Stop-motion → Animatron packs each pose as a `hold:false` pop clip. Those
+ * groups morph into the next pose (no dropped in-betweens) instead of popping.
+ * Native draw-on paths keep `strokeAtTime` progressive reveal.
+ */
+export function animatronStrokesAtTime(
+  strokes: Stroke[],
+  timeMs: number,
+): Stroke[] {
+  const unclipped: Stroke[] = [];
+  const groups: ClipGroup[] = [];
+  const byKey = new Map<string, ClipGroup>();
+
+  for (const s of strokes) {
+    const clip = s.clip;
+    if (!clip) {
+      unclipped.push(s);
+      continue;
+    }
+    const key = clipGroupKey(clip);
+    let group = byKey.get(key);
+    if (!group) {
+      group = {
+        startMs: clip.startMs,
+        durationMs: clip.durationMs,
+        hold: clip.hold,
+        strokes: [],
+      };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    group.strokes.push(s);
+  }
+
+  groups.sort((a, b) => a.startMs - b.startMs || a.durationMs - b.durationMs);
+
+  const canMorphPops =
+    groups.length >= 2 && groups.some((g) => g.hold === false);
+
+  if (canMorphPops) {
+    for (let i = 0; i < groups.length; i++) {
+      const group = groups[i]!;
+      const end = group.startMs + group.durationMs;
+      const next = groups[i + 1];
+      if (group.hold === false && next && timeMs >= group.startMs && timeMs < end) {
+        const raw = group.durationMs > 0 ? (timeMs - group.startMs) / group.durationMs : 1;
+        const eased = group.strokes[0]?.clip?.easing
+          ? sampleBezierY(raw, group.strokes[0]!.clip!.easing!.bezier)
+          : raw;
+        const tweened = tweenStrokesAt(group.strokes, next.strokes, eased);
+        return [
+          ...unclipped,
+          ...tweened.map((s) => ({
+            ...s,
+            clip: group.strokes[0]?.clip ? { ...group.strokes[0]!.clip! } : s.clip,
+          })),
+        ];
+      }
+    }
+  }
+
+  const out: Stroke[] = [...unclipped];
+  for (const s of strokes) {
+    if (!s.clip) continue;
+    const pts = strokeAtTime(s, timeMs);
+    if (!pts || pts.length === 0) continue;
+    out.push(strokeWithClipPoints(s, pts));
+  }
+  return out;
 }
 
 type ClipBearer = { clip?: StrokeClip };

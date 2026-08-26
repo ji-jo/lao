@@ -298,6 +298,39 @@ export type BackgroundFit = "fill" | "cover" | "contain" | "crop";
 /** Paper image-filter chips on the Image background tab. */
 export type ImageFilterId = "paper" | "fluted" | "water" | "dither";
 
+export type DotsShape = "circle" | "square" | "diamond";
+export type DotsPattern = "grid" | "hex";
+export type DotsOrigin = "center" | "corner";
+
+/** Repeating-dot paper (project px). Omitted fields fall back to DEFAULT_DOTS. */
+export interface DotsBackground {
+  kind: "dots";
+  /** Solid fill behind the dots. */
+  color: string;
+  /** Dot fill color. */
+  dotColor: string;
+  /** Dot diameter in project px. */
+  size: number;
+  /** Horizontal spacing between dot centers (px). */
+  gapX: number;
+  /** Vertical spacing between dot centers (px). */
+  gapY: number;
+  /** When true, Gap X/Y stay locked together in the UI. */
+  gapLinked?: boolean;
+  offsetX?: number;
+  offsetY?: number;
+  /** 0–1. */
+  opacity?: number;
+  shape?: DotsShape;
+  pattern?: DotsPattern;
+  /** Grid rotation in degrees. */
+  rotation?: number;
+  /** Edge blur 0–1 (0 = hard). */
+  softness?: number;
+  /** Center = leftover spacing split on both edges. */
+  origin?: DotsOrigin;
+}
+
 /** Paper 27K-0 shader chips. */
 export type ShaderPresetId =
   | "aurora"
@@ -354,7 +387,8 @@ export type Background =
       params?: Record<string, number>;
       /** Named solids beyond `colors` (back, bloom, …). */
       namedColors?: Record<string, string>;
-    };
+    }
+  | DotsBackground;
 
 export type ProjectWorkflow = "stopmotion" | "animatron";
 
@@ -419,6 +453,16 @@ export function resolveCel(layer: Layer, i: number): Frame | null {
   return idx === null ? null : layer.frames[idx];
 }
 
+/** True when a cel has strokes, text, or images — empty keys are not art. */
+export function celHasArt(cel: Frame | null | undefined): boolean {
+  if (!cel) return false;
+  return (
+    cel.strokes.length > 0 ||
+    (cel.texts != null && cel.texts.length > 0) ||
+    (cel.images != null && cel.images.length > 0)
+  );
+}
+
 export function createEmptyProject(): Project {
   return {
     version: 1,
@@ -445,12 +489,6 @@ export function projectHasArt(project: Project): boolean {
   if (project.morphs && project.morphs.length > 0) return true;
   return project.layers.some((l) => {
     if (l.motionPaths && l.motionPaths.length > 0) return true;
-    return l.frames.some(
-      (f) =>
-        !!f &&
-        (f.strokes.length > 0 ||
-          (f.texts != null && f.texts.length > 0) ||
-          (f.images != null && f.images.length > 0)),
-    );
+    return l.frames.some((f) => celHasArt(f));
   });
 }

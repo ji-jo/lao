@@ -17,7 +17,7 @@ Frame   { id, strokes[] }                                          // a "cel"
 Stroke  { id, brush, color, size, points[], seed, jitter, clip? }
 StrokePoint { x, y, pressure (0..1), t (ms from stroke start) }
 StrokeClip { startMs, durationMs, hold? }                          // Animatron; hold:false = pop-off
-Background = none | color | gradient(linear/radial) | image(fill/cover/contain/crop) | shader
+Background = none | color | gradient(linear/radial) | image(fill/cover/contain/crop) | shader | dots
 workflow = "stopmotion" | "animatron"                              // optional; default animatron
 ```
 
@@ -31,9 +31,13 @@ frame 0) with `Stroke.clip` staggered after the previous path. Playback / export
 `strokeProgress` to progressively reveal points by `t` at composition time.
 
 **Mode switch** (Animatron ↔ Stop-motion): restore a mode when it already has
-art (keeps a one-layer Animatron drawing intact). Otherwise convert. Animatron →
-Stop-motion bakes onto **one layer**. Stop-motion → Animatron keeps **one layer
-per SM layer**; frame keys become clips on that layer, not extra layers.
+art **and the document you're leaving is a still** (keeps a one-layer Animatron
+drawing intact). If the current timeline actually moves, convert so playback
+survives the switch. Animatron → Stop-motion bakes onto **one layer** (timeline
+length kept). Stop-motion → Animatron keeps **one layer per SM layer**; frame
+keys become clips on that layer and consecutive poses **morph** instead of
+popping. Draw-stage play uses a wall-clock `timeMs` so Animatron isn't quantized
+to the stop-motion fps grid.
 `SaveFirstDialog` stays for New; mode switch does not prompt.
 
 Everything is **retained vector** — strokes keep their input points; raster is derived. This
@@ -69,7 +73,7 @@ powers boil, warp editing, copy/paste, and clean re-rendering at any resolution.
   handle spacing, stroke hit-testing. Pure functions, unit-tested.
 - `strokeProgress.ts` — Animatron draw-on (`truncateStrokePoints` / `strokeAtTime`).
 - `pressure.ts` — pen pressure passthrough; mouse/trackpad get velocity-synthesized pressure.
-- `background.ts` — paints color/gradient/image backgrounds into any 2d context;
+- `background.ts` — paints color/gradient/image/dots backgrounds into any 2d context;
   image cache; shader kind = flat first-color approx unless given a snapshot canvas.
 - `paintFrame.ts` — **single source of truth for full-quality frame rendering** (used by both
   the Remotion composition and the export pipeline). Animatron-aware progressive paint.

@@ -57,6 +57,9 @@ function bgSyncKey(bg: Background | undefined): string {
   if (bg.kind === "color") return `c:${bg.color}`;
   if (bg.kind === "shader") return `s:${bg.preset}`;
   if (bg.kind === "image") return `i:${bg.src.slice(0, 32)}`;
+  if (bg.kind === "dots") {
+    return `d:${bg.color}|${bg.dotColor}|${bg.size}|${bg.gapX}|${bg.gapY}|${bg.pattern}|${bg.shape}`;
+  }
   return bg.kind;
 }
 

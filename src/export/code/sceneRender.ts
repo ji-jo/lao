@@ -1,10 +1,85 @@
 import { tag, wrapSvg } from "@/export/code/svgDoc";
 import type { LaoScene, SceneBackground, SceneGroup, SceneMaskDef, ScenePath } from "@/export/code/sceneJson";
 import { smilRepeatAttrs, type SceneLoop } from "@/export/code/exportMeta";
+import {
+  dotsPatternOrigin,
+  dotsStampPoints,
+  dotsTileSize,
+  type ResolvedDots,
+} from "@/lib/dots-background";
 
 function cubicBezierKeySplines(bezier: [number, number, number, number]): string {
   const [x1, y1, x2, y2] = bezier;
   return `${x1} ${y1} ${x2} ${y2}`;
+}
+
+function renderDotsBackground(
+  bg: Extract<SceneBackground, { kind: "dots" }>,
+  width: number,
+  height: number,
+  idPrefix: string,
+): { defs: string; body: string } {
+  const d = bg as ResolvedDots;
+  const tile = dotsTileSize(d);
+  const origin = dotsPatternOrigin(d, width, height);
+  const r = Math.max(0.25, d.size / 2);
+  const patId = `${idPrefix}-dots`;
+  const marks = dotsStampPoints(d)
+    .map((p) => {
+      const fill = d.dotColor;
+      const opacity = d.opacity;
+      if (d.shape === "square") {
+        return tag("rect", {
+          x: p.x - r,
+          y: p.y - r,
+          width: r * 2,
+          height: r * 2,
+          fill,
+          opacity,
+        });
+      }
+      if (d.shape === "diamond") {
+        return tag("polygon", {
+          points: `${p.x},${p.y - r} ${p.x + r},${p.y} ${p.x},${p.y + r} ${p.x - r},${p.y}`,
+          fill,
+          opacity,
+        });
+      }
+      return tag("circle", {
+        cx: p.x,
+        cy: p.y,
+        r,
+        fill,
+        opacity,
+      });
+    })
+    .join("");
+  const filterId = d.softness > 0.02 ? `${idPrefix}-dots-blur` : undefined;
+  const filter = filterId
+    ? tag("filter", { id: filterId }, tag("feGaussianBlur", { stdDeviation: d.softness * r }))
+    : "";
+  const inner = filterId ? tag("g", { filter: `url(#${filterId})` }, marks) : marks;
+  const pattern = tag(
+    "pattern",
+    {
+      id: patId,
+      x: origin.x,
+      y: origin.y,
+      width: tile.w,
+      height: tile.h,
+      patternUnits: "userSpaceOnUse",
+      ...(Math.abs(d.rotation) > 0.01
+        ? { patternTransform: `rotate(${d.rotation} ${width / 2} ${height / 2})` }
+        : {}),
+    },
+    inner,
+  );
+  return {
+    defs: filter + pattern,
+    body:
+      tag("rect", { width, height, fill: d.color }) +
+      tag("rect", { width, height, fill: `url(#${patId})` }),
+  };
 }
 
 function renderBackground(
@@ -16,6 +91,9 @@ function renderBackground(
   if (!bg) return { defs: "", body: "" };
   if (bg.kind === "color") {
     return { defs: "", body: tag("rect", { width, height, fill: bg.color }) };
+  }
+  if (bg.kind === "dots") {
+    return renderDotsBackground(bg, width, height, idPrefix);
   }
   const gradId = `${idPrefix}-bg`;
   const stopTags = bg.stops

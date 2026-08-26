@@ -8,7 +8,7 @@ import DotsHorizontalIcon from "@/components/ui/dots-horizontal-icon";
 import { PaperEyeGlyph } from "@/components/timeline/TimelineDockParts";
 import { PAPER } from "@/components/chrome/paper-tokens";
 import { EASE_OUT_CSS, SPRING_SWAP } from "@/lib/ease";
-import { resolveCelIndex, type Layer } from "@/model/types";
+import { celHasArt, type Layer } from "@/model/types";
 
 /**
  * One exposure-sheet row — Paper 2LM-0 `A2M-0`, with the hover treatment from
@@ -337,8 +337,9 @@ export function TimelineLayerRow({
       <div className="min-w-0 flex-1" style={{ height: CELL_H }}>
         <div className="flex w-max" style={{ gap: CELL_GAP }}>
           {Array.from({ length: frameCount }, (_, fi) => {
-            const isKey = layer.isStatic ? fi === 0 : !!layer.frames[fi];
-            const isHold = !isKey && !layer.isStatic && resolveCelIndex(layer, fi) !== null;
+            const isKey = layer.isStatic
+              ? fi === 0 && celHasArt(layer.frames[0])
+              : celHasArt(layer.frames[fi]);
             const isPlayhead = fi === frameIndex;
             return (
               <button
@@ -352,7 +353,7 @@ export function TimelineLayerRow({
                 aria-current={isPlayhead ? "true" : undefined}
                 className={cn(
                   "flex shrink-0 cursor-pointer justify-center rounded-[8px] px-[2px] py-[7px] hover:brightness-150",
-                  isHold ? "items-center" : "items-start",
+                  isKey ? "items-start" : "items-center",
                   !reduce && "active:scale-90",
                 )}
                 style={{
@@ -373,7 +374,7 @@ export function TimelineLayerRow({
                       transition: `scale ${CELL_MS}ms ${EASE_OUT_CSS}`,
                     }}
                   />
-                ) : isHold ? (
+                ) : (
                   <span
                     className="h-[2px] w-[7px] shrink-0 rounded-full bg-white"
                     style={{
@@ -381,7 +382,7 @@ export function TimelineLayerRow({
                       transition: `opacity ${CELL_MS}ms ${EASE_OUT_CSS}`,
                     }}
                   />
-                ) : null}
+                )}
               </button>
             );
           })}

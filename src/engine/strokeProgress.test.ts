@@ -11,6 +11,8 @@ import {
   typewriterDurationMs,
   retimeStrokePoints,
   strokeWithClipPoints,
+  animatronStrokesAtTime,
+  compositionTimeMs,
 } from "@/engine/strokeProgress";
 import type { TextElement } from "@/model/types";
 
@@ -109,6 +111,48 @@ describe("strokeAtTime", () => {
     expect(strokeAtTime(s, 50)?.length).toBe(2);
     expect(strokeAtTime(s, 100)).toBeNull();
     expect(strokeAtTime(s, 500)).toBeNull();
+  });
+});
+
+describe("compositionTimeMs", () => {
+  test("uses override when playing", () => {
+    expect(compositionTimeMs(12, 1, 90)).toBe(90);
+    expect(compositionTimeMs(12, 1, null)).toBeCloseTo(1000 / 12);
+  });
+});
+
+describe("animatronStrokesAtTime", () => {
+  test("morphs consecutive hold:false pop clips instead of dropping in-betweens", () => {
+    const a = stroke({
+      id: "a",
+      points: [
+        { x: 0, y: 0, pressure: 0.5, t: 0 },
+        { x: 0, y: 10, pressure: 0.5, t: 0 },
+      ],
+      clip: { startMs: 0, durationMs: 100, hold: false },
+    });
+    const b = stroke({
+      id: "b",
+      points: [
+        { x: 100, y: 0, pressure: 0.5, t: 0 },
+        { x: 100, y: 10, pressure: 0.5, t: 0 },
+      ],
+      clip: { startMs: 100, durationMs: 100, hold: true },
+    });
+    const mid = animatronStrokesAtTime([a, b], 50);
+    expect(mid.length).toBeGreaterThan(0);
+    const x = mid[0]!.points[0]!.x;
+    expect(x).toBeGreaterThan(10);
+    expect(x).toBeLessThan(90);
+  });
+
+  test("native draw-on stays progressive (no morph)", () => {
+    const s = stroke({
+      points: pts(0, 50, 100),
+      clip: { startMs: 0, durationMs: 100 },
+    });
+    const mid = animatronStrokesAtTime([s], 50);
+    expect(mid[0]!.points.map((p) => p.t)).toEqual([0, 50]);
   });
 });
 

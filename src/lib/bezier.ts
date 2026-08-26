@@ -90,17 +90,81 @@ export function projectToCubicBezier(
   return { t: bestT, dist: minDt };
 }
 
+function arcLengths(pts: { x: number; y: number }[]): number[] {
+  const lens = [0];
+  for (let i = 1; i < pts.length; i++) {
+    lens.push(
+      lens[i - 1]! +
+        Math.hypot(pts[i]!.x - pts[i - 1]!.x, pts[i]!.y - pts[i - 1]!.y),
+    );
+  }
+  return lens;
+}
+
+function samplePressure(
+  pts: StrokePoint[],
+  lens: number[],
+  dist: number,
+): number {
+  if (dist <= 0) return pts[0]!.pressure;
+  const total = lens[lens.length - 1]!;
+  if (dist >= total) return pts[pts.length - 1]!.pressure;
+  let lo = 0;
+  let hi = lens.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (lens[mid]! < dist) lo = mid + 1;
+    else hi = mid;
+  }
+  const i = Math.max(1, lo);
+  const a = lens[i - 1]!;
+  const b = lens[i]!;
+  const t = b === a ? 0 : (dist - a) / (b - a);
+  return pts[i - 1]!.pressure + (pts[i]!.pressure - pts[i - 1]!.pressure) * t;
+}
+
+/** Copy a polyline's pressure envelope onto another path by arc length. */
+export function mapPressureAlongPath(
+  dest: StrokePoint[],
+  source: StrokePoint[],
+): StrokePoint[] {
+  if (dest.length === 0 || source.length === 0) return dest;
+  if (source.length === 1) {
+    const p = source[0]!.pressure;
+    return dest.map((d) => ({ ...d, pressure: p }));
+  }
+  const src = arcLengths(source);
+  const dst = arcLengths(dest);
+  const srcTotal = src[src.length - 1]! || 1;
+  const dstTotal = dst[dst.length - 1]! || 1;
+  return dest.map((d, i) => ({
+    ...d,
+    pressure: samplePressure(source, src, (dst[i]! / dstTotal) * srcTotal),
+  }));
+}
+
 /**
  * Flattens a list of BezierNodes into a dense array of StrokePoints.
- * This is used for hit-testing and bounding boxes.
+ * This is used for hit-testing, paint, and bounding boxes.
+ * Pass `pressureFrom` (the pre-edit polyline) so Path/Select edits keep
+ * the brush's variable width instead of flattening to pressure 1.
  */
 export function flattenBezierNodes(
   nodes: BezierNode[],
   closed?: boolean,
   durationMs?: number,
+  pressureFrom?: StrokePoint[],
 ): StrokePoint[] {
   if (nodes.length === 0) return [];
-  if (nodes.length === 1) return [{ x: nodes[0].x, y: nodes[0].y, pressure: 1, t: 0 }];
+  if (nodes.length === 1) {
+    const p0 = {
+      x: nodes[0].x,
+      y: nodes[0].y,
+      pressure: pressureFrom?.[0]?.pressure ?? 1,
+      t: 0,
+    };
+    return retimeStrokePoints([p0], durationMs);
+  }
 
   const points: StrokePoint[] = [];
   const resolution = 10; // Number of segments per bezier curve
@@ -140,7 +204,10 @@ export function flattenBezierNodes(
   const last = closed ? nodes[0] : nodes[nodes.length - 1];
   points.push({ x: last.x, y: last.y, pressure: 1, t: 0 });
 
-  return retimeStrokePoints(points, durationMs);
+  const withPressure = pressureFrom?.length
+    ? mapPressureAlongPath(points, pressureFrom)
+    : points;
+  return retimeStrokePoints(withPressure, durationMs);
 }
 
 function perpendicularDistance(point: XY, lineStart: XY, lineEnd: XY): number {

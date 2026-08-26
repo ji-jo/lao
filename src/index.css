@@ -270,7 +270,22 @@
   }
 }
 
-/* react-nano-scrollbar — fill sized parents + dark thumbs; hover-only bars */
+/*
+ * Product rule — never show scrollbars. Overflow still scrolls
+ * (wheel / trackpad / drag). Native bars + nano thumbs stay hidden.
+ */
+.lao-app,
+.lao-app * {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.lao-app *::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* react-nano-scrollbar — fill sized parents; thumbs never drawn */
 .lao-nano-scroll.react-nano-scrollbar-wrapper {
   min-height: 0;
   min-width: 0;
@@ -312,9 +327,11 @@
 .lao-nano-scroll.lao-nano-fade-both > .react-nano-scrollbar-content {
   @apply scroll-fade-effect-y scroll-fade-effect-x;
 }
+.lao-nano-scroll .react-nano-scrollbar-track-x,
+.lao-nano-scroll .react-nano-scrollbar-track-y,
 .lao-nano-scroll .react-nano-scrollbar-x,
 .lao-nano-scroll .react-nano-scrollbar-y {
-  background: rgb(255 255 255 / 0.35);
+  display: none !important;
 }
 /* 4px-thick horizontal bar (timeline gutter) */
 .lao-nano-scroll.lao-nano-thin .react-nano-scrollbar-track-x {

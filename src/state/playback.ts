@@ -19,6 +19,12 @@ interface PlaybackState {
   onionPanelOpen: boolean;
   /** Loop playback back to frame 0 at the end (Paper timeline loop toggle) */
   loop: boolean;
+  /**
+   * Live composition clock in ms while Draw-stage playback is running.
+   * Sub-frame so Animatron draw-on isn't quantized to the stop-motion fps grid.
+   * `null` when paused — paint from `frameIndex` instead.
+   */
+  timeMs: number | null;
   /** Animatron timeline-conjoined easing panel */
   animationPanelOpen: boolean;
   /** Animatron draw stage: show every layer’s complete paths on the canvas */
@@ -32,6 +38,7 @@ interface PlaybackState {
   setOnionSkinProps: (props: Partial<Pick<PlaybackState, "onionColor" | "onionOpacity" | "onionRange" | "onionAutoDuplicate">>) => void;
   toggleOnionPanel: () => void;
   toggleLoop: () => void;
+  setTimeMs: (timeMs: number | null) => void;
   setAnimationPanelOpen: (open: boolean) => void;
   toggleAnimationPanel: () => void;
   toggleShowFullStrokes: () => void;
@@ -50,17 +57,24 @@ export const usePlayback = create<PlaybackState>((set) => ({
   onionAutoDuplicate: true,
   onionPanelOpen: false,
   loop: true,
+  timeMs: null,
   animationPanelOpen: false,
   showFullStrokes: false,
-  setMode: (mode) => set({ mode, stage: mode, playing: false }),
-  setStage: (stage) => set({ stage, mode: stage, playing: false }),
-  setWorkflow: (workflow) => set({ workflow, playing: false, animationPanelOpen: false }),
-  setPlaying: (playing) => set({ playing }),
-  togglePlaying: () => set((s) => ({ playing: !s.playing })),
+  setMode: (mode) => set({ mode, stage: mode, playing: false, timeMs: null }),
+  setStage: (stage) => set({ stage, mode: stage, playing: false, timeMs: null }),
+  setWorkflow: (workflow) =>
+    set({ workflow, playing: false, animationPanelOpen: false, timeMs: null }),
+  setPlaying: (playing) =>
+    set(playing ? { playing } : { playing: false, timeMs: null }),
+  togglePlaying: () =>
+    set((s) =>
+      s.playing ? { playing: false, timeMs: null } : { playing: true },
+    ),
   toggleOnionSkin: () => set((s) => ({ onionSkin: !s.onionSkin })),
   setOnionSkinProps: (props) => set(props),
   toggleOnionPanel: () => set((s) => ({ onionPanelOpen: !s.onionPanelOpen })),
   toggleLoop: () => set((s) => ({ loop: !s.loop })),
+  setTimeMs: (timeMs) => set({ timeMs }),
   setAnimationPanelOpen: (animationPanelOpen) => set({ animationPanelOpen }),
   toggleAnimationPanel: () =>
     set((s) => ({ animationPanelOpen: !s.animationPanelOpen })),

@@ -54,11 +54,7 @@ describe("empty cel (addKeyframe)", () => {
 
     useProject.getState().addKeyframe();
 
-    const cel = useProject.getState().project.layers[0]!.frames[0]!;
-    expect(cel).toBeTruthy();
-    expect(cel.strokes).toEqual([]);
-    expect(cel.texts ?? []).toEqual([]);
-    expect(cel.images ?? []).toEqual([]);
+    expect(useProject.getState().project.layers[0]!.frames[0]).toBeNull();
   });
 
   test("on a hold, inserts a blank key so the previous drawing does not show through", () => {

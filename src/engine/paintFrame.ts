@@ -16,9 +16,9 @@ import {
 import {
   clipFadeOpacity,
   clipVisibleAt,
+  compositionTimeMs,
   sampleBezierY,
-  strokeAtTime,
-  strokeWithClipPoints,
+  animatronStrokesAtTime,
   textContentAtTime,
 } from "@/engine/strokeProgress";
 import { PATH_MAKER_ENABLED } from "@/lib/mvpFlags";
@@ -44,16 +44,13 @@ function getCelCanvas(w: number, h: number) {
   return celCanvas;
 }
 
-function strokesForFrame(project: Project, frame: number, layerStrokes: Stroke[]): Stroke[] {
+function strokesForFrame(
+  project: Project,
+  layerStrokes: Stroke[],
+  timeMs: number,
+): Stroke[] {
   if (project.workflow !== "animatron") return layerStrokes;
-  const timeMs = (frame / Math.max(project.fps, 1)) * 1000;
-  const out: Stroke[] = [];
-  for (const s of layerStrokes) {
-    const pts = strokeAtTime(s, timeMs);
-    if (!pts || pts.length === 0) continue;
-    out.push(strokeWithClipPoints(s, pts));
-  }
-  return out;
+  return animatronStrokesAtTime(layerStrokes, timeMs);
 }
 
 function morphProgress(clip: MorphClip, timeMs: number): number | null {
@@ -128,14 +125,15 @@ export function paintProjectFrame(
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   project: Project,
   frame: number,
-  opts: { clear?: boolean } = {},
+  opts: { clear?: boolean; timeMs?: number } = {},
 ) {
   const { width, height, fps } = project;
   if (opts.clear !== false) ctx.clearRect(0, 0, width, height);
 
   const scratch = getCelCanvas(width, height);
   const scratchCtx = scratch.getContext("2d") as CanvasRenderingContext2D;
-  const timeMs = (frame / Math.max(fps, 1)) * 1000;
+  const timeMs = compositionTimeMs(fps, frame, opts.timeMs);
+  const artFrame = Math.floor((timeMs / 1000) * Math.max(fps, 1) + 1e-6);
   const workflow = project.workflow ?? "animatron";
   const morphing = PATH_MAKER_ENABLED ? activeMorphs(project, timeMs) : [];
   const morphHide = new Set<string>();
@@ -159,7 +157,7 @@ export function paintProjectFrame(
     const cel =
       workflow === "animatron"
         ? layer.frames.find((f) => f) ?? null
-        : resolveCel(layer, frame);
+        : resolveCel(layer, artFrame);
     if (
       !cel ||
       (cel.strokes.length === 0 &&
@@ -168,9 +166,9 @@ export function paintProjectFrame(
     ) {
       continue;
     }
-    const strokes = strokesForFrame(project, frame, cel.strokes);
+    const strokes = strokesForFrame(project, cel.strokes, timeMs);
     const motion = PATH_MAKER_ENABLED
-      ? layerMotionAt(layer, timeMs, frame, workflow)
+      ? layerMotionAt(layer, timeMs, artFrame, workflow)
       : null;
     const posedImages = poseImages(
       workflow === "animatron"
@@ -189,14 +187,14 @@ export function paintProjectFrame(
       layer,
       strokes,
       timeMs,
-      frame,
+      artFrame,
       workflow,
       motion,
     );
     // Boil on posed points so seeds stay stable relative to the riding art.
-    let boilMap = boilDisplacement(strokes, frame, project.boil);
+    let boilMap = boilDisplacement(strokes, artFrame, project.boil);
     if (motionDisp) {
-      const variant = variantForFrame(frame, project.boil);
+      const variant = variantForFrame(artFrame, project.boil);
       boilMap = new Map();
       for (const s of strokes) {
         const posedPts = motionDisp.get(s.id);
@@ -271,7 +269,7 @@ export function paintProjectFrame(
     scratchCtx.clearRect(0, 0, width, height);
     renderStrokes(scratchCtx, strokes, {
       quality: "full",
-      displaced: boilDisplacement(strokes, frame, project.boil),
+      displaced: boilDisplacement(strokes, artFrame, project.boil),
     });
     ctx.drawImage(scratch, 0, 0);
   }

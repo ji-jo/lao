@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { useCurrentFrame } from "remotion";
+import { useCurrentFrame, useVideoConfig } from "remotion";
 import type { Project } from "@/model/types";
 import { paintProjectFrame } from "@/engine/paintFrame";
 import { paintBackground } from "@/engine/background";
@@ -16,12 +16,18 @@ export interface LaoCompositionProps {
  * boil applied) onto a project-resolution canvas each frame. Shader /
  * image-filter backgrounds render as a live DOM layer beneath the canvas;
  * other background kinds are painted into the canvas itself.
+ *
+ * Time is driven by the Player fps (Animatron preview may run at 60) so
+ * draw-on isn't quantized to the document fps grid.
  */
 export function LaoComposition({ project }: LaoCompositionProps) {
   const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const isShader = project.background?.kind === "shader";
   const isImageFilter = hasImageFilter(project.background);
+  const timeMs = (frame / Math.max(1, fps)) * 1000;
+  const projectFrame = (timeMs / 1000) * Math.max(1, project.fps);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -34,10 +40,10 @@ export function LaoComposition({ project }: LaoCompositionProps) {
       if (!isShader && !isImageFilter) {
         paintBackground(ctx, project, { onImageReady: paint });
       }
-      paintProjectFrame(ctx, project, frame, { clear: false });
+      paintProjectFrame(ctx, project, projectFrame, { clear: false, timeMs });
     }
     paint();
-  }, [project, frame, isShader, isImageFilter]);
+  }, [project, projectFrame, timeMs, isShader, isImageFilter]);
 
   return (
     <div style={{ position: "relative", width: "100%", height: "100%", background: "#141416" }}>

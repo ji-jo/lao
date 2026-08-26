@@ -20,3 +20,4 @@ Critical, non-negotiable:
   Never add another component library, icon pack, or design system. If it's not in one of
   these four, build it by hand with Tailwind + existing tokens.
 - All panels float; keep `npx tsc -b` clean and `bun test` green before committing.
+- **Never show scrollbars** (clipped overflow still scrolls via wheel/trackpad).

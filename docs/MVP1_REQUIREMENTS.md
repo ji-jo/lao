@@ -135,7 +135,7 @@ Wire to the actual export name from the fluid registry after install (do not lea
 
 ### Mode switch (Animatron ↔ Stop-motion)
 - Each mode keeps its own document (session memory, also saved on `.lao` / autosave).
-- Switching restores a mode when that side already has art (so a one-layer Animatron drawing is not split). Otherwise it converts: Animatron → one stop-motion layer with baked frames; Stop-motion → **one Animatron layer per SM layer** (keyframes become clips, not extra layers).
+- Switching converts when the current timeline actually moves (so a Stop-motion animation still plays in Animatron). A remembered mode is restored only when the side you're leaving is a still. Animatron → one stop-motion layer with baked frames (timeline length kept); Stop-motion → **one Animatron layer per SM layer** (keyframes become clips that morph between poses).
 - Return visits restore that mode's last document — drawings do not clobber the other mode.
 - Do **not** prompt to save on switch. `SaveFirstDialog` (`8BI-0`) stays for New / a possible one-shot confirm later.
 

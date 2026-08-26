@@ -1,7 +1,6 @@
-import { getStroke } from "perfect-freehand";
 import type { BezierNode, Stroke, StrokePoint } from "@/model/types";
 import { flattenBezierNodes } from "@/lib/bezier";
-import type { RenderQuality } from "@/engine/brushStyles";
+import { packBrushOutline, type RenderQuality } from "@/engine/brushStyles";
 
 const COORD_PRECISION = 1;
 const RDP_EPSILON = 0.85;
@@ -186,24 +185,16 @@ export function bezierNodesToPathD(nodes: BezierNode[], closed?: boolean): strin
   return compactBezierPathD(nodes, closed);
 }
 
-/** Closed ribbon outline — same perfect-freehand call as renderer. */
+/** Closed ribbon / nib outline — same envelope the canvas pack brush paints. */
 export function strokeOutlinePathD(
   stroke: Stroke,
   points: StrokePoint[],
   quality: RenderQuality = "full",
 ): string {
   if (points.length === 0) return "";
-  if (points.length === 1) {
-    const p = points[0];
-    const r = (stroke.size / 2) * Math.max(p.pressure, 0.28);
-    return `M${fmt(p.x - r)} ${fmt(p.y)}A${fmt(r)} ${fmt(r)} 0 1 0 ${fmt(p.x + r)} ${fmt(p.y)}A${fmt(r)} ${fmt(r)} 0 1 0 ${fmt(p.x - r)} ${fmt(p.y)}Z`;
-  }
-  const outline = getStroke(
-    points.map((p) => [p.x, p.y, p.pressure]),
-    freehandOptions(stroke, quality),
-  );
+  const outline = packBrushOutline(stroke, points, quality);
   if (outline.length < 2) return "";
-  return polylineToPathD(outline as Array<[number, number]>, true);
+  return polylineToPathD(outline, true);
 }
 
 /** Open centerline for draw-on mask animation. */
@@ -219,12 +210,15 @@ export function strokeToPathD(
   quality: RenderQuality = "full",
 ): string {
   const bez = nodes ?? stroke.bezierNodes;
-  if (bez && bez.length > 0 && !stroke.p5Brush) {
+  const geometricPen = stroke.brush === "pen" && !stroke.p5Brush;
+  if (bez && bez.length > 0 && geometricPen) {
     return bezierNodesToPathD(bez, stroke.closed);
   }
-  if (bez && bez.length > 0 && stroke.p5Brush) {
-    const flat = points.length > 1 ? points : flattenBezierNodes(bez, stroke.closed);
-    return strokeOutlinePathD(stroke, flat, quality);
-  }
-  return strokeOutlinePathD(stroke, points, quality);
+  const ribbonPts =
+    points.length > 1
+      ? points
+      : bez && bez.length > 0
+        ? flattenBezierNodes(bez, stroke.closed, undefined, stroke.points)
+        : points;
+  return strokeOutlinePathD(stroke, ribbonPts, quality);
 }

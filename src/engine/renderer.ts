@@ -103,21 +103,38 @@ export function renderStroke(
       ctx.fillStyle = stroke.fillColor;
       ctx.fill(path);
     }
-    // Pack brushes (calligraphy, dashed, …) need the flattened path — a plain
-    // ctx.stroke ignores p5Brush and made Calligraphy look "broken".
-    // Prefer displaced points (live node drag); else flatten the (possibly
-    // displaced) bezier so pack brushes follow path edits instead of snapping.
-    if (stroke.p5Brush && stroke.brush !== "eraser") {
-      const displacedPts = opts.displaced?.get(stroke.id);
-      const flat =
-        displacedPts && displacedPts.length > 1
-          ? displacedPts
-          : flattenBezierNodes(nodes!, stroke.closed);
-      if (flat.length > 0) {
-        paintPackBrush(ctx, stroke, flat, color, opts.quality);
+    // Pen tool is a uniform vector stroke. Ink / marker / pack brushes keep
+    // the pressure ribbon after Path (A) / Select (V) bezier edits.
+    const ribbonPts =
+      livePoints && livePoints.length > 1
+        ? livePoints
+        : (() => {
+            const displacedPts = opts.displaced?.get(stroke.id);
+            if (displacedPts && displacedPts.length > 1) return displacedPts;
+            if (points.length > 1) return points;
+            return flattenBezierNodes(
+              nodes!,
+              stroke.closed,
+              undefined,
+              stroke.points,
+            );
+          })();
+    // Pen tool is a uniform vector stroke. Ink / marker / pack brushes must
+    // keep the pressure ribbon after Path (A) / Select (V) bezier edits.
+    const asRibbon = stroke.brush !== "pen" || !!stroke.p5Brush;
+    if (asRibbon && ribbonPts.length > 0) {
+      if (stroke.brush === "eraser") {
+        if (!opts.eraseAsMask) {
+          ctx.globalCompositeOperation = "destination-out";
+        }
+        ctx.fillStyle = "#000";
+        ctx.fill(outlinePath(ribbonPts, stroke, opts.quality));
         ctx.restore();
         return;
       }
+      paintPackBrush(ctx, stroke, ribbonPts, color, opts.quality, opts.live);
+      ctx.restore();
+      return;
     }
     ctx.strokeStyle = color;
     ctx.lineWidth = stroke.size;

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
-import { Layers2 } from "reicon-react";
+import { ArrowsRight, Layers2 } from "reicon-react";
 import { isTypingTarget } from "@/lib/typingTarget";
 import { useProject } from "@/state/project";
 import { usePlayback } from "@/state/playback";
@@ -158,6 +158,32 @@ function TimelinePlayheadStamp({
         />
       </div>
     </div>
+  );
+}
+
+function TimelineFpsStepper({ fps }: { fps: number }) {
+  return (
+    <StepperBox
+      value={fps}
+      onDec={() => {
+        if (fps > 1) useProject.getState().setProjectSettings({ fps: fps - 1 });
+      }}
+      onInc={() => {
+        if (fps < 60) useProject.getState().setProjectSettings({ fps: fps + 1 });
+      }}
+      onSetValue={(n) => useProject.getState().setProjectSettings({ fps: n })}
+      min={1}
+      max={60}
+      decDisabled={fps <= 1}
+      incDisabled={fps >= 60}
+      decLabel="Slower"
+      incLabel="Faster"
+      trailing={
+        <span className="text-[12px] leading-[14px] text-white opacity-20" style={{ fontFamily: PAPER.fontMono }}>
+          fps
+        </span>
+      }
+    />
   );
 }
 
@@ -463,20 +489,69 @@ export function Timeline() {
     if (pb.stage === "preview") {
       const player = playerRef.current;
       if (!player) return;
-      if (player.isPlaying()) player.pause();
-      else player.play();
+      if (player.isPlaying()) {
+        player.pause();
+        pb.setPlaying(false);
+      } else {
+        void player.play();
+        pb.setPlaying(true);
+      }
       return;
     }
     pb.togglePlaying();
   }
 
-  // playback loop (edit-mode draft playback)
+  // playback loop (edit-mode draft playback) — wall-clock so Animatron
+  // draw-on isn't quantized to one sample per project frame.
   useEffect(() => {
     if (!playing || stage !== "draw") return;
-    const interval = window.setInterval(() => {
-      useProject.getState().stepFrame(1);
-    }, 1000 / project.fps);
-    return () => window.clearInterval(interval);
+    const fps = Math.max(1, project.fps);
+    const startFrame = useProject.getState().frameIndex;
+    const t0 = performance.now();
+    let raf = 0;
+    let timeout = 0;
+    let stopped = false;
+
+    const arm = () => {
+      if (stopped) return;
+      if (document.hidden) {
+        timeout = window.setTimeout(() => tick(performance.now()), 33);
+      } else {
+        raf = requestAnimationFrame(tick);
+      }
+    };
+
+    const tick = (now: number) => {
+      if (stopped) return;
+      const n = Math.max(1, useProject.getState().project.frameCount);
+      const elapsedMs = Math.max(0, now - t0);
+      let frame = startFrame + (elapsedMs / 1000) * fps;
+      const looping = usePlayback.getState().loop;
+      if (looping) {
+        frame = ((frame % n) + n) % n;
+      } else if (frame >= n - 1e-6) {
+        const last = n - 1;
+        useProject.getState().setFrameIndex(last);
+        usePlayback.getState().setTimeMs((last / fps) * 1000);
+        usePlayback.getState().setPlaying(false);
+        return;
+      }
+      const timeMs = (frame / fps) * 1000;
+      usePlayback.getState().setTimeMs(timeMs);
+      const fi = Math.min(n - 1, Math.max(0, Math.floor(frame + 1e-6)));
+      if (useProject.getState().frameIndex !== fi) {
+        useProject.getState().setFrameIndex(fi);
+      }
+      arm();
+    };
+
+    arm();
+    return () => {
+      stopped = true;
+      cancelAnimationFrame(raf);
+      window.clearTimeout(timeout);
+      usePlayback.getState().setTimeMs(null);
+    };
   }, [playing, stage, project.fps]);
 
   // frame stepping shortcuts
@@ -626,7 +701,7 @@ export function Timeline() {
     >
       {/* Above the whole column (settings + dock). Inline bottom — class bottom-full
           was a no-op here and left the panel in static flow, shooting downward. */}
-      {(animationPanelOpen || onionPanelOpen) && (
+      {stage === "draw" && (animationPanelOpen || onionPanelOpen) && (
         <div
           className="pointer-events-auto absolute left-1/2 z-30 flex -translate-x-1/2 gap-4"
           style={{ bottom: "calc(100% + 14px)" }}
@@ -641,8 +716,7 @@ export function Timeline() {
         </div>
       )}
       {/*
-        Paper 5S8-0: 704 wide, 6px top / 12px bottom / 16px side padding,
-        handle → transport 12px, transport → track 16px.
+        Paper 5S8-0: 7/14/19 panel pad; 12px pitch between icons / inputs / tabs.
         GooeySurfaceMorph: collapse size melt + bottom re-dock settle pulse.
       */}
       <GooeySurfaceMorph
@@ -651,7 +725,7 @@ export function Timeline() {
         borderRadius={19}
         transparentVar="--timeline-surface-bg"
         className={cn(
-          "relative z-0 min-h-0 w-full",
+          "relative z-0 min-h-0 w-max max-w-full",
           // Floated panel stays under the setting dock (z-40) so resize/drag
           // never stacks the timeline on top of brush/canvas chips.
           floatPos && "pointer-events-auto !fixed z-[25]",
@@ -661,7 +735,7 @@ export function Timeline() {
             ? {
                 left: floatPos.left,
                 top: floatPos.top,
-                width: PAPER.timelineWidth,
+                width: "max-content",
                 maxWidth: "calc(100vw - 124px)",
               }
             : undefined
@@ -669,7 +743,7 @@ export function Timeline() {
       >
       <div
         ref={panelRef}
-        className="pointer-events-auto relative w-full overflow-hidden rounded-[19px] antialiased"
+        className="pointer-events-auto relative grid max-w-full overflow-hidden rounded-[19px] antialiased"
         style={{
           backgroundColor: "var(--timeline-surface-bg, " + PAPER.surface + ")",
           outline: `0.4px solid ${PAPER.outlineSubtle}`,
@@ -677,6 +751,10 @@ export function Timeline() {
           paddingBottom: 14,
           paddingLeft: 19,
           paddingRight: 19,
+          // Column hugs the transport row. Frame cells / clips scroll inside
+          // and must not stretch the dock when the sheet gets longer.
+          gridTemplateColumns: "max-content",
+          justifyItems: "stretch",
         }}
       >
       {/* collapse / move handle — Paper 9JI-0 */}
@@ -706,150 +784,136 @@ export function Timeline() {
           style={{ backgroundColor: PAPER.handle }}
         />
       </div>
-      {/* transport row — Paper 5S8-0 */}
-      <div className="flex items-center justify-between gap-[14px]">
-        <div className="flex items-center gap-3 px-[5px] py-1">
-          <DockBtn label="First frame" onClick={() => setFrameIndex(0)}>
-            <SkipStartIcon />
-          </DockBtn>
-          <DockBtn label="Back one frame" onClick={() => stepFrame(-1)}>
-            <PrevIcon />
-          </DockBtn>
-          <DockBtn label={playing ? "Pause" : "Play"} onClick={togglePlaying} active={playing}>
-            {playing ? <PauseTriIcon /> : <PlayTriIcon />}
-          </DockBtn>
-          <DockBtn label="Forward one frame" onClick={() => stepFrame(1)}>
-            <NextIcon />
-          </DockBtn>
-        </div>
-
-        <DockBtn label={loop ? "Loop on" : "Loop off"} onClick={toggleLoop} active={loop}>
-          <LoopIcon />
+      {/* transport row — 12px between icons, inputs, and stage tabs. */}
+      <div className="flex w-max items-center gap-3">
+        <DockBtn label="First frame" onClick={() => setFrameIndex(0)}>
+          <SkipStartIcon />
         </DockBtn>
-
+        <DockBtn label="Back one frame" onClick={() => stepFrame(-1)}>
+          <PrevIcon />
+        </DockBtn>
+        <DockBtn label={playing ? "Pause" : "Play"} onClick={togglePlaying} active={playing}>
+          {playing ? <PauseTriIcon /> : <PlayTriIcon />}
+        </DockBtn>
+        <DockBtn label="Forward one frame" onClick={() => stepFrame(1)}>
+          <NextIcon />
+        </DockBtn>
         <DockBtn
-          label="Empty cel — wipe this cell, stop any hold"
-          onClick={addKeyframe}
+          label="Last frame"
+          onClick={() => setFrameIndex(project.frameCount - 1)}
         >
-          <ClearFrameIcon />
+          <ArrowsRight size={17} weight="Filled" />
         </DockBtn>
-
-        {workflow === "stopmotion" ? (
-          <DockBtn
-            label="Tween — generate in-betweens between previous and current keyframe"
-            onClick={() => {
-              const { project, layerIndex, frameIndex } = useProject.getState();
-              const layer = project.layers[layerIndex];
-              if (!layer || !layer.frames[frameIndex]) return;
-              let prev = -1;
-              for (let i = frameIndex - 1; i >= 0; i--) {
-                if (layer.frames[i]) {
-                  prev = i;
-                  break;
-                }
-              }
-              if (prev < 0) return;
-              const raw = window.prompt("Number of in-between frames", "3");
-              if (raw == null) return;
-              const n = Math.max(1, Math.min(48, Math.floor(Number(raw)) || 3));
-              generateInbetweens(prev, frameIndex, n);
-            }}
-          >
-            <span className="text-[10px] font-medium leading-none">Tw</span>
-          </DockBtn>
+        <DockSep />
+        <DockBtn label={loop ? "Loop on" : "Loop off"} onClick={toggleLoop} active={loop}>
+          <LoopIcon size={17} />
+        </DockBtn>
+        {stage === "draw" ? (
+          <>
+            <DockBtn
+              label="Empty cel — wipe this cell, stop any hold"
+              onClick={addKeyframe}
+            >
+              <ClearFrameIcon size={17} />
+            </DockBtn>
+            <span className="hidden" aria-hidden>
+              <DockBtn
+                label="Tween — generate in-betweens between previous and current keyframe"
+                onClick={() => {
+                  const { project, layerIndex, frameIndex } = useProject.getState();
+                  const layer = project.layers[layerIndex];
+                  if (!layer || !layer.frames[frameIndex]) return;
+                  let prev = -1;
+                  for (let i = frameIndex - 1; i >= 0; i--) {
+                    if (layer.frames[i]) {
+                      prev = i;
+                      break;
+                    }
+                  }
+                  if (prev < 0) return;
+                  const raw = window.prompt("Number of in-between frames", "3");
+                  if (raw == null) return;
+                  const n = Math.max(1, Math.min(48, Math.floor(Number(raw)) || 3));
+                  generateInbetweens(prev, frameIndex, n);
+                }}
+              >
+                <span className="text-[10px] font-medium leading-none">Tw</span>
+              </DockBtn>
+            </span>
+          </>
         ) : null}
 
-        <div className="flex items-center gap-3">
-          <span
-            className="inline-flex w-[9ch] shrink-0 items-center justify-center gap-0 text-[12px] leading-[14px] text-white opacity-50 tabular-nums"
-            style={{ fontFamily: PAPER.fontMono }}
-            title="Current frame / total frames"
-          >
-            <span className="inline-block w-[3ch] text-right">{frameIndex + 1}</span>
-            <span aria-hidden> / </span>
-            <span className="inline-block w-[3ch] text-left">{project.frameCount}</span>
-          </span>
-          <StepperBox
-            value={project.fps}
-            onDec={() => {
-              if (project.fps > 1) useProject.getState().setProjectSettings({ fps: project.fps - 1 });
-            }}
-            onInc={() => {
-              if (project.fps < 60) useProject.getState().setProjectSettings({ fps: project.fps + 1 });
-            }}
-            onSetValue={(n) => useProject.getState().setProjectSettings({ fps: n })}
-            min={1}
-            max={60}
-            decDisabled={project.fps <= 1}
-            incDisabled={project.fps >= 60}
-            decLabel="Slower"
-            incLabel="Faster"
-            trailing={
-              <span className="text-[12px] leading-[14px] text-white opacity-20" style={{ fontFamily: PAPER.fontMono }}>
-                fps
-              </span>
-            }
-          />
-        </div>
+        <span
+          className="inline-flex shrink-0 items-center text-[12px] leading-[14px] text-white opacity-50 tabular-nums"
+          style={{ fontFamily: PAPER.fontMono }}
+          title="Current frame / total frames"
+        >
+          <span className="inline-block min-w-[2ch] text-right">{frameIndex + 1}</span>
+          <span aria-hidden> / </span>
+          <span className="inline-block min-w-[2ch] text-left">{project.frameCount}</span>
+        </span>
+        <TimelineFpsStepper fps={project.fps} />
 
-        <DockSep />
+        {stage === "draw" ? (
+          <>
+            <DockSep />
 
-        {isAnimatron ? (
-          <SquareBtn
-            label="Show complete drawing on canvas"
-            onClick={toggleShowFullStrokes}
-            active={showFullStrokes}
-          >
-            {(_bg, color) => <Layers2 size={20} color={color} weight="Outline" />}
-          </SquareBtn>
+            {isAnimatron ? (
+              <SquareBtn
+                label="Show complete drawing on canvas"
+                onClick={toggleShowFullStrokes}
+                active={showFullStrokes}
+              >
+                {(_bg, color) => <Layers2 size={20} color={color} weight="Outline" />}
+              </SquareBtn>
+            ) : null}
+
+            <SquareBtn
+              label="Animation easing — toggle panel; curve applies to all paths"
+              onClick={toggleAnimationPanel}
+              active={animationPanelOpen}
+            >
+              {(_bg, color) => <EaseCurveGlyph color={color} />}
+            </SquareBtn>
+            <SquareBtn label="Onion skin settings" onClick={toggleOnionPanel} active={onionSkin}>
+              {(bg, color) => <OnionRingsGlyph stroke={bg} color={color} />}
+            </SquareBtn>
+
+            <DockSep />
+
+            <StepperBox
+              leading={<LayerCountGlyph />}
+              value={project.layers.length}
+              onDec={() => {
+                if (project.layers.length > 1) deleteLayer(project.layers.length - 1);
+              }}
+              onInc={addLayer}
+              onSetValue={setLayerCount}
+              min={1}
+              max={500}
+              decDisabled={project.layers.length <= 1}
+              decLabel="Remove layer"
+              incLabel="Add layer"
+            />
+
+            <StepperBox
+              leading={<FrameCountGlyph />}
+              value={project.frameCount}
+              onDec={() => applyShrink(1)}
+              onInc={() => applyExtend(1)}
+              onSetValue={(n) => extendTimeline(n - project.frameCount)}
+              min={1}
+              max={100000}
+              decDisabled={project.frameCount <= 1}
+              decLabel="Fewer frames"
+              incLabel="More frames"
+            />
+          </>
         ) : null}
-
-        <div className="flex items-center gap-[14px]">
-          <SquareBtn
-            label="Animation easing — toggle panel; curve applies to all paths"
-            onClick={toggleAnimationPanel}
-            active={animationPanelOpen}
-          >
-            {(_bg, color) => <EaseCurveGlyph color={color} />}
-          </SquareBtn>
-          <SquareBtn label="Onion skin settings" onClick={toggleOnionPanel} active={onionSkin}>
-            {(bg, color) => <OnionRingsGlyph stroke={bg} color={color} />}
-          </SquareBtn>
-        </div>
-
-        <DockSep />
-
-        <StepperBox
-          leading={<LayerCountGlyph />}
-          value={project.layers.length}
-          onDec={() => {
-            if (project.layers.length > 1) deleteLayer(project.layers.length - 1);
-          }}
-          onInc={addLayer}
-          onSetValue={setLayerCount}
-          min={1}
-          max={500}
-          decDisabled={project.layers.length <= 1}
-          decLabel="Remove layer"
-          incLabel="Add layer"
-        />
-
-        <StepperBox
-          leading={<FrameCountGlyph />}
-          value={project.frameCount}
-          onDec={() => applyShrink(1)}
-          onInc={() => applyExtend(1)}
-          onSetValue={(n) => extendTimeline(n - project.frameCount)}
-          min={1}
-          max={100000}
-          decDisabled={project.frameCount <= 1}
-          decLabel="Fewer frames"
-          incLabel="More frames"
-        />
 
         {/* Draw / Preview segmented toggle */}
         <div
-          className="flex h-[29px] items-center overflow-clip rounded-[10px] p-[2px]"
+          className="flex h-[29px] shrink-0 items-center overflow-clip rounded-[10px] p-[2px]"
           style={{ backgroundColor: PAPER.segmentBg, outline: `1px solid ${PAPER.borderHairline}` }}
         >
           <Tooltip content="Draw">
@@ -885,10 +949,14 @@ export function Timeline() {
         </div>
       </div>
 
-      {collapsed ? null : (
+      {collapsed || stage === "preview" ? null : (
         /* stop-motion / Animatron — TimingBar + rows; nano ScrollArea owns both axes */
-        <div ref={stampTrackRef} className="relative mt-[19px]">
-          {/* Paper 6ML-0 stamp — pill sits in the 19px gap above the ruler;
+        <div
+          ref={stampTrackRef}
+          className="relative mt-[19px] min-w-full overflow-hidden"
+          style={{ width: 0 }}
+        >
+          {/* Paper 6ML-0 stamp — pill sits in the 16px gap above the ruler;
               line runs through the timing bar + layer rows. Drag to scrub. */}
           <TimelinePlayheadStamp
             left={
@@ -903,7 +971,7 @@ export function Timeline() {
             frameFromClientX={stampFrameFromClientX}
           />
           {/* timing ruler — Paper AKB-0 (stop-motion) / 6JD-0 (Animatron) */}
-          <div className="mb-[5px]">
+          <div className="mb-[5px] w-full min-w-0">
             <TimelineTimingBar
               frameCount={project.frameCount}
               fps={project.fps}
@@ -928,7 +996,7 @@ export function Timeline() {
           {!layersCollapsed && (
             <div
               ref={rowsVpRef}
-              className="relative w-full"
+              className="relative w-full min-w-0 overflow-hidden"
               style={{ height: rowsViewportH }}
             >
               <ScrollArea

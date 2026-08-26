@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createEmptyProject, type Stroke, type StrokePoint } from "@/model/types";
+import { makeDotsBackground } from "@/lib/dots-background";
 import {
   buildLaoScene,
   emitProjectSceneJson,
@@ -91,4 +92,27 @@ test("buildLaoScene emits compressed paths without raw points", () => {
   expect(scene.groups[0]!.paths[0]!.d.length).toBeGreaterThan(8);
   expect(scene.groups[0]!.paths[0]!.boil?.values.length).toBeGreaterThan(1);
   expect(json.length).toBeLessThan(scene.groups[0]!.paths[0]!.d.length * 80);
+});
+
+test("buildLaoScene keeps dots backgrounds as a vector pattern", () => {
+  const project = createEmptyProject();
+  project.background = makeDotsBackground({
+    color: "#fafafa",
+    dotColor: "#222222",
+    size: 3,
+    gapX: 16,
+    gapY: 20,
+    gapLinked: false,
+    pattern: "hex",
+  });
+  const scene = buildLaoScene(project, { transparent: false });
+  expect(scene.background).toMatchObject({
+    kind: "dots",
+    color: "#fafafa",
+    dotColor: "#222222",
+    size: 3,
+    gapX: 16,
+    gapY: 20,
+    pattern: "hex",
+  });
 });

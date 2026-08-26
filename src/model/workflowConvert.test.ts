@@ -3,6 +3,7 @@ import { createEmptyProject, type Stroke } from "@/model/types";
 import {
   animatronToStopMotion,
   convertProjectWorkflow,
+  projectHasTimelineMotion,
   stopMotionToAnimatron,
 } from "@/model/workflowConvert";
 import { clipVisibleAt, strokeAtTime } from "@/engine/strokeProgress";
@@ -84,6 +85,16 @@ describe("animatronToStopMotion", () => {
     expect(frames[2]!.strokes).toHaveLength(2);
     expect(frames[2]!.strokes.every((s) => s.clip === undefined)).toBe(true);
   });
+
+  test("empty Animatron keeps the timeline length in Stop-motion", () => {
+    const project = createEmptyProject();
+    project.workflow = "animatron";
+    project.frameCount = 24;
+    const out = animatronToStopMotion(project);
+    expect(out.frameCount).toBe(24);
+    expect(out.layers[0]!.frames).toHaveLength(24);
+    expect(out.layers[0]!.frames.every((f) => f === null)).toBe(true);
+  });
 });
 
 describe("stopMotionToAnimatron", () => {
@@ -147,6 +158,44 @@ describe("stopMotionToAnimatron", () => {
     expect(out.layers.map((l) => l.name)).toEqual(["Back", "Front"]);
     expect(out.layers[0]!.frames[0]!.strokes).toHaveLength(1);
     expect(out.layers[1]!.frames[0]!.strokes).toHaveLength(1);
+  });
+});
+
+describe("projectHasTimelineMotion", () => {
+  test("a still drawing is not motion", () => {
+    const project = createEmptyProject();
+    project.workflow = "stopmotion";
+    project.frameCount = 3;
+    project.layers = [
+      {
+        id: "sheet",
+        name: "Layer 1",
+        visible: true,
+        isStatic: false,
+        frames: [{ id: "a", strokes: [ink("a")] }, null, null],
+      },
+    ];
+    expect(projectHasTimelineMotion(project)).toBe(false);
+  });
+
+  test("changing stop-motion cels are motion", () => {
+    const project = createEmptyProject();
+    project.workflow = "stopmotion";
+    project.frameCount = 3;
+    project.layers = [
+      {
+        id: "sheet",
+        name: "Layer 1",
+        visible: true,
+        isStatic: false,
+        frames: [
+          { id: "a", strokes: [ink("a")] },
+          { id: "b", strokes: [ink("b", 40)] },
+          { id: "c", strokes: [ink("c", 80)] },
+        ],
+      },
+    ];
+    expect(projectHasTimelineMotion(project)).toBe(true);
   });
 });
 

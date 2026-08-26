@@ -182,7 +182,7 @@ export function TimelineTimingBar({
   return (
     <div
       ref={rootRef}
-      className="relative shrink-0 overflow-clip rounded-[14px]"
+      className="relative w-full min-w-0 shrink-0 overflow-clip rounded-[14px]"
       style={{ height: BAR_H, backgroundColor: PAPER.trackBg }}
     >
       {/* ruler — starts past the left cluster and scrubs */}

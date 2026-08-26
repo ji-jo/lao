@@ -1297,6 +1297,153 @@ function paintPreset(
   }
 }
 
+function ribbonOptsForStroke(
+  stroke: Stroke,
+  preset: P5BrushId | undefined,
+  style: StyleParams,
+  quality: RenderQuality,
+  avg: number,
+): RibbonOpts {
+  if (preset === "smooth") {
+    return {
+      size: Math.max(stroke.size * 0.95, 1.2),
+      thinning: 0.72,
+      smoothing: style.smoothing,
+      streamline: 0.35 + style.corners * 0.35,
+      simulatePressure: false,
+      last: true,
+    };
+  }
+  if (stroke.brush === "pen" && !preset) {
+    return {
+      size: Math.max(stroke.size * 0.5, 1),
+      thinning: 0.55,
+      smoothing: style.smoothing,
+      streamline: 0.3,
+      simulatePressure: false,
+      last: true,
+    };
+  }
+  if (stroke.brush === "marker" && !preset) {
+    return {
+      size: stroke.size * 2 * (0.75 + avg * 0.35),
+      thinning: 0.28,
+      smoothing: style.smoothing,
+      streamline: 0.5,
+      simulatePressure: false,
+      last: true,
+    };
+  }
+  if (stroke.brush === "eraser") {
+    return {
+      size: stroke.size * 2.5,
+      thinning: 0.1,
+      smoothing: 0.5,
+      streamline: quality === "draft" ? 0.4 : 0.4,
+      simulatePressure: false,
+      last: true,
+    };
+  }
+  return {
+    size: stroke.size,
+    thinning: 0.7,
+    smoothing: style.smoothing,
+    streamline: quality === "draft" ? 0.3 : 0.5,
+    simulatePressure: false,
+    last: true,
+  };
+}
+
+function calligraphyOutline(
+  stroke: Stroke,
+  points: StrokePoint[],
+  style: StyleParams,
+  avg: number,
+): Array<[number, number]> {
+  const nib = Math.PI / 4;
+  const half = Math.max(stroke.size * (0.55 + avg * 0.45), 1.5);
+  const nx = Math.cos(nib);
+  const ny = Math.sin(nib);
+  if (style.corners < 0.35) {
+    const warped = points.map((p, i) => {
+      const prev = points[Math.max(0, i - 1)]!;
+      const next = points[Math.min(points.length - 1, i + 1)]!;
+      const ang = Math.atan2(next.y - prev.y, next.x - prev.x);
+      const across = Math.abs(Math.sin(ang - nib));
+      return {
+        ...p,
+        pressure: Math.min(1, 0.12 + across * 0.95) * (0.55 + p.pressure * 0.45),
+      };
+    });
+    const outline = getStroke(
+      warped.map((p) => [p.x, p.y, p.pressure]),
+      {
+        size: stroke.size * 1.6,
+        thinning: 0.82,
+        smoothing: style.smoothing,
+        streamline: 0.35,
+        simulatePressure: false,
+        last: true,
+      },
+    );
+    return outline as Array<[number, number]>;
+  }
+  if (points.length < 2) {
+    const p = points[0]!;
+    const w = half * (0.55 + p.pressure * 0.55);
+    return [
+      [p.x + nx * w, p.y + ny * w],
+      [p.x - nx * w, p.y - ny * w],
+    ];
+  }
+  const poly: Array<[number, number]> = [];
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i]!;
+    const w = half * (0.55 + p.pressure * 0.55);
+    poly.push([p.x + nx * w, p.y + ny * w]);
+  }
+  for (let i = points.length - 1; i >= 0; i--) {
+    const p = points[i]!;
+    const w = half * (0.55 + p.pressure * 0.55);
+    poly.push([p.x - nx * w, p.y - ny * w]);
+  }
+  return poly;
+}
+
+/**
+ * Filled outline matching canvas `paintPackBrush` so SVG/code export
+ * keeps brush width variation after Path/Select bezier edits.
+ */
+export function packBrushOutline(
+  stroke: Stroke,
+  points: StrokePoint[],
+  quality: RenderQuality = "full",
+): Array<[number, number]> {
+  if (points.length === 0) return [];
+  if (points.length === 1) {
+    const p = points[0]!;
+    const r = (stroke.size / 2) * Math.max(p.pressure, 0.28);
+    const segs = 12;
+    const out: Array<[number, number]> = [];
+    for (let i = 0; i < segs; i++) {
+      const a = (i / segs) * Math.PI * 2;
+      out.push([p.x + Math.cos(a) * r, p.y + Math.sin(a) * r]);
+    }
+    return out;
+  }
+  const preset = coerceP5Brush(stroke.p5Brush) as P5BrushId | undefined;
+  const style = styleOf(stroke);
+  const avg = meanPressure(points);
+  if (preset === "calligraphy") {
+    return calligraphyOutline(stroke, points, style, avg);
+  }
+  const outline = getStroke(
+    points.map((p) => [p.x, p.y, p.pressure]),
+    ribbonOptsForStroke(stroke, preset, style, quality, avg),
+  );
+  return outline as Array<[number, number]>;
+}
+
 export function paintPackBrush(
   ctx: CanvasRenderingContext2D,
   stroke: Stroke,
